@@ -1,6 +1,11 @@
 import Foundation
 import Testing
 @testable import ThoughtCore
+#if canImport(SQLite3)
+import SQLite3
+#else
+import CSQLite
+#endif
 
 @Suite("Thought timeline", .serialized)
 struct ThoughtTimelineTests {
@@ -116,6 +121,144 @@ struct ThoughtTimelineTests {
     }
 }
 
+@Suite("Thought history", .serialized)
+struct ThoughtHistoryTests {
+    @Test func createsAndFetchesContinuationInBothDirections() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let parent = Thought(body: "A", createdAt: Date(timeIntervalSince1970: 100))
+        let child = Thought(body: "B", createdAt: Date(timeIntervalSince1970: 200))
+        try repository.create(parent)
+        try repository.create(child)
+        let relation = ThoughtRelation(sourceThoughtID: child.id, targetThoughtID: parent.id, createdAt: child.createdAt)
+        try repository.create(relation)
+
+        #expect(try repository.fetchContinuationSource(for: child.id) == relation)
+        #expect(try repository.fetchContinuations(of: parent.id) == [relation])
+        #expect(try repository.fetchBySourceThoughtID(child.id) == [relation])
+        #expect(try repository.fetchByTargetThoughtID(parent.id) == [relation])
+    }
+
+    @Test func followsAThreeThoughtChainOneStepAtATime() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let a = Thought(body: "A", createdAt: Date(timeIntervalSince1970: 100))
+        try repository.create(a)
+        let b = try #require(try repository.createContinuation(body: "B", parentThoughtID: a.id, now: Date(timeIntervalSince1970: 200)))
+        let c = try #require(try repository.createContinuation(body: "C", parentThoughtID: b.id, now: Date(timeIntervalSince1970: 300)))
+
+        let fromA = try #require(repository.fetchContinuations(of: a.id).first)
+        let fromB = try #require(repository.fetchContinuations(of: fromA.sourceThoughtID).first)
+        #expect(fromA.sourceThoughtID == b.id)
+        #expect(fromB.sourceThoughtID == c.id)
+        #expect(try repository.fetchTimeline().map(\.body) == ["C", "B", "A"])
+        #expect(try ThoughtHistory(
+            thoughtRepository: repository,
+            relationRepository: repository
+        ).entries(containing: b.id).map(\.thought.body) == ["A", "B", "C"])
+    }
+
+    @Test func historyIncludesMultipleContinuationsInStableOrder() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let a = Thought(body: "A", createdAt: Date(timeIntervalSince1970: 100))
+        try repository.create(a)
+        _ = try repository.createContinuation(body: "B", parentThoughtID: a.id, now: Date(timeIntervalSince1970: 200))
+        _ = try repository.createContinuation(body: "C", parentThoughtID: a.id, now: Date(timeIntervalSince1970: 300))
+
+        let entries = try ThoughtHistory(
+            thoughtRepository: repository,
+            relationRepository: repository
+        ).entries(containing: a.id)
+        #expect(entries.map(\.thought.body) == ["A", "B", "C"])
+        #expect(entries.map(\.depth) == [0, 1, 1])
+    }
+
+    @Test func relationsPersistAndSurviveParentSoftDeleteWithoutChangingOriginalText() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let created = Date(timeIntervalSince1970: 100)
+        let updated = Date(timeIntervalSince1970: 150)
+        let parent = Thought(body: "original", createdAt: created, updatedAt: updated)
+        let repository = try fixture.repository()
+        try repository.create(parent)
+        let child = try #require(try repository.createContinuation(body: "next", parentThoughtID: parent.id))
+        let unchangedParent = try repository.fetchByID(parent.id)
+        #expect(unchangedParent == parent)
+        #expect(try repository.softDelete(id: parent.id, at: Date(timeIntervalSince1970: 500)))
+
+        let reopened = try fixture.repository()
+        #expect(try reopened.fetchContinuationSource(for: child.id)?.targetThoughtID == parent.id)
+        #expect(try reopened.fetchByID(parent.id)?.body == "original")
+        #expect(try reopened.fetchByID(parent.id)?.createdAt == created)
+        #expect(try reopened.fetchByID(parent.id)?.updatedAt == Date(timeIntervalSince1970: 500))
+        #expect(try ThoughtHistory(
+            thoughtRepository: reopened,
+            relationRepository: reopened
+        ).entries(containing: child.id).map { $0.thought.deletedAt != nil } == [true, false])
+    }
+
+    @Test func rejectsSelfMissingDuplicateAndCycleRelations() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let a = Thought(body: "A")
+        let b = Thought(body: "B")
+        try repository.create(a)
+        try repository.create(b)
+        #expect(throws: SQLiteThoughtRepositoryError.selfRelation) {
+            try repository.create(ThoughtRelation(sourceThoughtID: a.id, targetThoughtID: a.id))
+        }
+        #expect(throws: SQLiteThoughtRepositoryError.self) {
+            try repository.create(ThoughtRelation(sourceThoughtID: UUID(), targetThoughtID: a.id))
+        }
+        let relation = ThoughtRelation(sourceThoughtID: b.id, targetThoughtID: a.id)
+        try repository.create(relation)
+        #expect(throws: SQLiteThoughtRepositoryError.self) { try repository.create(relation) }
+        #expect(throws: SQLiteThoughtRepositoryError.cycle) {
+            try repository.create(ThoughtRelation(sourceThoughtID: a.id, targetThoughtID: b.id))
+        }
+    }
+
+    @Test func continuationRollsBackThoughtWhenRelationInsertFails() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let parent = Thought(body: "parent")
+        let first = Thought(body: "first")
+        let duplicateRelationID = UUID()
+        try repository.create(parent)
+        _ = try repository.createContinuation(first, parentThoughtID: parent.id, relationID: duplicateRelationID)
+        let rejected = Thought(body: "must rollback")
+
+        #expect(throws: SQLiteThoughtRepositoryError.self) {
+            try repository.createContinuation(rejected, parentThoughtID: parent.id, relationID: duplicateRelationID)
+        }
+        #expect(try repository.fetchByID(rejected.id) == nil)
+    }
+
+    @Test func migratesV1WithoutChangingAnyThoughtFields() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let original = Thought(
+            id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            body: "保持する原文 🚀",
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 200),
+            deletedAt: Date(timeIntervalSince1970: 300)
+        )
+        try fixture.writeV1Database(thought: original)
+
+        let repository = try fixture.repository()
+        #expect(SQLiteThoughtRepository.schemaVersion == 2)
+        #expect(try repository.fetchAll() == [original])
+        #expect(try repository.fetchBySourceThoughtID(original.id).isEmpty)
+    }
+}
+
 @Suite("Thought export")
 struct ThoughtExporterTests {
     private let utc = TimeZone(secondsFromGMT: 0)!
@@ -200,6 +343,25 @@ private struct Fixture {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(thoughts).write(to: jsonURL)
+    }
+
+    func writeV1Database(thought: Thought) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
+            throw SQLiteThoughtRepositoryError.open("test setup")
+        }
+        defer { sqlite3_close(database) }
+        let escapedBody = thought.body.replacingOccurrences(of: "'", with: "''")
+        let deleted = thought.deletedAt.map { String($0.timeIntervalSince1970) } ?? "NULL"
+        let sql = """
+            CREATE TABLE thoughts (id TEXT PRIMARY KEY NOT NULL, body TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, deleted_at REAL NULL);
+            CREATE TABLE migrations (name TEXT PRIMARY KEY NOT NULL, completed_at REAL NOT NULL);
+            INSERT INTO thoughts VALUES ('\(thought.id.uuidString)', '\(escapedBody)', \(thought.createdAt.timeIntervalSince1970), \(thought.updatedAt.timeIntervalSince1970), \(deleted));
+            PRAGMA user_version = 1;
+            """
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
+        }
     }
 
     func remove() { try? FileManager.default.removeItem(at: directory) }

@@ -10,6 +10,8 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     case database(String)
     case invalidRecord
     case migration(String)
+    case selfRelation
+    case cycle
 
     public var errorDescription: String? {
         switch self {
@@ -17,12 +19,14 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
         case .database(let message): "SQLite操作に失敗しました: \(message)"
         case .invalidRecord: "SQLite内のThoughtデータが不正です。"
         case .migration(let message): "JSON migrationに失敗しました: \(message)"
+        case .selfRelation: "Thoughtを自分自身の続きにはできません。"
+        case .cycle: "Thought Historyに循環するRelationは作成できません。"
         }
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 1
+public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, @unchecked Sendable {
+    public static let schemaVersion: Int32 = 2
 
     private let databaseURL: URL
     private let legacyJSONURL: URL
@@ -115,6 +119,67 @@ public final class SQLiteThoughtRepository: ThoughtRepository, @unchecked Sendab
         }
     }
 
+    public func create(_ relation: ThoughtRelation) throws {
+        try lock.withLock {
+            try validate(relation)
+            try executeRelationInsert(relation)
+            createRollingBackupIfPossible()
+        }
+    }
+
+    public func fetchBySourceThoughtID(_ id: UUID) throws -> [ThoughtRelation] {
+        try lock.withLock { try queryRelations(where: "source_thought_id = ?", id: id) }
+    }
+
+    public func fetchByTargetThoughtID(_ id: UUID) throws -> [ThoughtRelation] {
+        try lock.withLock { try queryRelations(where: "target_thought_id = ?", id: id) }
+    }
+
+    public func fetchContinuationSource(for thoughtID: UUID) throws -> ThoughtRelation? {
+        try fetchBySourceThoughtID(thoughtID).first { $0.type == .continues }
+    }
+
+    public func fetchContinuations(of thoughtID: UUID) throws -> [ThoughtRelation] {
+        try fetchByTargetThoughtID(thoughtID).filter { $0.type == .continues }
+    }
+
+    public func createContinuation(
+        body: String,
+        parentThoughtID: UUID,
+        now: Date,
+        thoughtID: UUID
+    ) throws -> Thought? {
+        guard let body = ThoughtDraft.validBody(from: body) else { return nil }
+        return try createContinuation(
+            Thought(id: thoughtID, body: body, createdAt: now),
+            parentThoughtID: parentThoughtID,
+            relationID: UUID()
+        )
+    }
+
+    @discardableResult
+    func createContinuation(
+        _ thought: Thought,
+        parentThoughtID: UUID,
+        relationID: UUID
+    ) throws -> Thought {
+        try lock.withLock {
+            let relation = ThoughtRelation(
+                id: relationID,
+                sourceThoughtID: thought.id,
+                targetThoughtID: parentThoughtID,
+                createdAt: thought.createdAt
+            )
+            try transaction {
+                try executeThoughtInsert(thought, conflictClause: "")
+                try validate(relation)
+                try executeRelationInsert(relation)
+            }
+            createRollingBackupIfPossible()
+            return thought
+        }
+    }
+
     /// Keeps two SQLite-native snapshots beside the canonical database. Backup
     /// errors are logged but never turn an already successful post/delete into a
     /// user-visible failure.
@@ -191,6 +256,24 @@ public final class SQLiteThoughtRepository: ThoughtRepository, @unchecked Sendab
                 try execute("PRAGMA user_version = 1")
             }
         }
+        if version < 2 {
+            try transaction {
+                try execute("""
+                    CREATE TABLE thought_relations (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        source_thought_id TEXT NOT NULL REFERENCES thoughts(id),
+                        target_thought_id TEXT NOT NULL REFERENCES thoughts(id),
+                        relation_type TEXT NOT NULL CHECK (relation_type = 'continues'),
+                        created_at REAL NOT NULL,
+                        CHECK (source_thought_id <> target_thought_id),
+                        UNIQUE (source_thought_id, target_thought_id, relation_type)
+                    )
+                    """)
+                try execute("CREATE INDEX thought_relations_source_idx ON thought_relations(source_thought_id)")
+                try execute("CREATE INDEX thought_relations_target_idx ON thought_relations(target_thought_id)")
+                try execute("PRAGMA user_version = 2")
+            }
+        }
     }
 
     private func migrateLegacyJSONIfNeeded() throws {
@@ -258,6 +341,73 @@ public final class SQLiteThoughtRepository: ThoughtRepository, @unchecked Sendab
             sqlite3_bind_null(statement, 5)
         }
         try stepDone(statement)
+    }
+
+    private func executeRelationInsert(_ relation: ThoughtRelation) throws {
+        let statement = try prepare("INSERT INTO thought_relations(id, source_thought_id, target_thought_id, relation_type, created_at) VALUES (?, ?, ?, ?, ?)")
+        defer { sqlite3_finalize(statement) }
+        try bind(relation.id.uuidString, to: 1, in: statement)
+        try bind(relation.sourceThoughtID.uuidString, to: 2, in: statement)
+        try bind(relation.targetThoughtID.uuidString, to: 3, in: statement)
+        try bind(relation.type.rawValue, to: 4, in: statement)
+        try bind(relation.createdAt.timeIntervalSince1970, to: 5, in: statement)
+        try stepDone(statement)
+    }
+
+    private func validate(_ relation: ThoughtRelation) throws {
+        guard relation.sourceThoughtID != relation.targetThoughtID else {
+            throw SQLiteThoughtRepositoryError.selfRelation
+        }
+        let statement = try prepare("""
+            WITH RECURSIVE ancestors(id) AS (
+                SELECT target_thought_id FROM thought_relations
+                WHERE source_thought_id = ? AND relation_type = 'continues'
+                UNION
+                SELECT relation.target_thought_id
+                FROM thought_relations relation JOIN ancestors ON relation.source_thought_id = ancestors.id
+                WHERE relation.relation_type = 'continues'
+            )
+            SELECT 1 FROM ancestors WHERE id = ? LIMIT 1
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bind(relation.targetThoughtID.uuidString, to: 1, in: statement)
+        try bind(relation.sourceThoughtID.uuidString, to: 2, in: statement)
+        let result = sqlite3_step(statement)
+        guard result == SQLITE_ROW || result == SQLITE_DONE else { throw lastError() }
+        if result == SQLITE_ROW { throw SQLiteThoughtRepositoryError.cycle }
+    }
+
+    private func queryRelations(where clause: String, id: UUID) throws -> [ThoughtRelation] {
+        let statement = try prepare("""
+            SELECT id, source_thought_id, target_thought_id, relation_type, created_at
+            FROM thought_relations WHERE \(clause) ORDER BY created_at ASC, id ASC
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bind(id.uuidString, to: 1, in: statement)
+        var output: [ThoughtRelation] = []
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            guard let idText = sqlite3_column_text(statement, 0),
+                  let sourceText = sqlite3_column_text(statement, 1),
+                  let targetText = sqlite3_column_text(statement, 2),
+                  let typeText = sqlite3_column_text(statement, 3),
+                  let relationID = UUID(uuidString: String(cString: idText)),
+                  let sourceID = UUID(uuidString: String(cString: sourceText)),
+                  let targetID = UUID(uuidString: String(cString: targetText)),
+                  let type = ThoughtRelation.RelationType(rawValue: String(cString: typeText)) else {
+                throw SQLiteThoughtRepositoryError.invalidRecord
+            }
+            output.append(ThoughtRelation(
+                id: relationID,
+                sourceThoughtID: sourceID,
+                targetThoughtID: targetID,
+                type: type,
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+            ))
+            result = sqlite3_step(statement)
+        }
+        guard result == SQLITE_DONE else { throw lastError() }
+        return output
     }
 
     private func queryByID(_ id: UUID) throws -> Thought? {

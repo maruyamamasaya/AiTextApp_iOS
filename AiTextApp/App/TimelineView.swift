@@ -29,6 +29,9 @@ struct TimelineView: View {
             .animation(.easeOut(duration: 0.2), value: store.thoughts.map(\.id))
             .navigationTitle("Thoughts")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: UUID.self) { thoughtID in
+                ThoughtDetailView(store: store, initialThoughtID: thoughtID)
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
@@ -156,44 +159,205 @@ struct TimelineView: View {
     }
 }
 
+private struct ThoughtDetailView: View {
+    @ObservedObject var store: ThoughtStore
+    let initialThoughtID: UUID
+    @State private var currentThoughtID: UUID
+    @State private var showsComposer = false
+    @FocusState private var composerIsFocused: Bool
+
+    init(store: ThoughtStore, initialThoughtID: UUID) {
+        self.store = store
+        self.initialThoughtID = initialThoughtID
+        _currentThoughtID = State(initialValue: initialThoughtID)
+    }
+
+    private var currentThought: Thought? {
+        store.history.first { $0.id == currentThoughtID }?.thought
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if let currentThought {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(currentThought.deletedAt == nil ? currentThought.body : "削除されたThought")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(currentThought.deletedAt == nil ? Color.primary : Color.secondary)
+                        Text(ThoughtDateText.string(for: currentThought.createdAt))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("続きを書く") {
+                            showsComposer.toggle()
+                            if showsComposer { composerIsFocused = true }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .accessibilityLabel("このThoughtの続きを書く")
+                        .accessibilityHint("\(currentThought.deletedAt == nil ? currentThought.body : "削除されたThought")の続きを作成します")
+                        .accessibilityIdentifier("writeContinuationButton")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+
+                    if showsComposer { continuationComposer(parent: currentThought) }
+                }
+
+                Divider()
+                Text("History")
+                    .font(.headline)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 18)
+                    .padding(.bottom, 8)
+
+                ForEach(Array(store.history.enumerated()), id: \.element.id) { index, entry in
+                    historyRow(entry)
+                    if index < store.history.count - 1 {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.35))
+                            .frame(width: 1, height: 18)
+                            .padding(.leading, 24 + CGFloat(entry.depth) * 14)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Thought")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { store.loadHistory(for: currentThoughtID) }
+    }
+
+    private func continuationComposer(parent: Thought) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("続きを書く")
+                .font(.headline)
+            TextEditor(text: Binding(get: { store.continuationDraft }, set: store.updateContinuationDraft))
+                .focused($composerIsFocused)
+                .frame(minHeight: 96, maxHeight: 140)
+                .padding(8)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityLabel("\(parent.deletedAt == nil ? parent.body : "削除されたThought")の続きを入力")
+                .accessibilityHint("140文字以内で入力します")
+                .accessibilityIdentifier("continuationComposer")
+            HStack {
+                Text("\(store.continuationDraft.count) / \(ThoughtDraft.characterLimit)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(store.continuationDraft.count >= 130 ? Color.orange : Color.secondary)
+                Spacer()
+                Button("投稿") {
+                    if let created = store.postContinuation(parentThoughtID: parent.id) {
+                        currentThoughtID = created.id
+                        showsComposer = false
+                        composerIsFocused = false
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .disabled(!store.canPostContinuation)
+                .accessibilityLabel("続きを投稿")
+                .accessibilityIdentifier("postContinuationButton")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+    }
+
+    private func historyRow(_ entry: ThoughtHistoryEntry) -> some View {
+        HStack(alignment: .center, spacing: 0) {
+            Button {
+                currentThoughtID = entry.id
+                showsComposer = false
+                store.loadHistory(for: entry.id)
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Circle()
+                        .fill(entry.id == currentThoughtID ? Color.accentColor : Color.secondary.opacity(0.45))
+                        .frame(width: 8, height: 8)
+                        .padding(.top, 6)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(entry.thought.deletedAt == nil ? entry.thought.body : "削除されたThought")
+                                .font(entry.id == currentThoughtID ? .body.weight(.semibold) : .body)
+                                .foregroundStyle(entry.thought.deletedAt == nil ? Color.primary : Color.secondary)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 8)
+                            if entry.id == currentThoughtID {
+                                Text("現在")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                        Text(ThoughtDateText.string(for: entry.thought.createdAt))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, 16 + CGFloat(entry.depth) * 14)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("History Thought、\(entry.thought.deletedAt == nil ? entry.thought.body : "削除されたThought")\(entry.id == currentThoughtID ? "、現在" : "")")
+            .accessibilityHint("ダブルタップしてこのThoughtを現在位置にします")
+            .accessibilityIdentifier("historyThought_\(entry.id.uuidString)")
+
+            if entry.thought.deletedAt == nil {
+                Menu {
+                    Button("削除", role: .destructive) { store.requestDeletion(of: entry.thought) }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("History Thoughtの操作")
+                .accessibilityIdentifier("historyThoughtMenu_\(entry.id.uuidString)")
+            }
+        }
+        .padding(.trailing, 8)
+        .background(entry.id == currentThoughtID ? Color.accentColor.opacity(0.08) : Color.clear)
+    }
+}
+
 private struct ThoughtRow: View {
     let thought: Thought
     let onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(thought.body)
-                .font(.body)
-                .lineSpacing(4)
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-                .accessibilityIdentifier("thoughtBody_\(thought.id.uuidString)")
-
-            HStack(alignment: .center, spacing: 8) {
-                Text(ThoughtDateText.string(for: thought.createdAt))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Spacer(minLength: 8)
-
-                Menu {
-                    Button("削除", role: .destructive, action: onDelete)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(width: 36, height: 32)
-                        .contentShape(Rectangle())
+        HStack(alignment: .bottom, spacing: 0) {
+            NavigationLink(value: thought.id) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(thought.body)
+                        .font(.body)
+                        .lineSpacing(4)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.leading)
+                        .accessibilityIdentifier("thoughtBody_\(thought.id.uuidString)")
+                    Text(ThoughtDateText.string(for: thought.createdAt))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Thoughtの操作")
-                .accessibilityHint("削除メニューを表示します")
-                .accessibilityIdentifier("thoughtMenu")
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Thought、\(thought.body)")
+            .accessibilityHint("ダブルタップして詳細とHistoryを開きます")
+            .accessibilityIdentifier("timelineThought_\(thought.id.uuidString)")
+
+            Menu {
+                Button("削除", role: .destructive, action: onDelete)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Thoughtの操作")
+            .accessibilityHint("削除メニューを表示します")
+            .accessibilityIdentifier("thoughtMenu")
         }
         .padding(.leading, 16)
         .padding(.trailing, 10)
         .padding(.vertical, 14)
         .accessibilityElement(children: .contain)
+        .contentShape(Rectangle())
     }
 }
 

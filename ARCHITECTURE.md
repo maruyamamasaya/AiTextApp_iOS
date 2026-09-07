@@ -5,11 +5,13 @@
 ## System Overview
 
 ```text
-SwiftUI TimelineView
+SwiftUI TimelineView -> ThoughtDetailView / Continuation Composer
   -> ThoughtStore (presentation state)
     -> ThoughtTimeline (validation/order/delete use cases)
       -> ThoughtRepository protocol
         -> SQLiteThoughtRepository (Application Support SQLite)
+      -> ThoughtContinuationRepository (Thought + Relation transaction)
+    -> ThoughtRelationRepository (History relation queries)
     -> ThoughtExporter -> ThoughtRepository
     -> ShareSheet (UIActivityViewController)
 ```
@@ -22,12 +24,17 @@ SwiftUI TimelineView
 
 ## Main Components
 
-- `TimelineView`: placeholder付きComposer、Lazy Timeline、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
-- `ThoughtStore`: draftと画面状態をuse caseへ接続。
+- `TimelineView`: placeholder付きComposer、Lazy Timeline、DetailへのNavigation、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
+- `ThoughtDetailView`: 現在Thought、縦型History、削除済みplaceholder、「続きを書く」Composerを表示。
+- `ThoughtStore`: Timeline／Continuation draftとHistory画面状態を各use caseへ接続。
 - `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
 - `Thought` / `ThoughtDraft`: 原文モデルと140文字ルール。
 - `ThoughtRepository`: create、Timeline query、ID取得、全件取得、soft deleteの保存境界。
-- `SQLiteThoughtRepository`: schema v1、SQL query、旧JSON importと2世代backupを所有する正本実装。
+- `ThoughtRelation`: Thought本文から独立した文脈モデル。sourceは新しいThought、targetは元のThoughtで、Phase 2-Aは`continues`のみ。
+- `ThoughtRelationRepository`: Relation作成、source／target方向の1ステップ取得境界。
+- `ThoughtContinuationRepository`: 新規Thoughtと`continues` Relationを同一transactionで作成する境界。
+- `ThoughtHistory`: 現在Thoughtからrootを求め、Relation APIだけで分岐を安定順に取得するuse case。
+- `SQLiteThoughtRepository`: schema v2、Thought／Relation query、旧JSON importと2世代backupを所有する正本実装。
 - `ThoughtExporter`: Repositoryから未削除Thoughtを取得し、Markdown／JSONを生成。
 - `ShareSheet`: ExportファイルをiOS標準共有UIへ渡すUIKit bridge。
 
@@ -37,9 +44,11 @@ SwiftUI TimelineView
 
 Timelineは`ScrollView`と`LazyVStack`で構成します。Composerは投稿成功時だけ入力とfocusを解除し、Timeline scrollではキーボードをinteractiveに閉じます。行は本文を主役にし、日時と削除メニューを補助情報として表示します。
 
+Thought DetailはrootからContinuationをdepth-firstで並べた静かな縦型Historyです。現在位置を控えめな背景とlabelで示し、削除済みThoughtはRelationを切らず「削除されたThought」と表示します。Continuation成功後は新Thoughtを現在位置にし、同じThoughtをTimelineにも即時反映します。
+
 ## Persistence
 
-`Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。初回に旧`thoughts.json`があればtransaction内で`INSERT OR IGNORE`し、各IDの主要データを照合してmigration markerを記録します。JSONは削除しません。Thoughtは人間の原文だけを持ち、将来のAI派生情報は別テーブルにします。
+`Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。schema v2の`thought_relations`は両端を`thoughts.id`へ外部キー参照し、cascade deleteは使いません。初回に旧`thoughts.json`があればtransaction内で`INSERT OR IGNORE`し、各IDの主要データを照合してmigration markerを記録します。JSONは削除しません。Thoughtは人間の原文だけを持ち、Relationや将来のAI派生情報は別テーブルにします。
 
 初期化成功後とcreate／soft delete成功後にSQLite Online Backup APIでスナップショットを作り、`.backup.1`と`.backup.2`だけを保持します。バックアップ失敗は成功済み投稿を失敗扱いにせずログへ記録し、破損時の自動巻き戻しは行いません。
 

@@ -13,15 +13,24 @@ final class ThoughtStore: ObservableObject {
     @Published var deletionCandidate: Thought?
     @Published var errorMessage: String?
     @Published var exportArtifact: ExportArtifact?
+    @Published private(set) var history: [ThoughtHistoryEntry] = []
+    @Published private(set) var historyCurrentID: UUID?
+    @Published var continuationDraft = ""
 
     private var timeline: ThoughtTimeline?
     private var exporter: ThoughtExporter?
+    private var thoughtRepository: (any ThoughtRepository)?
+    private var relationRepository: (any ThoughtRelationRepository)?
+    private var continuationRepository: (any ThoughtContinuationRepository)?
 
     init(repository: (any ThoughtRepository)? = nil) {
         do {
             let repository = try repository ?? SQLiteThoughtRepository()
             let timeline = try ThoughtTimeline(repository: repository)
             self.timeline = timeline
+            thoughtRepository = repository
+            relationRepository = repository as? any ThoughtRelationRepository
+            continuationRepository = repository as? any ThoughtContinuationRepository
             exporter = ThoughtExporter(repository: repository)
             thoughts = timeline.thoughts
         } catch {
@@ -57,6 +66,52 @@ final class ThoughtStore: ObservableObject {
         draft = ThoughtDraft.limited(value)
     }
 
+    var canPostContinuation: Bool {
+        ThoughtDraft.validBody(from: continuationDraft) != nil
+    }
+
+    func updateContinuationDraft(_ value: String) {
+        continuationDraft = ThoughtDraft.limited(value)
+    }
+
+    func loadHistory(for thoughtID: UUID) {
+        guard let thoughtRepository, let relationRepository else {
+            errorMessage = "Thought Historyを読み込めませんでした。"
+            return
+        }
+        do {
+            history = try ThoughtHistory(
+                thoughtRepository: thoughtRepository,
+                relationRepository: relationRepository
+            ).entries(containing: thoughtID)
+            historyCurrentID = thoughtID
+        } catch {
+            errorMessage = "Thought Historyを読み込めませんでした。"
+        }
+    }
+
+    @discardableResult
+    func postContinuation(parentThoughtID: UUID) -> Thought? {
+        guard let continuationRepository, let thoughtRepository else {
+            errorMessage = "保存先を利用できないため続きを投稿できません。入力内容は残しています。"
+            return nil
+        }
+        do {
+            guard let thought = try continuationRepository.createContinuation(
+                body: continuationDraft,
+                parentThoughtID: parentThoughtID
+            ) else { return nil }
+            timeline = try ThoughtTimeline(repository: thoughtRepository)
+            thoughts = timeline?.thoughts ?? []
+            continuationDraft = ""
+            loadHistory(for: thought.id)
+            return thought
+        } catch {
+            errorMessage = "続きを保存できませんでした。入力内容は残しています。"
+            return nil
+        }
+    }
+
     @discardableResult
     func post() -> Bool {
         guard var timeline else {
@@ -90,6 +145,7 @@ final class ThoughtStore: ObservableObject {
             self.timeline = timeline
             thoughts = timeline.thoughts
             deletionCandidate = nil
+            if let historyCurrentID { loadHistory(for: historyCurrentID) }
         } catch {
             errorMessage = "Thoughtを削除できませんでした。"
         }

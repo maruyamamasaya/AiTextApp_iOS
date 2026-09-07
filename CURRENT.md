@@ -8,7 +8,7 @@
 
 ## 現在のフェーズ
 
-Phase 1-D（実使用に向けた品質・データ持ち出し）の実装を完了しています。
+Phase 2-B（Thought History UI / Continuation Flow）の実装を完了しています。
 
 ## 実装済み
 
@@ -17,7 +17,7 @@ Phase 1-D（実使用に向けた品質・データ持ち出し）の実装を�
 - UUIDと作成・更新・削除日時を持つThought原文モデル。
 - Application Support配下のSQLiteを正本にしたローカル保存、query順序、ソフトデリート。
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
-- `PRAGMA user_version`によるschema version管理（現在v1）。
+- `PRAGMA user_version`によるschema version管理（現在v2）。
 - placeholder、控えめな文字数表示、明確な投稿状態を備えたComposer。
 - Lazy Timeline、自然な相対日時、メニュー内削除、Empty State。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。
@@ -26,21 +26,29 @@ Phase 1-D（実使用に向けた品質・データ持ち出し）の実装を�
 - Repository経由のMarkdown／JSON ExportとiOS標準Share Sheet。
 - SQLiteの直近2世代ローリングバックアップ。
 - 投稿・削除主要フローのXCUITest target。
+- Thought本文と分離した`ThoughtRelation`モデル（`continues`）と、source=新しいThought／target=元Thoughtの固定方向。
+- SQLite schema v2、Relationの外部キー・index・重複／self relation制約。
+- parent／continuationの1ステップ取得と、Thought作成＋Relation作成の原子的transaction境界。
+- Soft Delete後もRelationを保持するThought History基盤と、単純なcycle防止。
+- Timelineから開くThought Detail、現在位置を示す縦型History、履歴内移動。
+- 既存140文字ルールとatomic transactionを使う「続きを書く」Composer。
+- 分岐Continuationの安定順表示と、削除済みThoughtのHistory placeholder。
+- Timeline／History／Continuation操作のVoiceOver labelとaccessibility identifier。
 
 ## 未実装
 
-- AI分類・要約などの派生情報、クラウド同期、アカウント、外部連携（Phase 1-Aの対象外）。
+- AI分類・要約などの派生情報、クラウド同期、アカウント、外部連携。
 - CI/CD、配布用の署名・bundle identifier設定。
 
 ## 既知の問題
 
-- Linux環境ではXcode/iOS Simulatorがないため、iOSアプリのbuildと手動UI確認は未実施です。
+- iPhone SE (3rd generation, iOS 17.4)のbuildとXCUITestは確認済みですが、Light／Dark Modeの手動目視確認は未実施です。
 - 破損した移行元JSONは自動復旧せず、SQLiteへの移行を中止してエラー表示し、原本を保持します。
-- XCUITest targetは追加済みですが、Linux環境では実行未確認です。
+- XCUITestは投稿・削除とContinuation主要フローをiPhone SE Simulatorで確認済みです。
 - App iconの実画像は未設定です。
 
 ## 次に行うこと
 
-1. macOS/XcodeでiPhone SEと最新標準iPhoneのbuild／XCUITest／手動表示確認を行う。
+1. iPhone SEと最新標準iPhoneでLight／Dark Mode、140文字、分岐Historyを手動表示確認する。
 2. 実機でVoiceOverとShare Sheet（Files、AirDrop）を確認する。
-3. 数日間の実利用後にバックアップ／Export運用を再評価する。
+3. 数日間の実利用後にHistory／バックアップ／Export運用を再評価する。

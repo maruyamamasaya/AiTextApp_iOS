@@ -39,6 +39,34 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertFalse(postedThought.waitForExistence(timeout: 1), "削除確定後はTimelineから消える")
     }
 
+    func testCreateContinuationAndShowItInHistoryAndTimeline() {
+        let composer = app.textViews["thoughtComposer"]
+        let parent = "History A"
+        let child = "History B"
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText(parent)
+        app.buttons["postButton"].tap()
+
+        let parentText = app.staticTexts[parent]
+        XCTAssertTrue(parentText.waitForExistence(timeout: 2))
+        parentText.tap()
+        let writeContinuation = app.buttons["writeContinuationButton"]
+        XCTAssertTrue(writeContinuation.waitForExistence(timeout: 2))
+        writeContinuation.tap()
+
+        let continuationComposer = app.textViews["continuationComposer"]
+        XCTAssertTrue(continuationComposer.waitForExistence(timeout: 2))
+        continuationComposer.tap()
+        continuationComposer.typeText(child)
+        app.buttons["postContinuationButton"].tap()
+
+        XCTAssertTrue(app.staticTexts[parent].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts[child].waitForExistence(timeout: 2))
+        app.navigationBars["Thought"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.staticTexts[child].waitForExistence(timeout: 2), "Continuationが通常Timelineにも表示される")
+    }
+
     private func openThoughtMenuAndChooseDelete() {
         let menu = app.buttons.matching(identifier: "thoughtMenu").firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 2))
