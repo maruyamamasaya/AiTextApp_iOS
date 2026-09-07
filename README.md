@@ -2,7 +2,11 @@
 
 X（旧Twitter）のタイムラインのように短いテキストを扱う、iOS向けメモアプリのリポジトリです。
 
-> **現在の状態:** アプリケーションコードやXcodeプロジェクトはまだ登録されておらず、構想・初期準備段階です。現状の詳細は [`CURRENT.md`](CURRENT.md) を参照してください。
+> **現在の状態:** Phase 1-Aとして、140文字の投稿、ローカルTimeline、確認付き削除、再起動後も残るJSON保存を実装済みです。現状の詳細は [`CURRENT.md`](CURRENT.md) を参照してください。
+
+## 開発を始める
+
+`AiTextApp.xcodeproj`をXcode 16以降で開き、`AiTextApp` schemeをiPhone Simulatorで実行してください。UI非依存のテストは`swift test`で実行できます。
 
 ## 開発ドキュメント
 
@@ -17,4 +21,4 @@ X（旧Twitter）のタイムラインのように短いテキストを扱う、
 | 判断の背景を知る／残す | [`decisions/`](decisions/) |
 | 直近の作業履歴を確認する | [`sessions/`](sessions/) |
 
-利用手順、ビルド手順、対応OSなどは、Xcodeプロジェクトと仕様が確定した時点で追記します。未確定事項を推測して記載しない方針です。
+詳しいビルド・検証方法は [`TESTING.md`](TESTING.md)、ローカルデータの扱いは [`OPERATIONS.md`](OPERATIONS.md) を参照してください。

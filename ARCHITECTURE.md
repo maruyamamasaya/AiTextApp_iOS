@@ -4,60 +4,36 @@
 
 ## System Overview
 
-実行可能なシステムはまだありません。リポジトリはREADMEと開発支援文書のみで、アプリ層、API、データ層、外部連携は未実装です。
-
 ```text
-Repository
-  |
-  +-- Human entry: README.md
-  +-- AI context: CURRENT / ARCHITECTURE / CODEMAP
-  +-- Work guides: AGENTS / TESTING / OPERATIONS
-  +-- History: decisions / sessions
-
-(iOS application runtime: not present)
+SwiftUI TimelineView
+  -> ThoughtStore (presentation state)
+    -> ThoughtTimeline (validation/order/delete use cases)
+      -> ThoughtRepository protocol
+        -> FileThoughtRepository (Application Support JSON)
 ```
 
 ## Technology Stack
 
-- Gitリポジトリ。
-- 対象プラットフォームはリポジトリ名からiOSと読み取れます。
-- Swift、SwiftUI/UIKit、Xcode、パッケージ管理などの具体的な技術は未導入・未確定です。
-
-## Directory Structure
-
-- ルートのMarkdown: 人間・AI向けの現在情報と作業ガイド。
-- `decisions/`: 長期間影響する重要な判断。
-- `sessions/`: 短い作業引き継ぎ記録。
-- アプリケーション／テスト用ディレクトリはまだありません。
+- Swift 5 language mode、SwiftUI、Combine、Foundation。
+- iPhone / iOS 16.0以降、外部依存なし。
+- Xcode projectと、CoreのLinuxテストにも使うSwift Package。
 
 ## Main Components
 
-アプリケーションコンポーネントはありません。実装追加時に、責務と主要な入口だけをここへ追記してください。
+- `TimelineView`: Composer、Timeline、削除確認、エラー表示。
+- `ThoughtStore`: draftと画面状態をuse caseへ接続。
+- `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
+- `Thought` / `ThoughtDraft`: 原文モデルと140文字ルール。
+- `ThoughtRepository`: 保存境界。現在の実装はJSONファイル。
 
 ## Data Flow
 
-アプリケーションのデータフローは未実装・未決定です。
+入力はBindingで140 Character以内に制限され、投稿時に前後空白を除去します。use caseが全レコードを保存し、非削除レコードを日時降順でStoreへ返し、SwiftUIが即時再描画します。
 
-## API Structure
+## Persistence
 
-APIルート、HTTPクライアント、バックエンドはありません。READMEの「X風」はUIの概念を示すだけで、X API連携が必要だとは確認できません。
+`Application Support/ThoughtTimeline/thoughts.json`へCodable JSONをatomic writeします。削除は`deletedAt`を設定するsoft deleteです。Thoughtは人間の原文だけを持ち、将来のAI派生情報は別モデルにします。
 
-## Database
+## External Services / Authentication
 
-DB、ローカル永続化、schema/migration、テーブルはありません。採用方針も未決定です。
-
-## Authentication
-
-認証処理、資格情報、セッション管理はありません。認証要件も未確認です。
-
-## External Services
-
-SDK、外部API、analytics/crash reportingなどの連携はありません。
-
-## Deployment
-
-Xcode project、scheme、署名設定、CI/CD、App Store/TestFlight設定はありません。
-
-## Important Dependencies
-
-依存関係を宣言するファイルはなく、外部ライブラリは確認できません。
+外部API、SDK、認証、クラウド同期はありません（意図されたPhase 1-Aの範囲）。
