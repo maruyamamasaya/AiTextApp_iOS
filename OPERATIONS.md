@@ -6,7 +6,7 @@
 
 ## Local Data
 
-初回投稿時にApplication Support内の`ThoughtTimeline/thoughts.json`と親ディレクトリを自動作成します。データをリセットするにはSimulatorからアプリを削除してください。
+初回起動時にApplication Support内の`ThoughtTimeline/thought-timeline.sqlite3`と親ディレクトリを自動作成します。同じ場所に旧`thoughts.json`があれば一度だけ取り込み、成功後もバックアップとして残します。データをリセットするにはSimulatorからアプリを削除してください。
 
 ## Build / Test
 

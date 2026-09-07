@@ -6,7 +6,8 @@ let package = Package(
     platforms: [.iOS(.v16)],
     products: [.library(name: "ThoughtCore", targets: ["ThoughtCore"])],
     targets: [
-        .target(name: "ThoughtCore", path: "ThoughtCore"),
+        .systemLibrary(name: "CSQLite", path: "CSQLite"),
+        .target(name: "ThoughtCore", dependencies: ["CSQLite"], path: "ThoughtCore"),
         .testTarget(name: "ThoughtCoreTests", dependencies: ["ThoughtCore"], path: "ThoughtCoreTests")
     ]
 )

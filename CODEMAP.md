@@ -21,11 +21,12 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 
 ## Persistence
 
-- `ThoughtCore/ThoughtRepository.swift` — repository境界とCodable JSON実装。
+- `ThoughtCore/ThoughtRepository.swift` — CRUD repository境界とテスト用メモリ実装。
+- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema/query/旧JSON migration。
 
-Search: `ThoughtRepository|FileThoughtRepository|applicationSupportDirectory`
+Search: `ThoughtRepository|SQLiteThoughtRepository|applicationSupportDirectory|legacy_json_v1`
 
 ## Tests
 
-- `ThoughtCoreTests/ThoughtTimelineTests.swift` — 投稿境界、Unicode、順序、削除、再読込。
+- `ThoughtCoreTests/ThoughtTimelineTests.swift` — 投稿境界、Unicode、SQL順序、削除、再読込、JSON migration。
 - `Package.swift` — `swift test`用manifest。

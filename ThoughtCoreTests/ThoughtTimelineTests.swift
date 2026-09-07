@@ -2,13 +2,15 @@ import Foundation
 import Testing
 @testable import ThoughtCore
 
-@Suite("Thought timeline")
+@Suite("Thought timeline", .serialized)
 struct ThoughtTimelineTests {
-    @Test func acceptsOneAnd140CharactersButRejectsEmptyAndLongText() throws {
-        let repository = MemoryRepository()
+    @Test func createSupportsBoundariesAndUnicode() throws {
+        let repository = MemoryThoughtRepository()
         var timeline = try ThoughtTimeline(repository: repository)
 
         #expect(try timeline.post("a")?.body == "a")
+        #expect(try timeline.post("日本語")?.body == "日本語")
+        #expect(try timeline.post("🚀")?.body == "🚀")
         let maximum = String(repeating: "あ", count: 140)
         #expect(try timeline.post(maximum)?.body == maximum)
         #expect(try timeline.post("") == nil)
@@ -18,56 +20,99 @@ struct ThoughtTimelineTests {
 
     @Test func limitsDraftByUserPerceivedCharacters() {
         let emoji = String(repeating: "👨‍👩‍👧‍👦", count: 141)
-        let limited = ThoughtDraft.limited(emoji)
-        #expect(limited.count == 140)
-        #expect(emoji.count == 141)
+        #expect(ThoughtDraft.limited(emoji).count == 140)
     }
 
-    @Test func trimsOnlyLeadingAndTrailingWhitespaceAndPreservesUnicode() throws {
-        var timeline = try ThoughtTimeline(repository: MemoryRepository())
-        let posted = try timeline.post("  日本語 English 123 🚀\n")
-        let thought = try #require(posted)
-        #expect(thought.body == "日本語 English 123 🚀")
+    @Test func trimsEdgesAndPreservesUnicode() throws {
+        var timeline = try ThoughtTimeline(repository: MemoryThoughtRepository())
+        #expect(try timeline.post("  日本語 English 123 🚀\n")?.body == "日本語 English 123 🚀")
     }
 
-    @Test func sortsNewestFirstAndKeepsStableOrderAfterReload() throws {
-        let repository = MemoryRepository()
-        var timeline = try ThoughtTimeline(repository: repository)
-        let older = Date(timeIntervalSince1970: 100)
-        let newer = Date(timeIntervalSince1970: 200)
-        try timeline.post("older", now: older)
-        try timeline.post("newer", now: newer)
-        #expect(timeline.thoughts.map(\.body) == ["newer", "older"])
+    @Test func sqliteCreatesReadsAndUsesStableQueryOrder() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let date = Date(timeIntervalSince1970: 200)
+        let low = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let high = UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!
+        try repository.create(Thought(id: low, body: "low", createdAt: date))
+        try repository.create(Thought(id: high, body: "high", createdAt: date))
+        try repository.create(Thought(body: "older", createdAt: Date(timeIntervalSince1970: 100)))
 
-        let reloaded = try ThoughtTimeline(repository: repository)
-        #expect(reloaded.thoughts.map(\.body) == ["newer", "older"])
+        #expect(try repository.fetchByID(low)?.body == "low")
+        #expect(try repository.fetchTimeline().map(\.body) == ["high", "low", "older"])
     }
 
-    @Test func softDeletesAndPersistsDeletion() throws {
-        let repository = MemoryRepository()
-        var timeline = try ThoughtTimeline(repository: repository)
-        let posted = try timeline.post("delete me")
-        let thought = try #require(posted)
-        #expect(try timeline.delete(id: thought.id))
-        #expect(timeline.thoughts.isEmpty)
-        #expect(repository.values.first?.deletedAt != nil)
-        #expect(try ThoughtTimeline(repository: repository).thoughts.isEmpty)
+    @Test func softDeleteSetsTimestampAndExcludesTimeline() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let thought = Thought(body: "delete me")
+        let deletion = Date(timeIntervalSince1970: 500)
+        try repository.create(thought)
+
+        #expect(try repository.softDelete(id: thought.id, at: deletion))
+        #expect(try repository.fetchByID(thought.id)?.deletedAt == deletion)
+        #expect(try repository.fetchTimeline().isEmpty)
+        #expect(try repository.fetchAll().count == 1)
     }
 
-    @Test func fileRepositorySurvivesRecreation() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appendingPathComponent("thoughts.json")
-        var first = try ThoughtTimeline(repository: FileThoughtRepository(fileURL: url))
-        try first.post("persisted 🚀")
+    @Test func sqliteSurvivesRepositoryRecreation() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try fixture.repository().create(Thought(body: "persisted 🚀"))
+        #expect(try fixture.repository().fetchTimeline().map(\.body) == ["persisted 🚀"])
+    }
 
-        let second = try ThoughtTimeline(repository: FileThoughtRepository(fileURL: url))
-        #expect(second.thoughts.map(\.body) == ["persisted 🚀"])
+    @Test(arguments: [[], [Thought(body: "migrated 日本語 🚀")]])
+    func migratesLegacyJSONIncludingEmptyFile(thoughts: [Thought]) throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try fixture.writeLegacyJSON(thoughts)
+        let repository = try fixture.repository()
+        #expect(try repository.fetchAll().map(\.id) == thoughts.map(\.id))
+        #expect(try repository.fetchAll().map(\.body) == thoughts.map(\.body))
+        #expect(FileManager.default.fileExists(atPath: fixture.jsonURL.path))
+    }
+
+    @Test func runningMigrationTwiceDoesNotDuplicate() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let thought = Thought(body: "only once")
+        try fixture.writeLegacyJSON([thought])
+        #expect(try fixture.repository().fetchAll().count == 1)
+        #expect(try fixture.repository().fetchAll().count == 1)
+    }
+
+    @Test func failedMigrationRetainsLegacyJSON() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try Data("not-json".utf8).write(to: fixture.jsonURL)
+        #expect(throws: SQLiteThoughtRepositoryError.self) { try fixture.repository() }
+        #expect(FileManager.default.fileExists(atPath: fixture.jsonURL.path))
+        #expect(try String(contentsOf: fixture.jsonURL, encoding: .utf8) == "not-json")
     }
 }
 
-private final class MemoryRepository: ThoughtRepository, @unchecked Sendable {
-    var values: [Thought] = []
-    func load() throws -> [Thought] { values }
-    func save(_ thoughts: [Thought]) throws { values = thoughts }
+private struct Fixture {
+    let directory: URL
+    var databaseURL: URL { directory.appendingPathComponent("thought-timeline.sqlite3") }
+    var jsonURL: URL { directory.appendingPathComponent("thoughts.json") }
+
+    init() throws {
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    func repository() throws -> SQLiteThoughtRepository {
+        try SQLiteThoughtRepository(databaseURL: databaseURL, legacyJSONURL: jsonURL)
+    }
+
+    func writeLegacyJSON(_ thoughts: [Thought]) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(thoughts).write(to: jsonURL)
+    }
+
+    func remove() { try? FileManager.default.removeItem(at: directory) }
 }
