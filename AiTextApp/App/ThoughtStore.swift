@@ -10,8 +10,9 @@ final class ThoughtStore: ObservableObject {
 
     private var timeline: ThoughtTimeline?
 
-    init(repository: any ThoughtRepository = FileThoughtRepository()) {
+    init(repository: (any ThoughtRepository)? = nil) {
         do {
+            let repository = try repository ?? SQLiteThoughtRepository()
             let timeline = try ThoughtTimeline(repository: repository)
             self.timeline = timeline
             thoughts = timeline.thoughts

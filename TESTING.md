@@ -10,7 +10,7 @@ UI非依存のドメイン／永続化はSwift PackageとしてLinux/macOS共通
 swift test
 ```
 
-1/140文字、空・空白・141文字の拒否、Character単位の絵文字制限、Unicode、trim、降順、複数投稿、soft delete、ファイル再読込を検証します。
+1/140文字、空・空白・141文字の拒否、Character単位の絵文字制限、Unicode、trim、SQLite query順序、soft delete、DB再読込、JSON migrationの成功・空・冪等・失敗を検証します。
 
 ## UI Test
 
