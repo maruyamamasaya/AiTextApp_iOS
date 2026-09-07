@@ -29,6 +29,24 @@ struct TimelineView: View {
             .animation(.easeOut(duration: 0.2), value: store.thoughts.map(\.id))
             .navigationTitle("Thoughts")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button("Markdownを共有") { store.export(.markdown) }
+                            .accessibilityIdentifier("exportMarkdownButton")
+                        Button("JSONを共有") { store.export(.json) }
+                            .accessibilityIdentifier("exportJSONButton")
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .accessibilityLabel("ThoughtをExport")
+                    .accessibilityHint("MarkdownまたはJSONとして共有します")
+                    .accessibilityIdentifier("exportMenu")
+                }
+            }
+            .sheet(item: $store.exportArtifact) { artifact in
+                ShareSheet(url: artifact.url, onFailure: store.sharingFailed)
+            }
             .confirmationDialog(
                 "このThoughtを削除しますか？",
                 isPresented: deletionDialogIsPresented,
@@ -150,6 +168,7 @@ private struct ThoughtRow: View {
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
+                .accessibilityIdentifier("thoughtBody_\(thought.id.uuidString)")
 
             HStack(alignment: .center, spacing: 8) {
                 Text(ThoughtDateText.string(for: thought.createdAt))
@@ -168,7 +187,7 @@ private struct ThoughtRow: View {
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Thoughtの操作")
                 .accessibilityHint("削除メニューを表示します")
-                .accessibilityIdentifier("thoughtMenu_\(thought.id.uuidString)")
+                .accessibilityIdentifier("thoughtMenu")
             }
         }
         .padding(.leading, 16)

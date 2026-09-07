@@ -52,6 +52,7 @@ public final class SQLiteThoughtRepository: ThoughtRepository, @unchecked Sendab
             try open()
             try configureAndMigrateSchema()
             try migrateLegacyJSONIfNeeded()
+            createRollingBackupIfPossible()
         } catch {
             if let database { sqlite3_close(database) }
             database = nil
@@ -65,6 +66,7 @@ public final class SQLiteThoughtRepository: ThoughtRepository, @unchecked Sendab
     public func create(_ thought: Thought) throws {
         try lock.withLock {
             try executeThoughtInsert(thought, conflictClause: "")
+            createRollingBackupIfPossible()
         }
     }
 
@@ -107,7 +109,52 @@ public final class SQLiteThoughtRepository: ThoughtRepository, @unchecked Sendab
             try bind(date.timeIntervalSince1970, to: 2, in: statement)
             try bind(id.uuidString, to: 3, in: statement)
             try stepDone(statement)
-            return sqlite3_changes(database) > 0
+            let changed = sqlite3_changes(database) > 0
+            if changed { createRollingBackupIfPossible() }
+            return changed
+        }
+    }
+
+    /// Keeps two SQLite-native snapshots beside the canonical database. Backup
+    /// errors are logged but never turn an already successful post/delete into a
+    /// user-visible failure.
+    private func createRollingBackupIfPossible() {
+        guard let database else { return }
+        let olderURL = databaseURL.appendingPathExtension("backup.2")
+        let latestURL = databaseURL.appendingPathExtension("backup.1")
+        let temporaryURL = databaseURL.appendingPathExtension("backup.tmp")
+        try? fileManager.removeItem(at: temporaryURL)
+
+        var destination: OpaquePointer?
+        guard sqlite3_open_v2(temporaryURL.path, &destination, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+              let destination else {
+            if let destination { sqlite3_close(destination) }
+            NSLog("Thought database backup could not be opened")
+            return
+        }
+        defer { sqlite3_close(destination) }
+
+        guard let backup = sqlite3_backup_init(destination, "main", database, "main") else {
+            NSLog("Thought database backup could not start: %@", String(cString: sqlite3_errmsg(destination)))
+            return
+        }
+        let step = sqlite3_backup_step(backup, -1)
+        let finish = sqlite3_backup_finish(backup)
+        guard step == SQLITE_DONE, finish == SQLITE_OK else {
+            try? fileManager.removeItem(at: temporaryURL)
+            NSLog("Thought database backup failed")
+            return
+        }
+
+        do {
+            try? fileManager.removeItem(at: olderURL)
+            if fileManager.fileExists(atPath: latestURL.path) {
+                try fileManager.moveItem(at: latestURL, to: olderURL)
+            }
+            try fileManager.moveItem(at: temporaryURL, to: latestURL)
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            NSLog("Thought database backup rotation failed: %@", String(describing: error))
         }
     }
 

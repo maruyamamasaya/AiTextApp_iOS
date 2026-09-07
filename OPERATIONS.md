@@ -19,3 +19,9 @@ Xcodeの`AiTextApp` shared schemeでbuildします。CLIコマンドとCore test
 ## Deploy
 
 CI/CD、配布用bundle identifier、code signing、provisioning、TestFlight/App Store設定は未構成です。
+
+## Backup / Export
+
+正常なDB初期化後とThoughtの書き込み後には、`thought-timeline.sqlite3.backup.1`（最新）と`.backup.2`（ひとつ前）をSQLite Online Backup APIで更新します。自動復元は行いません。DB初期化失敗時はアプリを削除せず、正本を退避してからバックアップコピーを復元します。調査なしに新規DBで上書きしないでください。
+
+通常の持ち出しは画面右上のExportからMarkdown（人間向け）またはJSON（原文バックアップ／将来Import向け）を選び、標準Share SheetでFilesやAirDropへ保存します。Export失敗はSQLiteとComposerを変更しません。
