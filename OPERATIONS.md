@@ -2,32 +2,20 @@
 
 ## Local Development
 
-実行可能なアプリケーションはまだありません。リポジトリはGitで取得できますが、Xcodeで開くproject/workspaceや起動コマンドは存在しません。
+`AiTextApp.xcodeproj`をXcode 16以降で開き、`AiTextApp` schemeと任意のiPhone Simulatorを選んで実行します。iOS 16.0以降が対象で、外部dependencyや初回セットアップはありません。
 
-実装開始時には、必要なXcode/Swiftのバージョン、project/workspace、scheme、simulator destination、初回セットアップをここへ記録してください。
+## Local Data
 
-## Environment Variables / Configuration
+初回投稿時にApplication Support内の`ThoughtTimeline/thoughts.json`と親ディレクトリを自動作成します。データをリセットするにはSimulatorからアプリを削除してください。
 
-環境変数、`.xcconfig`、plist設定、secret管理はありません。必要になった場合は変数名・用途・必須/任意・安全な入手方法だけを記録し、実際のtoken、password、証明書、秘密鍵、production値はコミットしないでください。
+## Build / Test
 
-## Database Setup
+Xcodeの`AiTextApp` shared schemeでbuildします。CLIコマンドとCore testは`TESTING.md`を参照してください。
 
-DBやローカル永続化は未実装で、セットアップはありません。
+## Environment / External Services
 
-## External Services
-
-外部サービスは設定されていません。X風という説明は、Xサービスとの連携を意味するとは確認できません。
-
-## Build
-
-ビルド構成がないため実行できません。追加後は `TESTING.md` に検証コマンド、本書に開発者向け起動手順と必要設定を記載します。
+環境変数、secret、外部サービスはありません。
 
 ## Deploy
 
-CI/CD、code signing、provisioning、bundle identifier、TestFlight/App Store配布設定はありません。配布先も未確認です。
-
-## Troubleshooting
-
-- 開くprojectが見つからない: 現在は未登録で、正常な既知状態です。`CURRENT.md` を確認してください。
-- ビルドコマンドが分からない: 現在は実行できません。projectとscheme追加後に本書と `TESTING.md` を更新してください。
-- 文書と実装が違う: コード・設定・テストを調査し、事実と意図を区別したうえで関連文書を更新してください。
+CI/CD、配布用bundle identifier、code signing、provisioning、TestFlight/App Store設定は未構成です。
