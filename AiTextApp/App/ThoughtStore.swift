@@ -18,6 +18,7 @@ final class ThoughtStore: ObservableObject {
     @Published var continuationDraft = ""
     @Published private(set) var reviewThoughts: [Thought] = []
     @Published private(set) var reviewContinuationCounts: [UUID: Int] = [:]
+    let externalBackupManager: ExternalBackupManager?
 
     private var timeline: ThoughtTimeline?
     private var exporter: ThoughtExporter?
@@ -25,7 +26,8 @@ final class ThoughtStore: ObservableObject {
     private var relationRepository: (any ThoughtRelationRepository)?
     private var continuationRepository: (any ThoughtContinuationRepository)?
 
-    init(repository: (any ThoughtRepository)? = nil) {
+    init(repository: (any ThoughtRepository)? = nil, startupError: String? = nil) {
+        var backupManager: ExternalBackupManager?
         do {
             let repository = try repository ?? SQLiteThoughtRepository()
             let timeline = try ThoughtTimeline(repository: repository)
@@ -35,9 +37,14 @@ final class ThoughtStore: ObservableObject {
             continuationRepository = repository as? any ThoughtContinuationRepository
             exporter = ThoughtExporter(repository: repository)
             thoughts = timeline.thoughts
+            if let sqliteRepository = repository as? SQLiteThoughtRepository {
+                backupManager = ExternalBackupManager(repository: sqliteRepository)
+            }
         } catch {
             errorMessage = "保存したThoughtを読み込めませんでした。"
         }
+        externalBackupManager = backupManager
+        if let startupError { errorMessage = startupError }
     }
 
     func export(_ format: ThoughtExportFormat) {

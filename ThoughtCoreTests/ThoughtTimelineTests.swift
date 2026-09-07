@@ -388,6 +388,109 @@ struct ThoughtExporterTests {
     private func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
 }
 
+@Suite("External disaster recovery backup", .serialized)
+struct ExternalBackupTests {
+    @Test func createsManifestAndRotatesExactlyTwoGenerations() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let destination = fixture.directory.appendingPathComponent("Files", isDirectory: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let repository = try fixture.repository()
+        let service = ExternalBackupService(repository: repository, appVersion: "1.2", buildVersion: "34")
+
+        try repository.create(Thought(body: "one")); let first = try service.createBackup(in: destination)
+        try repository.create(Thought(body: "two")); _ = try service.createBackup(in: destination)
+        try repository.create(Thought(body: "three")); _ = try service.createBackup(in: destination)
+
+        let root = destination.appendingPathComponent("AiText Backup")
+        #expect(first.backupFormatVersion == 1)
+        #expect(first.sqliteUserVersion == SQLiteThoughtRepository.schemaVersion)
+        #expect(first.databaseFileSize > 0)
+        #expect(first.files.first?.sha256?.count == 64)
+        #expect(try repositoryBodies(at: root.appendingPathComponent("latest")) == ["three", "two", "one"])
+        #expect(try repositoryBodies(at: root.appendingPathComponent("previous")) == ["two", "one"])
+        let visibleGenerations = try FileManager.default.contentsOfDirectory(atPath: root.path).filter { !$0.hasPrefix(".") }
+        #expect(Set(visibleGenerations) == ["latest", "previous"])
+        _ = try ExternalBackupService.validateBackup(at: root.appendingPathComponent("latest"), maximumSchemaVersion: SQLiteThoughtRepository.schemaVersion)
+    }
+
+    @Test func failedBackupDoesNotDamageExistingLatest() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let destination = fixture.directory.appendingPathComponent("Files", isDirectory: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let repository = try fixture.repository()
+        let service = ExternalBackupService(repository: repository, appVersion: "1", buildVersion: "1")
+        try repository.create(Thought(body: "safe")); _ = try service.createBackup(in: destination)
+        let latest = destination.appendingPathComponent("AiText Backup/latest")
+        let inaccessible = fixture.directory.appendingPathComponent("not-a-folder")
+        try Data("file".utf8).write(to: inaccessible)
+        #expect(throws: Error.self) { try service.createBackup(in: inaccessible) }
+        #expect(try repositoryBodies(at: latest) == ["safe"])
+    }
+
+    @Test func rejectsInvalidManifestAndCorruptSQLiteWithoutChangingCurrentDatabase() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let current = try fixture.repository(); try current.create(Thought(body: "current"))
+        let generation = fixture.directory.appendingPathComponent("bad", isDirectory: true)
+        try FileManager.default.createDirectory(at: generation, withIntermediateDirectories: true)
+        try Data("bad json".utf8).write(to: generation.appendingPathComponent("manifest.json"))
+        #expect(throws: ExternalBackupError.invalidManifest) {
+            try RestoreCoordinator.stageRestore(from: generation, applicationSupportDirectory: fixture.directory)
+        }
+        #expect(try current.fetchTimeline().map(\.body) == ["current"])
+
+        let files = fixture.directory.appendingPathComponent("Files", isDirectory: true)
+        try FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
+        let service = ExternalBackupService(repository: current, appVersion: "1", buildVersion: "1")
+        _ = try service.createBackup(in: files)
+        let latest = files.appendingPathComponent("AiText Backup/latest")
+        try Data("not sqlite".utf8).write(to: latest.appendingPathComponent(ExternalBackupService.databaseFileName))
+        #expect(throws: ExternalBackupError.self) {
+            try RestoreCoordinator.stageRestore(from: latest, applicationSupportDirectory: fixture.directory.appendingPathComponent("Support"))
+        }
+        #expect(try current.fetchTimeline().map(\.body) == ["current"])
+    }
+
+    @Test func restorePreservesThoughtRelationSoftDeleteAndSchema() throws {
+        let sourceFixture = try Fixture(); defer { sourceFixture.remove() }
+        let source = try sourceFixture.repository()
+        let parent = Thought(body: "parent", createdAt: Date(timeIntervalSince1970: 100))
+        try source.create(parent)
+        let child = try #require(try source.createContinuation(body: "child", parentThoughtID: parent.id, now: Date(timeIntervalSince1970: 200)))
+        _ = try source.softDelete(id: parent.id, at: Date(timeIntervalSince1970: 300))
+        let files = sourceFixture.directory.appendingPathComponent("Files", isDirectory: true)
+        try FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
+        _ = try ExternalBackupService(repository: source, appVersion: "1", buildVersion: "1").createBackup(in: files)
+
+        let restored = try Fixture(); defer { restored.remove() }
+        do {
+            let existing = try restored.repository()
+            try existing.create(Thought(body: "replace me"))
+        }
+        let generation = files.appendingPathComponent("AiText Backup/latest")
+        _ = try RestoreCoordinator.stageRestore(from: generation, applicationSupportDirectory: restored.directory)
+        #expect(try RestoreCoordinator.applyPendingRestoreIfNeeded(databaseURL: restored.databaseURL, applicationSupportDirectory: restored.directory))
+        let repository = try restored.repository()
+        #expect(try repository.fetchAll().map(\.body) == ["child", "parent"])
+        #expect(try repository.fetchByID(parent.id)?.deletedAt == Date(timeIntervalSince1970: 300))
+        #expect(try repository.fetchContinuationSource(for: child.id)?.targetThoughtID == parent.id)
+        #expect(try ThoughtHistory(thoughtRepository: repository, relationRepository: repository).entries(containing: child.id).map(\.thought.body) == ["parent", "child"])
+        #expect(try sqliteUserVersion(at: restored.databaseURL) == SQLiteThoughtRepository.schemaVersion)
+    }
+
+    private func repositoryBodies(at generation: URL) throws -> [String] {
+        let database = generation.appendingPathComponent(ExternalBackupService.databaseFileName)
+        return try SQLiteThoughtRepository(databaseURL: database).fetchAll().map(\.body)
+    }
+
+    private func sqliteUserVersion(at url: URL) throws -> Int32 {
+        var database: OpaquePointer?; guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let database else { throw ExternalBackupError.invalidSQLite("test open") }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?; sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nil); defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw ExternalBackupError.invalidSQLite("test pragma") }
+        return sqlite3_column_int(statement, 0)
+    }
+}
+
 private extension JSONDecoder {
     static var withISO8601: JSONDecoder {
         let decoder = JSONDecoder()

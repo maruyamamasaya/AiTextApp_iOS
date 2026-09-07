@@ -10,7 +10,21 @@ struct AiTextApp: App {
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
             _store = StateObject(wrappedValue: ThoughtStore(repository: MemoryThoughtRepository()))
         } else {
-            _store = StateObject(wrappedValue: ThoughtStore())
+            var restoreError: String?
+            let fileManager = FileManager.default
+            let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? fileManager.temporaryDirectory
+            let databaseURL = support.appendingPathComponent("ThoughtTimeline/thought-timeline.sqlite3")
+            do {
+                _ = try RestoreCoordinator.applyPendingRestoreIfNeeded(
+                    databaseURL: databaseURL,
+                    applicationSupportDirectory: support,
+                    fileManager: fileManager
+                )
+            } catch {
+                restoreError = "Restoreを適用できなかったため、元のデータを維持しました。\n\(error.localizedDescription)"
+            }
+            _store = StateObject(wrappedValue: ThoughtStore(startupError: restoreError))
         }
     }
 

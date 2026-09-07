@@ -1,6 +1,6 @@
 # Current Project Status
 
-最終照合日: 2026-09-07
+最終照合日: 2026-09-08
 
 ## Project
 
@@ -37,6 +37,9 @@ Phase 2-C（History Review / 時間軸でThoughtを振り返る）の実装を�
 - 今日／昨日／過去7日／日付指定で開けるHistory Reviewと、日ごとの件数表示。
 - `createdAt`昇順の安定したReview表示、Thought Detailへの遷移、Continuation件数の軽量表示。
 - SQLiteの日付範囲query（開始inclusive／終了exclusive）とRelation件数の一括query。
+- Files／iCloud Driveのユーザー選択フォルダへSQLite Online Backup APIの完全snapshotを保存する外部災害復旧バックアップ。
+- `latest`／`previous`の外部2世代、version・schema・サイズ・SHA-256を持つmanifest、作成後検証と失敗時rollback。
+- security-scoped bookmarkによる保存先再利用、Restore事前検証・確認UI・次回起動前のatomic適用と現DB rollback。
 
 ## 未実装
 

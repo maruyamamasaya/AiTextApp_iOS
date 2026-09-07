@@ -56,6 +56,17 @@ struct TimelineView: View {
                     .accessibilityHint("MarkdownまたはJSONとして共有します")
                     .accessibilityIdentifier("exportMenu")
                 }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if let manager = store.externalBackupManager {
+                        NavigationLink {
+                            BackupManagementView(manager: manager)
+                        } label: {
+                            Image(systemName: "externaldrive.badge.timemachine")
+                        }
+                        .accessibilityLabel("バックアップ管理を開く")
+                        .accessibilityIdentifier("backupManagementButton")
+                    }
+                }
             }
             .sheet(item: $store.exportArtifact) { artifact in
                 ShareSheet(url: artifact.url, onFailure: store.sharingFailed)
@@ -166,6 +177,69 @@ struct TimelineView: View {
             get: { store.errorMessage != nil },
             set: { if !$0 { store.errorMessage = nil } }
         )
+    }
+}
+
+private struct BackupManagementView: View {
+    enum PickerPurpose: Identifiable { case destination, restore; var id: Int { self == .destination ? 0 : 1 } }
+    @ObservedObject var manager: ExternalBackupManager
+    @State private var pickerPurpose: PickerPurpose?
+
+    var body: some View {
+        Form {
+            Section("保存先") {
+                LabeledContent("フォルダ", value: manager.destinationName ?? "未選択")
+                LabeledContent("状態", value: manager.destinationAvailable ? "利用可能" : "利用できません")
+                Button("バックアップ保存先を選択") { pickerPurpose = .destination }
+                    .accessibilityIdentifier("selectBackupDestinationButton")
+            }
+            Section {
+                LabeledContent("最終バックアップ") {
+                    Text(manager.lastBackupAt?.formatted(date: .numeric, time: .shortened) ?? "未作成")
+                }
+                Button("今すぐバックアップ") { manager.createBackup() }
+                    .disabled(!manager.destinationAvailable)
+                    .accessibilityIdentifier("createExternalBackupButton")
+            } header: {
+                Text("外部完全バックアップ")
+            } footer: {
+                Text("SQLite全体をFilesまたはiCloud Driveへ保存します。アプリ内の2世代バックアップやMarkdown／JSON Exportとは別の、削除・再インストール時の復旧用です。")
+            }
+            Section {
+                Button("バックアップから復元", role: .destructive) { pickerPurpose = .restore }
+                    .accessibilityIdentifier("restoreExternalBackupButton")
+            } header: {
+                Text("Restore")
+            } footer: {
+                Text("選択後に内容を検証し、確認画面を表示します。現在のデータは次回起動時まで置き換えません。")
+            }
+        }
+        .navigationTitle("バックアップ")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { manager.refreshDestinationStatus() }
+        .sheet(item: $pickerPurpose) { purpose in
+            FolderPicker { url in
+                pickerPurpose = nil
+                if purpose == .destination { manager.selectDestination(url) }
+                else { manager.prepareRestoreSelection(url) }
+            } onCancel: { pickerPurpose = nil }
+        }
+        .alert("バックアップから復元", isPresented: restoreConfirmationIsPresented) {
+            Button("キャンセル", role: .cancel) { manager.cancelRestore() }
+            Button("復元する", role: .destructive) { manager.confirmRestore() }
+        } message: {
+            Text("このバックアップで現在のAiTextデータを置き換えます。\n\nバックアップ日時: \(manager.restoreCandidate?.manifest.createdAt.formatted(date: .numeric, time: .shortened) ?? "不明")\n\n適用は次回アプリ起動時です。")
+        }
+        .alert("バックアップ", isPresented: messageIsPresented) {
+            Button("OK") { manager.message = nil }
+        } message: { Text(manager.message ?? "") }
+    }
+
+    private var restoreConfirmationIsPresented: Binding<Bool> {
+        Binding(get: { manager.restoreCandidate != nil }, set: { if !$0 { manager.cancelRestore() } })
+    }
+    private var messageIsPresented: Binding<Bool> {
+        Binding(get: { manager.message != nil }, set: { if !$0 { manager.message = nil } })
     }
 }
 

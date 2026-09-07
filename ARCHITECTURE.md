@@ -14,6 +14,7 @@ SwiftUI TimelineView -> HistoryReviewView / ThoughtDetailView / Continuation Com
     -> ThoughtRelationRepository (History relation queries)
     -> ThoughtExporter -> ThoughtRepository
     -> ShareSheet (UIActivityViewController)
+    -> ExternalBackupManager -> ExternalBackupService / RestoreCoordinator
 ```
 
 ## Technology Stack
@@ -38,6 +39,9 @@ SwiftUI TimelineView -> HistoryReviewView / ThoughtDetailView / Continuation Com
 - `SQLiteThoughtRepository`: schema v2、Thought／Relation query、旧JSON importと2世代backupを所有する正本実装。
 - `ThoughtExporter`: Repositoryから未削除Thoughtを取得し、Markdown／JSONを生成。
 - `ShareSheet`: ExportファイルをiOS標準共有UIへ渡すUIKit bridge。
+- `ExternalBackupManager`: Filesフォルダpicker、security-scoped bookmark、バックアップ状態と確認UIのpresentation境界。
+- `ExternalBackupService`: RepositoryのOnline Backup snapshotを外部フォルダへmanifest付きで作成・検証し、`latest`／`previous`をtransaction的に回転。
+- `RestoreCoordinator`: 選択世代をApplication Supportへstageしてpending化し、次回起動のRepository生成前に検証・置換・rollbackする境界。
 
 ## Data Flow
 
@@ -55,6 +59,8 @@ History ReviewはCalendarの日境界から期間を作り、開始inclusive／�
 
 初期化成功後とcreate／soft delete成功後にSQLite Online Backup APIでスナップショットを作り、`.backup.1`と`.backup.2`だけを保持します。バックアップ失敗は成功済み投稿を失敗扱いにせずログへ記録し、破損時の自動巻き戻しは行いません。
 
+外部完全バックアップは選択されたFilesフォルダ配下の`AiText Backup/latest`と`previous`に、SQLite全体と`manifest.json`を保存します。作成中はUUID付き一時directoryを使い、integrity、schema、サイズ、SHA-256を検証できた新snapshotだけをlatestへ切り替えます。Restoreは外部ファイルを直接正本にせずApplication Supportへcopy・再検証してpendingにし、次回起動時にSQLite connection生成前に正本・WAL・SHMをrollback用へ退避して適用します。適用後のSQLite確認が失敗すれば元の組を戻します。
+
 ## External Services / Authentication
 
-外部API、SDK、認証、クラウド同期はありません（意図されたPhase 1-Aの範囲）。
+外部API、SDK、認証、クラウド同期はありません。Files／iCloud DriveアクセスにはiOS標準document pickerとsecurity-scoped bookmarkだけを使います。

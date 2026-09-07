@@ -67,6 +67,17 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
 
     deinit { if let database { sqlite3_close(database) } }
 
+    public var canonicalDatabaseURL: URL { databaseURL }
+
+    /// Creates a transactionally consistent, standalone SQLite database even
+    /// while the canonical database is using a journal or WAL.
+    public func createSnapshot(at destinationURL: URL) throws {
+        try lock.withLock {
+            guard let database else { throw SQLiteThoughtRepositoryError.open("database is closed") }
+            try Self.createSnapshot(from: database, at: destinationURL, fileManager: fileManager)
+        }
+    }
+
     public func create(_ thought: Thought) throws {
         try lock.withLock {
             try executeThoughtInsert(thought, conflictClause: "")
@@ -232,24 +243,9 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
         let temporaryURL = databaseURL.appendingPathExtension("backup.tmp")
         try? fileManager.removeItem(at: temporaryURL)
 
-        var destination: OpaquePointer?
-        guard sqlite3_open_v2(temporaryURL.path, &destination, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
-              let destination else {
-            if let destination { sqlite3_close(destination) }
-            NSLog("Thought database backup could not be opened")
-            return
-        }
-        defer { sqlite3_close(destination) }
-
-        guard let backup = sqlite3_backup_init(destination, "main", database, "main") else {
-            NSLog("Thought database backup could not start: %@", String(cString: sqlite3_errmsg(destination)))
-            return
-        }
-        let step = sqlite3_backup_step(backup, -1)
-        let finish = sqlite3_backup_finish(backup)
-        guard step == SQLITE_DONE, finish == SQLITE_OK else {
-            try? fileManager.removeItem(at: temporaryURL)
-            NSLog("Thought database backup failed")
+        do { try Self.createSnapshot(from: database, at: temporaryURL, fileManager: fileManager) }
+        catch {
+            NSLog("Thought database backup failed: %@", String(describing: error))
             return
         }
 
@@ -262,6 +258,28 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
         } catch {
             try? fileManager.removeItem(at: temporaryURL)
             NSLog("Thought database backup rotation failed: %@", String(describing: error))
+        }
+    }
+
+    private static func createSnapshot(from source: OpaquePointer, at destinationURL: URL, fileManager: FileManager) throws {
+        try? fileManager.removeItem(at: destinationURL)
+        try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var destination: OpaquePointer?
+        let openResult = sqlite3_open_v2(destinationURL.path, &destination, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil)
+        guard openResult == SQLITE_OK, let destination else {
+            let message = destination.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
+            if let destination { sqlite3_close(destination) }
+            throw SQLiteThoughtRepositoryError.open(message)
+        }
+        defer { sqlite3_close(destination) }
+        guard let backup = sqlite3_backup_init(destination, "main", source, "main") else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(destination)))
+        }
+        let step = sqlite3_backup_step(backup, -1)
+        let finish = sqlite3_backup_finish(backup)
+        guard step == SQLITE_DONE, finish == SQLITE_OK else {
+            try? fileManager.removeItem(at: destinationURL)
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(destination)))
         }
     }
 
