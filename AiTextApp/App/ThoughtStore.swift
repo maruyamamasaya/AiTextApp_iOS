@@ -10,8 +10,9 @@ final class ThoughtStore: ObservableObject {
 
     private var timeline: ThoughtTimeline?
 
-    init(repository: any ThoughtRepository = FileThoughtRepository()) {
+    init(repository: (any ThoughtRepository)? = nil) {
         do {
+            let repository = try repository ?? SQLiteThoughtRepository()
             let timeline = try ThoughtTimeline(repository: repository)
             self.timeline = timeline
             thoughts = timeline.thoughts
@@ -32,15 +33,18 @@ final class ThoughtStore: ObservableObject {
         draft = ThoughtDraft.limited(value)
     }
 
-    func post() {
-        guard var timeline else { return }
+    @discardableResult
+    func post() -> Bool {
+        guard var timeline else { return false }
         do {
-            guard try timeline.post(draft) != nil else { return }
+            guard try timeline.post(draft) != nil else { return false }
             self.timeline = timeline
             thoughts = timeline.thoughts
             draft = ""
+            return true
         } catch {
             errorMessage = "Thoughtを保存できませんでした。"
+            return false
         }
     }
 

@@ -5,7 +5,7 @@
 ## Application Entry / UI
 
 - `AiTextApp/App/AiTextApp.swift` — SwiftUIエントリーポイント。
-- `AiTextApp/App/TimelineView.swift` — Composer、Timeline、削除確認UI。
+- `AiTextApp/App/TimelineView.swift` — Composer、Lazy Timeline、相対日時、Empty State、削除メニュー／確認UI。
 - `AiTextApp/App/ThoughtStore.swift` — UI stateとCoreの接続。
 - `AiTextApp.xcodeproj` — iPhone app projectとshared scheme。
 
@@ -21,11 +21,12 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 
 ## Persistence
 
-- `ThoughtCore/ThoughtRepository.swift` — repository境界とCodable JSON実装。
+- `ThoughtCore/ThoughtRepository.swift` — CRUD repository境界とテスト用メモリ実装。
+- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema/query/旧JSON migration。
 
-Search: `ThoughtRepository|FileThoughtRepository|applicationSupportDirectory`
+Search: `ThoughtRepository|SQLiteThoughtRepository|applicationSupportDirectory|legacy_json_v1`
 
 ## Tests
 
-- `ThoughtCoreTests/ThoughtTimelineTests.swift` — 投稿境界、Unicode、順序、削除、再読込。
+- `ThoughtCoreTests/ThoughtTimelineTests.swift` — 投稿境界、Unicode、SQL順序、削除、再読込、JSON migration。
 - `Package.swift` — `swift test`用manifest。

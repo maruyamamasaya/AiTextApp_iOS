@@ -1,58 +1,53 @@
 import Foundation
 
 public protocol ThoughtRepository: Sendable {
-    func load() throws -> [Thought]
-    func save(_ thoughts: [Thought]) throws
+    func create(_ thought: Thought) throws
+    func fetchTimeline() throws -> [Thought]
+    func fetchByID(_ id: UUID) throws -> Thought?
+    func fetchAll() throws -> [Thought]
+    @discardableResult func softDelete(id: UUID, at date: Date) throws -> Bool
 }
 
-public final class FileThoughtRepository: ThoughtRepository, @unchecked Sendable {
-    private let fileURL: URL
-    private let fileManager: FileManager
+/// A small repository useful for previews and domain tests. SQLite is the app's durable store.
+public final class MemoryThoughtRepository: ThoughtRepository, @unchecked Sendable {
+    private var records: [Thought]
     private let lock = NSLock()
 
-    public init(fileURL: URL, fileManager: FileManager = .default) {
-        self.fileURL = fileURL
-        self.fileManager = fileManager
+    public init(records: [Thought] = []) { self.records = records }
+
+    public func create(_ thought: Thought) throws {
+        lock.withLock { records.append(thought) }
     }
 
-    public convenience init(fileManager: FileManager = .default) {
-        let baseURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? fileManager.temporaryDirectory
-        self.init(fileURL: baseURL.appendingPathComponent("ThoughtTimeline/thoughts.json"), fileManager: fileManager)
+    public func fetchTimeline() throws -> [Thought] {
+        lock.withLock {
+            records.filter { $0.deletedAt == nil }.sorted(by: Thought.timelineOrder)
+        }
     }
 
-    public func load() throws -> [Thought] {
-        lock.lock()
-        defer { lock.unlock() }
-        guard fileManager.fileExists(atPath: fileURL.path) else { return [] }
-        return try JSONDecoder.thoughtDecoder.decode([Thought].self, from: Data(contentsOf: fileURL))
+    public func fetchByID(_ id: UUID) throws -> Thought? {
+        lock.withLock { records.first { $0.id == id } }
     }
 
-    public func save(_ thoughts: [Thought]) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        try fileManager.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        let data = try JSONEncoder.thoughtEncoder.encode(thoughts)
-        try data.write(to: fileURL, options: .atomic)
+    public func fetchAll() throws -> [Thought] {
+        lock.withLock { records.sorted(by: Thought.timelineOrder) }
     }
-}
 
-private extension JSONEncoder {
-    static var thoughtEncoder: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return encoder
+    public func softDelete(id: UUID, at date: Date) throws -> Bool {
+        lock.withLock {
+            guard let index = records.firstIndex(where: { $0.id == id && $0.deletedAt == nil }) else {
+                return false
+            }
+            records[index].deletedAt = date
+            return true
+        }
     }
 }
 
-private extension JSONDecoder {
-    static var thoughtDecoder: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
+extension Thought {
+    static func timelineOrder(_ lhs: Thought, _ rhs: Thought) -> Bool {
+        lhs.createdAt == rhs.createdAt
+            ? lhs.id.uuidString > rhs.id.uuidString
+            : lhs.createdAt > rhs.createdAt
     }
 }

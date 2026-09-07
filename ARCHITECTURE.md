@@ -9,7 +9,7 @@ SwiftUI TimelineView
   -> ThoughtStore (presentation state)
     -> ThoughtTimeline (validation/order/delete use cases)
       -> ThoughtRepository protocol
-        -> FileThoughtRepository (Application Support JSON)
+        -> SQLiteThoughtRepository (Application Support SQLite)
 ```
 
 ## Technology Stack
@@ -20,19 +20,22 @@ SwiftUI TimelineView
 
 ## Main Components
 
-- `TimelineView`: Composer、Timeline、削除確認、エラー表示。
+- `TimelineView`: placeholder付きComposer、Lazy Timeline、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
 - `ThoughtStore`: draftと画面状態をuse caseへ接続。
 - `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
 - `Thought` / `ThoughtDraft`: 原文モデルと140文字ルール。
-- `ThoughtRepository`: 保存境界。現在の実装はJSONファイル。
+- `ThoughtRepository`: create、Timeline query、ID取得、全件取得、soft deleteの保存境界。
+- `SQLiteThoughtRepository`: schema v1、SQL query、旧JSON importを所有する正本実装。
 
 ## Data Flow
 
-入力はBindingで140 Character以内に制限され、投稿時に前後空白を除去します。use caseが全レコードを保存し、非削除レコードを日時降順でStoreへ返し、SwiftUIが即時再描画します。
+入力はBindingで140 Character以内に制限され、投稿時に前後空白を除去します。use caseはrepositoryへ1件を追加し、SQLiteが非削除レコードを作成日時・IDの降順で返し、SwiftUIが即時再描画します。
+
+Timelineは`ScrollView`と`LazyVStack`で構成します。Composerは投稿成功時だけ入力とfocusを解除し、Timeline scrollではキーボードをinteractiveに閉じます。行は本文を主役にし、日時と削除メニューを補助情報として表示します。
 
 ## Persistence
 
-`Application Support/ThoughtTimeline/thoughts.json`へCodable JSONをatomic writeします。削除は`deletedAt`を設定するsoft deleteです。Thoughtは人間の原文だけを持ち、将来のAI派生情報は別モデルにします。
+`Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。初回に旧`thoughts.json`があればtransaction内で`INSERT OR IGNORE`し、各IDの主要データを照合してmigration markerを記録します。JSONは削除しません。Thoughtは人間の原文だけを持ち、将来のAI派生情報は別テーブルにします。
 
 ## External Services / Authentication
 
