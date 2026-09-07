@@ -5,6 +5,9 @@ public protocol ThoughtRepository: Sendable {
     func fetchTimeline() throws -> [Thought]
     func fetchByID(_ id: UUID) throws -> Thought?
     func fetchAll() throws -> [Thought]
+    /// Returns active Thoughts in ascending creation order. `from` is inclusive
+    /// and `to` is exclusive.
+    func fetchThoughts(from startDate: Date, to endDate: Date) throws -> [Thought]
     @discardableResult func softDelete(id: UUID, at date: Date) throws -> Bool
 }
 
@@ -35,6 +38,18 @@ public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRe
 
     public func fetchAll() throws -> [Thought] {
         lock.withLock { records.sorted(by: Thought.timelineOrder) }
+    }
+
+    public func fetchThoughts(from startDate: Date, to endDate: Date) throws -> [Thought] {
+        lock.withLock {
+            records
+                .filter { $0.deletedAt == nil && $0.createdAt >= startDate && $0.createdAt < endDate }
+                .sorted {
+                    $0.createdAt == $1.createdAt
+                        ? $0.id.uuidString < $1.id.uuidString
+                        : $0.createdAt < $1.createdAt
+                }
+        }
     }
 
     public func softDelete(id: UUID, at date: Date) throws -> Bool {
@@ -68,6 +83,15 @@ public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRe
 
     public func fetchContinuations(of thoughtID: UUID) throws -> [ThoughtRelation] {
         try fetchByTargetThoughtID(thoughtID).filter { $0.type == .continues }
+    }
+
+    public func fetchContinuationCounts(for thoughtIDs: [UUID]) throws -> [UUID: Int] {
+        let ids = Set(thoughtIDs)
+        return lock.withLock {
+            Dictionary(grouping: relations.filter {
+                $0.type == .continues && ids.contains($0.targetThoughtID)
+            }, by: \.targetThoughtID).mapValues(\.count)
+        }
     }
 
     public func createContinuation(
@@ -132,5 +156,30 @@ extension Thought {
         lhs.createdAt == rhs.createdAt
             ? lhs.id.uuidString > rhs.id.uuidString
             : lhs.createdAt > rhs.createdAt
+    }
+}
+
+public enum ThoughtReviewPeriod {
+    public static func today(containing date: Date, calendar: Calendar = .current) -> DateInterval {
+        day(containing: date, calendar: calendar)
+    }
+
+    public static func yesterday(containing date: Date, calendar: Calendar = .current) -> DateInterval {
+        let today = calendar.startOfDay(for: date)
+        let start = calendar.date(byAdding: .day, value: -1, to: today)!
+        return DateInterval(start: start, end: today)
+    }
+
+    public static func pastSevenDays(containing date: Date, calendar: Calendar = .current) -> DateInterval {
+        let today = calendar.startOfDay(for: date)
+        let start = calendar.date(byAdding: .day, value: -6, to: today)!
+        let end = calendar.date(byAdding: .day, value: 1, to: today)!
+        return DateInterval(start: start, end: end)
+    }
+
+    public static func day(containing date: Date, calendar: Calendar = .current) -> DateInterval {
+        let start = calendar.startOfDay(for: date)
+        let end = calendar.date(byAdding: .day, value: 1, to: start)!
+        return DateInterval(start: start, end: end)
     }
 }

@@ -105,6 +105,20 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
         }
     }
 
+    public func fetchThoughts(from startDate: Date, to endDate: Date) throws -> [Thought] {
+        try lock.withLock {
+            try query("""
+                SELECT id, body, created_at, updated_at, deleted_at
+                FROM thoughts
+                WHERE deleted_at IS NULL AND created_at >= ? AND created_at < ?
+                ORDER BY created_at ASC, id ASC
+                """, bind: { statement in
+                    try self.bind(startDate.timeIntervalSince1970, to: 1, in: statement)
+                    try self.bind(endDate.timeIntervalSince1970, to: 2, in: statement)
+                })
+        }
+    }
+
     public func softDelete(id: UUID, at date: Date) throws -> Bool {
         try lock.withLock {
             let statement = try prepare("UPDATE thoughts SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
@@ -141,6 +155,34 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
 
     public func fetchContinuations(of thoughtID: UUID) throws -> [ThoughtRelation] {
         try fetchByTargetThoughtID(thoughtID).filter { $0.type == .continues }
+    }
+
+    public func fetchContinuationCounts(for thoughtIDs: [UUID]) throws -> [UUID: Int] {
+        guard !thoughtIDs.isEmpty else { return [:] }
+        return try lock.withLock {
+            let placeholders = Array(repeating: "?", count: thoughtIDs.count).joined(separator: ",")
+            let statement = try prepare("""
+                SELECT target_thought_id, COUNT(*) FROM thought_relations
+                WHERE relation_type = 'continues' AND target_thought_id IN (\(placeholders))
+                GROUP BY target_thought_id
+                """)
+            defer { sqlite3_finalize(statement) }
+            for (offset, id) in thoughtIDs.enumerated() {
+                try bind(id.uuidString, to: Int32(offset + 1), in: statement)
+            }
+            var output: [UUID: Int] = [:]
+            var result = sqlite3_step(statement)
+            while result == SQLITE_ROW {
+                guard let idText = sqlite3_column_text(statement, 0),
+                      let id = UUID(uuidString: String(cString: idText)) else {
+                    throw SQLiteThoughtRepositoryError.invalidRecord
+                }
+                output[id] = Int(sqlite3_column_int(statement, 1))
+                result = sqlite3_step(statement)
+            }
+            guard result == SQLITE_DONE else { throw lastError() }
+            return output
+        }
     }
 
     public func createContinuation(

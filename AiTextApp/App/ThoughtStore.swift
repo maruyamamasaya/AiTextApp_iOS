@@ -16,6 +16,8 @@ final class ThoughtStore: ObservableObject {
     @Published private(set) var history: [ThoughtHistoryEntry] = []
     @Published private(set) var historyCurrentID: UUID?
     @Published var continuationDraft = ""
+    @Published private(set) var reviewThoughts: [Thought] = []
+    @Published private(set) var reviewContinuationCounts: [UUID: Int] = [:]
 
     private var timeline: ThoughtTimeline?
     private var exporter: ThoughtExporter?
@@ -87,6 +89,20 @@ final class ThoughtStore: ObservableObject {
             historyCurrentID = thoughtID
         } catch {
             errorMessage = "Thought Historyを読み込めませんでした。"
+        }
+    }
+
+    func loadReview(in interval: DateInterval) {
+        guard let thoughtRepository, let relationRepository else {
+            errorMessage = "History Reviewを読み込めませんでした。"
+            return
+        }
+        do {
+            let thoughts = try thoughtRepository.fetchThoughts(from: interval.start, to: interval.end)
+            reviewThoughts = thoughts
+            reviewContinuationCounts = try relationRepository.fetchContinuationCounts(for: thoughts.map(\.id))
+        } catch {
+            errorMessage = "History Reviewを読み込めませんでした。"
         }
     }
 

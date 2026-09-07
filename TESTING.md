@@ -10,11 +10,11 @@ UI非依存のドメイン／永続化／ExportはSwift PackageとしてLinux/ma
 swift test
 ```
 
-入力境界、Unicode、SQLite順序、soft delete、再読込、2世代backup、JSON migration、Markdown／JSON Export、Continuation、分岐Historyを検証します。
+入力境界、Unicode、SQLite順序、soft delete、再読込、2世代backup、JSON migration、Markdown／JSON Export、Continuation、分岐Historyに加え、Reviewの日境界・7日範囲・安定昇順・削除除外・Continuation件数を検証します。
 
 ## UI Test
 
-`AiTextAppUITests`は空投稿不可、投稿後入力クリア、Timeline表示、削除確認に加え、DetailからのContinuation作成、History表示、Timeline反映をidentifierベースで検証します。
+`AiTextAppUITests`は空投稿不可、投稿後入力クリア、Timeline表示、削除確認に加え、DetailからのContinuation作成、History表示、History Reviewの古い順表示・件数・Detail遷移、Timeline反映をidentifierベースで検証します。
 
 ```bash
 xcodebuild -project AiTextApp.xcodeproj -scheme AiTextApp \

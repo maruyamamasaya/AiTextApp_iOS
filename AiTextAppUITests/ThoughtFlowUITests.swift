@@ -67,6 +67,40 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts[child].waitForExistence(timeout: 2), "Continuationが通常Timelineにも表示される")
     }
 
+    func testHistoryReviewShowsTodayOldestFirstAndOpensDetail() {
+        let composer = app.textViews["thoughtComposer"]
+        let post = app.buttons["postButton"]
+        let oldest = "Review first"
+        let newest = "Review second"
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        for body in [oldest, newest] {
+            composer.tap()
+            composer.typeText(body)
+            post.tap()
+        }
+
+        let review = app.buttons["historyReviewButton"]
+        XCTAssertTrue(review.waitForExistence(timeout: 2))
+        review.tap()
+        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
+        XCTAssertEqual(app.staticTexts["historyReviewCount"].label, "2 Thoughts")
+
+        let oldestText = app.staticTexts[oldest]
+        let newestText = app.staticTexts[newest]
+        XCTAssertTrue(oldestText.waitForExistence(timeout: 2))
+        XCTAssertTrue(newestText.waitForExistence(timeout: 2))
+        XCTAssertLessThan(oldestText.frame.minY, newestText.frame.minY, "Reviewは古いThoughtから表示する")
+
+        let reviewThoughts = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "historyReviewThought_")
+        )
+        XCTAssertEqual(reviewThoughts.count, 2)
+        reviewThoughts.element(boundBy: 1).tap()
+        XCTAssertTrue(app.buttons["writeContinuationButton"].waitForExistence(timeout: 2))
+        app.navigationBars["Thought"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
+    }
+
     private func openThoughtMenuAndChooseDelete() {
         let menu = app.buttons.matching(identifier: "thoughtMenu").firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 2))

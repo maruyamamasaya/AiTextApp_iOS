@@ -33,6 +33,16 @@ struct TimelineView: View {
                 ThoughtDetailView(store: store, initialThoughtID: thoughtID)
             }
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    NavigationLink {
+                        HistoryReviewView(store: store)
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                    }
+                    .accessibilityLabel("History Reviewを開く")
+                    .accessibilityHint("日付や期間から過去のThoughtを振り返ります")
+                    .accessibilityIdentifier("historyReviewButton")
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button("Markdownを共有") { store.export(.markdown) }
@@ -156,6 +166,170 @@ struct TimelineView: View {
             get: { store.errorMessage != nil },
             set: { if !$0 { store.errorMessage = nil } }
         )
+    }
+}
+
+private struct HistoryReviewView: View {
+    enum Filter: String, CaseIterable, Identifiable {
+        case today = "今日"
+        case yesterday = "昨日"
+        case sevenDays = "過去7日"
+        case date = "日付指定"
+        var id: Self { self }
+    }
+
+    @ObservedObject var store: ThoughtStore
+    @State private var filter: Filter = .today
+    @State private var selectedDate = Date()
+
+    private var interval: DateInterval {
+        switch filter {
+        case .today: ThoughtReviewPeriod.today(containing: Date())
+        case .yesterday: ThoughtReviewPeriod.yesterday(containing: Date())
+        case .sevenDays: ThoughtReviewPeriod.pastSevenDays(containing: Date())
+        case .date: ThoughtReviewPeriod.day(containing: selectedDate)
+        }
+    }
+
+    private var groupedThoughts: [(date: Date, thoughts: [Thought])] {
+        Dictionary(grouping: store.reviewThoughts) { Calendar.current.startOfDay(for: $0.createdAt) }
+            .map { (date: $0.key, thoughts: $0.value) }
+            .sorted { $0.date < $1.date }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Picker("期間", selection: $filter) {
+                        ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("historyReviewFilter")
+                    Spacer()
+                    Text("\(store.reviewThoughts.count) Thoughts")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("historyReviewCount")
+                }
+
+                if filter == .date {
+                    DatePicker(
+                        "振り返る日",
+                        selection: $selectedDate,
+                        in: ...Date(),
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.compact)
+                    .accessibilityIdentifier("historyReviewDatePicker")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color(uiColor: .systemBackground))
+            .overlay(alignment: .bottom) { Divider() }
+
+            if store.reviewThoughts.isEmpty {
+                VStack(spacing: 6) {
+                    Text(filter == .today ? "今日はまだThoughtがありません" : "この期間にThoughtはありません")
+                        .font(.headline)
+                    Text("別の日付や期間も振り返れます。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+                .multilineTextAlignment(.center)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("historyReviewEmptyState")
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        ForEach(groupedThoughts, id: \.date) { group in
+                            Section {
+                                ForEach(group.thoughts) { thought in
+                                    reviewRow(thought)
+                                    if thought.id != group.thoughts.last?.id {
+                                        Divider().padding(.leading, 58)
+                                    }
+                                }
+                            } header: {
+                                HStack {
+                                    Text(ReviewDateText.heading(for: group.date))
+                                        .font(.headline)
+                                    Spacer()
+                                    Text("\(group.thoughts.count) Thoughts")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 9)
+                                .background(.regularMaterial)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("History Review")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear(perform: reload)
+        .onChange(of: filter) { _ in reload() }
+        .onChange(of: selectedDate) { _ in if filter == .date { reload() } }
+        .onChange(of: store.thoughts.map(\.id)) { _ in reload() }
+    }
+
+    private func reload() {
+        store.loadReview(in: interval)
+    }
+
+    private func reviewRow(_ thought: Thought) -> some View {
+        NavigationLink {
+            ThoughtDetailView(store: store, initialThoughtID: thought.id)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Text(thought.createdAt.formatted(date: .omitted, time: .shortened))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 40, alignment: .leading)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(thought.body)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let count = store.reviewContinuationCounts[thought.id], count > 0 {
+                        Text("↳ 続き \(count)件")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(thought.createdAt.formatted(date: .omitted, time: .shortened))、\(thought.body)" + continuationAccessibilityText(for: thought))
+        .accessibilityHint("ダブルタップしてThought Detailを開きます")
+        .accessibilityIdentifier("historyReviewThought_\(thought.id.uuidString)")
+    }
+
+    private func continuationAccessibilityText(for thought: Thought) -> String {
+        guard let count = store.reviewContinuationCounts[thought.id], count > 0 else { return "" }
+        return "、続き\(count)件"
+    }
+}
+
+private enum ReviewDateText {
+    static func heading(for date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        if calendar.isDate(date, inSameDayAs: now) { return "今日" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(date, inSameDayAs: yesterday) { return "昨日" }
+        if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
+            return date.formatted(.dateTime.month().day())
+        }
+        return date.formatted(.dateTime.year().month().day())
     }
 }
 

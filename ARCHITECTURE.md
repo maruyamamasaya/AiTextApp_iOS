@@ -5,7 +5,7 @@
 ## System Overview
 
 ```text
-SwiftUI TimelineView -> ThoughtDetailView / Continuation Composer
+SwiftUI TimelineView -> HistoryReviewView / ThoughtDetailView / Continuation Composer
   -> ThoughtStore (presentation state)
     -> ThoughtTimeline (validation/order/delete use cases)
       -> ThoughtRepository protocol
@@ -24,12 +24,13 @@ SwiftUI TimelineView -> ThoughtDetailView / Continuation Composer
 
 ## Main Components
 
-- `TimelineView`: placeholder付きComposer、Lazy Timeline、DetailへのNavigation、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
+- `TimelineView`: placeholder付きComposer、Lazy Timeline、Detail／History ReviewへのNavigation、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
+- `HistoryReviewView`: 今日／昨日／過去7日／日付指定の期間選択、日単位group、件数、古い順のThought、Continuation件数を表示。
 - `ThoughtDetailView`: 現在Thought、縦型History、削除済みplaceholder、「続きを書く」Composerを表示。
 - `ThoughtStore`: Timeline／Continuation draftとHistory画面状態を各use caseへ接続。
 - `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
 - `Thought` / `ThoughtDraft`: 原文モデルと140文字ルール。
-- `ThoughtRepository`: create、Timeline query、ID取得、全件取得、soft deleteの保存境界。
+- `ThoughtRepository`: create、Timeline query、日付範囲query、ID取得、全件取得、soft deleteの保存境界。
 - `ThoughtRelation`: Thought本文から独立した文脈モデル。sourceは新しいThought、targetは元のThoughtで、Phase 2-Aは`continues`のみ。
 - `ThoughtRelationRepository`: Relation作成、source／target方向の1ステップ取得境界。
 - `ThoughtContinuationRepository`: 新規Thoughtと`continues` Relationを同一transactionで作成する境界。
@@ -45,6 +46,8 @@ SwiftUI TimelineView -> ThoughtDetailView / Continuation Composer
 Timelineは`ScrollView`と`LazyVStack`で構成します。Composerは投稿成功時だけ入力とfocusを解除し、Timeline scrollではキーボードをinteractiveに閉じます。行は本文を主役にし、日時と削除メニューを補助情報として表示します。
 
 Thought DetailはrootからContinuationをdepth-firstで並べた静かな縦型Historyです。現在位置を控えめな背景とlabelで示し、削除済みThoughtはRelationを切らず「削除されたThought」と表示します。Continuation成功後は新Thoughtを現在位置にし、同じThoughtをTimelineにも即時反映します。
+
+History ReviewはCalendarの日境界から期間を作り、開始inclusive／終了exclusiveのSQLite queryで対象Thoughtだけを取得します。日付、`createdAt`、UUIDの順で古いThoughtから安定表示し、soft delete済みは除外します。Continuation件数は対象IDをまとめた1 queryで取得します。
 
 ## Persistence
 

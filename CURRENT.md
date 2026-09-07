@@ -8,7 +8,7 @@
 
 ## 現在のフェーズ
 
-Phase 2-B（Thought History UI / Continuation Flow）の実装を完了しています。
+Phase 2-C（History Review / 時間軸でThoughtを振り返る）の実装を完了しています。
 
 ## 実装済み
 
@@ -34,6 +34,9 @@ Phase 2-B（Thought History UI / Continuation Flow）の実装を完了してい
 - 既存140文字ルールとatomic transactionを使う「続きを書く」Composer。
 - 分岐Continuationの安定順表示と、削除済みThoughtのHistory placeholder。
 - Timeline／History／Continuation操作のVoiceOver labelとaccessibility identifier。
+- 今日／昨日／過去7日／日付指定で開けるHistory Reviewと、日ごとの件数表示。
+- `createdAt`昇順の安定したReview表示、Thought Detailへの遷移、Continuation件数の軽量表示。
+- SQLiteの日付範囲query（開始inclusive／終了exclusive）とRelation件数の一括query。
 
 ## 未実装
 
@@ -44,11 +47,11 @@ Phase 2-B（Thought History UI / Continuation Flow）の実装を完了してい
 
 - iPhone SE (3rd generation, iOS 17.4)のbuildとXCUITestは確認済みですが、Light／Dark Modeの手動目視確認は未実施です。
 - 破損した移行元JSONは自動復旧せず、SQLiteへの移行を中止してエラー表示し、原本を保持します。
-- XCUITestは投稿・削除とContinuation主要フローをiPhone SE Simulatorで確認済みです。
+- XCUITestは投稿・削除、Continuation、History Review主要フローをiPhone SE Simulatorで確認済みです。
 - App iconの実画像は未設定です。
 
 ## 次に行うこと
 
-1. iPhone SEと最新標準iPhoneでLight／Dark Mode、140文字、分岐Historyを手動表示確認する。
+1. iPhone SEと最新標準iPhoneでLight／Dark Mode、Dynamic Type、History Review、分岐Historyを手動表示確認する。
 2. 実機でVoiceOverとShare Sheet（Files、AirDrop）を確認する。
 3. 数日間の実利用後にHistory／バックアップ／Export運用を再評価する。

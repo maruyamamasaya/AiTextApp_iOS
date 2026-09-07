@@ -5,8 +5,8 @@
 ## Application Entry / UI
 
 - `AiTextApp/App/AiTextApp.swift` — SwiftUIエントリーポイント。
-- `AiTextApp/App/TimelineView.swift` — Composer、Lazy Timeline、Thought Detail、History、Continuation Composer、削除UI。
-- `AiTextApp/App/ThoughtStore.swift` — Timeline／History／Continuation UI stateとCoreの接続。
+- `AiTextApp/App/TimelineView.swift` — Composer、Lazy Timeline、History Review、Thought Detail、History、Continuation Composer、削除UI。
+- `AiTextApp/App/ThoughtStore.swift` — Timeline／Review／History／Continuation UI stateとCoreの接続。
 - `AiTextApp/App/ShareSheet.swift` — Exportファイルを標準Share Sheetへ渡すbridge。
 - `AiTextApp.xcodeproj` — iPhone app projectとshared scheme。
 
@@ -23,14 +23,14 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 
 ## Persistence
 
-- `ThoughtCore/ThoughtRepository.swift` — CRUD repository境界とテスト用メモリ実装。
-- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v2、Thought／Relation query、Continuation transaction、旧JSON migration／2世代backup。
+- `ThoughtCore/ThoughtRepository.swift` — CRUD・日付範囲repository境界、Review期間計算、テスト用メモリ実装。
+- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v2、Thought日付範囲／Relation件数query、Continuation transaction、旧JSON migration／2世代backup。
 - `ThoughtCore/ThoughtExporter.swift` — Repository経由のMarkdown／JSON生成。
 
 Search: `ThoughtRepository|ThoughtRelationRepository|createContinuation|SQLiteThoughtRepository|legacy_json_v1`
 
 ## Tests
 
-- `ThoughtCoreTests/ThoughtTimelineTests.swift` — 投稿境界、Unicode、SQL順序、削除、再読込、migration、Export。
-- `AiTextAppUITests/ThoughtFlowUITests.swift` — 投稿、削除、Detail、Continuation、History、Timeline反映の主要UI flow。
+- `ThoughtCoreTests/ThoughtTimelineTests.swift` — 投稿境界、Unicode、SQL順序、削除、再読込、migration、Export、Review期間・順序・件数。
+- `AiTextAppUITests/ThoughtFlowUITests.swift` — 投稿、削除、Detail、Continuation、History、Review順序・Detail遷移、Timeline反映の主要UI flow。
 - `Package.swift` — `swift test`用manifest。

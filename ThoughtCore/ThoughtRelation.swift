@@ -34,6 +34,7 @@ public protocol ThoughtRelationRepository: Sendable {
     func fetchByTargetThoughtID(_ id: UUID) throws -> [ThoughtRelation]
     func fetchContinuationSource(for thoughtID: UUID) throws -> ThoughtRelation?
     func fetchContinuations(of thoughtID: UUID) throws -> [ThoughtRelation]
+    func fetchContinuationCounts(for thoughtIDs: [UUID]) throws -> [UUID: Int]
 }
 
 public protocol ThoughtContinuationRepository: Sendable {

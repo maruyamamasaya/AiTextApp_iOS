@@ -259,6 +259,77 @@ struct ThoughtHistoryTests {
     }
 }
 
+@Suite("Thought history review", .serialized)
+struct ThoughtHistoryReviewTests {
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+
+    @Test func fetchesTodayAndYesterdayUsingInclusiveExclusiveBoundaries() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let today = ThoughtReviewPeriod.today(containing: now, calendar: calendar)
+        let yesterday = ThoughtReviewPeriod.yesterday(containing: now, calendar: calendar)
+        let atYesterdayStart = Thought(body: "yesterday start", createdAt: yesterday.start)
+        let atTodayStart = Thought(body: "today start", createdAt: today.start)
+        let beforeTodayEnd = Thought(body: "today end minus", createdAt: today.end.addingTimeInterval(-0.001))
+        let atTodayEnd = Thought(body: "excluded end", createdAt: today.end)
+        for thought in [atYesterdayStart, atTodayStart, beforeTodayEnd, atTodayEnd] {
+            try repository.create(thought)
+        }
+
+        #expect(try repository.fetchThoughts(from: today.start, to: today.end).map(\.body) == ["today start", "today end minus"])
+        #expect(try repository.fetchThoughts(from: yesterday.start, to: yesterday.end).map(\.body) == ["yesterday start"])
+    }
+
+    @Test func fetchesPastSevenDaysWithoutLoadingOlderThoughts() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let period = ThoughtReviewPeriod.pastSevenDays(containing: now, calendar: calendar)
+        try repository.create(Thought(body: "included start", createdAt: period.start))
+        try repository.create(Thought(body: "too old", createdAt: period.start.addingTimeInterval(-1)))
+        try repository.create(Thought(body: "included latest", createdAt: period.end.addingTimeInterval(-1)))
+
+        #expect(try repository.fetchThoughts(from: period.start, to: period.end).map(\.body) == ["included start", "included latest"])
+    }
+
+    @Test func reviewIsStableAscendingExcludesDeletedAndLeavesTimelineDescending() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let date = Date(timeIntervalSince1970: 500)
+        let low = Thought(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, body: "low", createdAt: date)
+        let high = Thought(id: UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!, body: "high", createdAt: date)
+        let deleted = Thought(body: "deleted", createdAt: date.addingTimeInterval(1))
+        try repository.create(high)
+        try repository.create(low)
+        try repository.create(deleted)
+        #expect(try repository.softDelete(id: deleted.id, at: date.addingTimeInterval(2)))
+
+        #expect(try repository.fetchThoughts(from: date, to: date.addingTimeInterval(10)).map(\.body) == ["low", "high"])
+        #expect(try repository.fetchTimeline().map(\.body) == ["high", "low"])
+    }
+
+    @Test func continuationCountsAreFetchedForReviewThoughtsInOneCall() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let parent = Thought(body: "parent")
+        try repository.create(parent)
+        _ = try repository.createContinuation(body: "one", parentThoughtID: parent.id)
+        _ = try repository.createContinuation(body: "two", parentThoughtID: parent.id)
+
+        #expect(try repository.fetchContinuationCounts(for: [parent.id]) == [parent.id: 2])
+        #expect(try repository.fetchContinuationCounts(for: []).isEmpty)
+    }
+}
+
 @Suite("Thought export")
 struct ThoughtExporterTests {
     private let utc = TimeZone(secondsFromGMT: 0)!
