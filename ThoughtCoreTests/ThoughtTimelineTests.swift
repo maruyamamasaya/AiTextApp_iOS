@@ -28,6 +28,13 @@ struct ThoughtTimelineTests {
         #expect(try timeline.post("  日本語 English 123 🚀\n")?.body == "日本語 English 123 🚀")
     }
 
+    @Test func postingAddsNewThoughtAtTimelineTop() throws {
+        var timeline = try ThoughtTimeline(repository: MemoryThoughtRepository())
+        try timeline.post("first", now: Date(timeIntervalSince1970: 100))
+        try timeline.post("newest", now: Date(timeIntervalSince1970: 200))
+        #expect(timeline.thoughts.map(\.body) == ["newest", "first"])
+    }
+
     @Test func sqliteCreatesReadsAndUsesStableQueryOrder() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }

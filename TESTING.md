@@ -2,7 +2,7 @@
 
 ## Test Strategy
 
-UI非依存のドメイン／永続化はSwift PackageとしてLinux/macOS共通で検証します。SwiftUI appはmacOS/XcodeのSimulatorでbuild・手動確認します。
+UI非依存のドメイン／永続化はSwift PackageとしてLinux/macOS共通で検証します。SwiftUI appはmacOS/XcodeのSimulatorでbuild・手動確認します。XCUITest targetは未導入です。
 
 ## Unit / Persistence Test
 
@@ -14,7 +14,7 @@ swift test
 
 ## UI Test
 
-自動UI testは未導入です。投稿後の入力クリア、削除確認のキャンセル／確定、Dynamic Type、dark mode、小型iPhoneはSimulatorで手動確認が必要です。
+自動UI testは未導入です。投稿後の入力クリア、キーボードdismiss、削除メニューと確認のキャンセル／確定、Dynamic Type、Light/Dark mode、小型iPhone、VoiceOver labelはSimulatorで手動確認が必要です。
 
 ## Build
 

@@ -5,7 +5,7 @@
 ## Application Entry / UI
 
 - `AiTextApp/App/AiTextApp.swift` — SwiftUIエントリーポイント。
-- `AiTextApp/App/TimelineView.swift` — Composer、Timeline、削除確認UI。
+- `AiTextApp/App/TimelineView.swift` — Composer、Lazy Timeline、相対日時、Empty State、削除メニュー／確認UI。
 - `AiTextApp/App/ThoughtStore.swift` — UI stateとCoreの接続。
 - `AiTextApp.xcodeproj` — iPhone app projectとshared scheme。
 

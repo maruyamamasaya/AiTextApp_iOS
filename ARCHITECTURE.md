@@ -20,7 +20,7 @@ SwiftUI TimelineView
 
 ## Main Components
 
-- `TimelineView`: Composer、Timeline、削除確認、エラー表示。
+- `TimelineView`: placeholder付きComposer、Lazy Timeline、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
 - `ThoughtStore`: draftと画面状態をuse caseへ接続。
 - `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
 - `Thought` / `ThoughtDraft`: 原文モデルと140文字ルール。
@@ -30,6 +30,8 @@ SwiftUI TimelineView
 ## Data Flow
 
 入力はBindingで140 Character以内に制限され、投稿時に前後空白を除去します。use caseはrepositoryへ1件を追加し、SQLiteが非削除レコードを作成日時・IDの降順で返し、SwiftUIが即時再描画します。
+
+Timelineは`ScrollView`と`LazyVStack`で構成します。Composerは投稿成功時だけ入力とfocusを解除し、Timeline scrollではキーボードをinteractiveに閉じます。行は本文を主役にし、日時と削除メニューを補助情報として表示します。
 
 ## Persistence
 
