@@ -18,7 +18,7 @@ Phase 2-C（History Review / 時間軸でThoughtを振り返る）の実装を�
 - Application Support配下のSQLiteを正本にしたローカル保存、query順序、ソフトデリート。
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
 - `PRAGMA user_version`によるschema version管理（現在v2）。
-- placeholder、控えめな文字数表示、明確な投稿状態を備えたComposer。
+- 画面下部に固定し、入力中だけ枠内右端に投稿ボタンを表示するコンパクトなComposer。
 - Lazy Timeline、自然な相対日時、メニュー内削除、Empty State。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。
 - iOS 16以降用SwiftUIアプリ、Xcode project/shared scheme。

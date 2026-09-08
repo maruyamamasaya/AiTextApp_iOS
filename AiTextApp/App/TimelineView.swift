@@ -8,8 +8,6 @@ struct TimelineView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    composer
-
                     if store.thoughts.isEmpty {
                         emptyState
                     } else {
@@ -26,6 +24,9 @@ struct TimelineView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                composer
+            }
             .animation(.easeOut(duration: 0.2), value: store.thoughts.map(\.id))
             .navigationTitle("Thoughts")
             .navigationBarTitleDisplayMode(.inline)
@@ -92,16 +93,12 @@ struct TimelineView: View {
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("今なに考えてる？")
-                .font(.headline)
-
-            ZStack(alignment: .topLeading) {
+        HStack(alignment: .center, spacing: 8) {
+            ZStack(alignment: .leading) {
                 if store.draft.isEmpty {
-                    Text("Thoughtを入力")
+                    Text("今なに考えてる？")
                         .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 16)
+                        .padding(.leading, 6)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -109,43 +106,47 @@ struct TimelineView: View {
                 TextEditor(text: Binding(get: { store.draft }, set: store.updateDraft))
                     .focused($composerIsFocused)
                     .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 1)
+                    .padding(.vertical, 4)
+                    .frame(height: 44)
                     .accessibilityLabel("Thoughtを入力")
                     .accessibilityHint("140文字以内で入力します")
                     .accessibilityIdentifier("thoughtComposer")
             }
-            .frame(minHeight: 104, maxHeight: 152)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .contentShape(Rectangle())
-            .onTapGesture { composerIsFocused = true }
 
-            HStack(alignment: .center, spacing: 12) {
+            if !store.draft.isEmpty {
                 characterCount
-                Spacer(minLength: 8)
+                    .transition(.opacity)
+            }
+
+            if store.canPost {
                 Button("投稿") {
                     if store.post() { composerIsFocused = false }
                 }
-                .font(.body.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
-                .controlSize(.regular)
-                .disabled(!store.canPost)
+                .controlSize(.small)
+                .transition(.scale(scale: 0.85).combined(with: .opacity))
                 .accessibilityLabel("Thoughtを投稿")
-                .accessibilityHint(store.canPost ? "入力したThoughtを投稿します" : "文字を入力すると投稿できます")
+                .accessibilityHint("入力したThoughtを投稿します")
                 .accessibilityIdentifier("postButton")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .animation(.easeOut(duration: 0.16), value: store.canPost)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(Color(uiColor: .systemBackground))
-        .overlay(alignment: .bottom) { Divider() }
+        .overlay(alignment: .top) { Divider() }
     }
 
     private var characterCount: some View {
         Text("\(store.draft.count) / \(ThoughtDraft.characterLimit)")
-            .font(.caption.monospacedDigit())
+            .font(.caption2.monospacedDigit())
             .foregroundStyle(store.draft.count >= 130 ? Color.orange : Color.secondary)
             .accessibilityLabel("文字数 \(store.draft.count)、上限 \(ThoughtDraft.characterLimit)")
     }

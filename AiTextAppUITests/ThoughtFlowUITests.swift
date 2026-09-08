@@ -16,13 +16,15 @@ final class ThoughtFlowUITests: XCTestCase {
         let body = "UIテスト Thought 🚀"
 
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
-        XCTAssertFalse(post.isEnabled, "空文字では投稿できない")
+        XCTAssertFalse(post.exists, "空文字では投稿ボタンを表示しない")
         composer.tap()
         composer.typeText(body)
+        XCTAssertTrue(post.waitForExistence(timeout: 2))
         XCTAssertTrue(post.isEnabled)
         post.tap()
 
         XCTAssertEqual(composer.value as? String, "", "投稿後にComposerが空になる")
+        XCTAssertFalse(post.exists, "投稿後は投稿ボタンを再び隠す")
         let postedThought = app.staticTexts[body]
         XCTAssertTrue(postedThought.waitForExistence(timeout: 2), "投稿がTimeline先頭に表示される")
 
