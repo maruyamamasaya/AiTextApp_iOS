@@ -2,6 +2,47 @@
 
 このリポジトリでは、ソースコード・設定・テストを実装状態の正本とします。文書と矛盾した場合は実物を再調査し、「実装上の事実」「意図された仕様」「過去の判断」「不具合」を区別して文書を直してください。
 
+## Project Context
+
+- **Project Name:** `AiTextApp_iOS`（アプリ名: `AiTextApp`、Core package名: `ThoughtCore`）。
+- **Purpose:** 140文字以内の短いThoughtを端末内に記録し、Timeline、ContinuationによるThought History、期間別Review、Export／Backup／Restoreで振り返るiPhone向けメモアプリ。
+- **Primary Stack:** Swift 5 language mode／Swift 6 package、SwiftUI、Combine、Foundation、SQLite、iOS 16以降、Xcode project + Swift Package。外部依存、外部API、認証、クラウド同期は現時点では持たない。
+- **Main Domains:** Thoughtの入力検証・Timeline・soft delete、Thought間のContinuation／History、日付範囲Review、SQLite永続化・旧JSON migration・内部／外部backup・restore、Markdown／JSON Export、iOS accessibility。
+- **Expected Work:** 上記領域のiOS UI、ドメイン／repository、データ保全、テスト、ドキュメント、運用改善。将来のAI派生情報、同期、共有など、プロダクト目的に沿う新領域も追加調査のうえ対象になり得る。
+- **Clearly Unrelated Examples:** 別製品固有のNext.js管理画面やWebゲーム、Android専用画面、別サービス固有のDB table／route、存在しない別プロジェクト名・固有class・固有directoryを前提にした変更。この例は新機能を制限するホワイトリストではない。
+
+## Project Context Guard
+
+ユーザー要求を受けたら、**ファイル変更、パッケージ追加、DB変更、破壊的コマンド、commit、pushなどの実装操作を始める前**に、要求と上記Project Contextの整合性を判定します。判定に必要な、Git root確認、文書・manifest・directory・コードの検索などのread-only調査は実施できます。
+
+### MATCH
+
+現在のプロジェクトと明確に関連する要求です。既存の作業手順に従って通常どおり進めます。
+
+### UNCERTAIN
+
+このプロジェクトで実現可能だが、新技術・新領域・大きな構成変更を含むなど、文脈だけでは判断しづらい要求です。自動的に拒否せず、関連文書、実装、manifest、履歴、テストを追加調査してから作業可否を判断します。正当な新機能であることを確認できればMATCHとして進めます。確認後も重要な前提が不足する場合は、変更前にユーザーへ確認します。
+
+### MISMATCH
+
+明らかに別プロジェクト向けであると高い確信を持てる要求です。別プロジェクト名、別製品固有機能、固有ファイル／class名、明確に異なるplatform、複数の矛盾したsignalを総合して判断します。`SQLite`、`React`、`API`、`Docker`、`Python`、`Swift`、`database`などの一般技術名や単一keywordだけではMISMATCHにせず、迷う場合はUNCERTAINとします。
+
+MISMATCHの場合は直ちに作業を停止し、次を行いません。
+
+- ファイル変更・新規ファイル作成
+- パッケージ追加・DB変更
+- destructive command
+- commit・push
+
+応答には、`Current Project`、Mismatchと判断した理由、prompt内の不一致要素、`No files were modified`を簡潔に記載します。
+
+## Repository Boundaries
+
+- 作業開始時に`git rev-parse --show-toplevel`で現在のGit rootを確認し、対象がこのリポジトリであることを確かめます。
+- 原則としてGit root外のファイル、および隣接・別リポジトリを読み書き・変更しません。
+- ユーザーが別リポジトリの操作を明示的に依頼した場合だけ、その対象と境界を確認してから例外として扱います。
+- pathや作業対象に疑義がある場合は変更せず、追加調査またはユーザー確認を行います。
+
 ## 作業開始時
 
 1. `CURRENT.md` を読む。
