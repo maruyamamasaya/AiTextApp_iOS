@@ -36,6 +36,9 @@ public protocol ThoughtTagRepository: Sendable {
     func fetchTags(for thoughtID: UUID) throws -> [ThoughtTag]
     func fetchAllTags() throws -> [ThoughtTag]
     func fetchThoughts(taggedWith tagID: UUID) throws -> [Thought]
+    /// Returns active Thoughts in the date range carrying one tag, ordered for Review.
+    /// `from` is inclusive and `to` is exclusive.
+    func fetchThoughts(from startDate: Date, to endDate: Date, taggedWith tagID: UUID) throws -> [Thought]
 }
 
 public extension ThoughtTagRepository {

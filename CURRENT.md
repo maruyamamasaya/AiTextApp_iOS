@@ -8,7 +8,7 @@
 
 ## 現在のフェーズ
 
-Phase 3-B（Thoughtタグ v1）を実装済みです。Phase 3-Aと同様、Windows環境のためSwift／Xcode検証は未実行で、Macでの確認後に完了判定します。
+Phase 3-C（History Review強化 v1）を実装済みです。Phase 3-A／3-Bと同様、Windows環境のためSwift／Xcode検証は未実行で、Macでの確認後に完了判定します。
 
 ## 実装済み
 
@@ -57,6 +57,10 @@ Phase 3-B（Thoughtタグ v1）を実装済みです。Phase 3-Aと同様、Wind
 - Thought原文と分離した`ThoughtTag`／`ThoughtTagRepository`、SQLite schema v4の`tags`／`thought_tags`。正規化名と複合主キーでタグ名・付与の重複を防止。
 - Thought Detailのタグ確認・編集、既存タグ付与、新規タグ作成、個別解除。Timeline／本文検索結果の最大2件＋省略表示、タグ一覧、タグ別Thought一覧、既存Detailへの遷移。
 - タグ追加／解除transaction、deleted Thoughtを除外するタグ一覧・タグ別query、v1〜v3から既存Thoughtを保持するmigration経路。
+- History Reviewへ「今週」「過去30日」「今月」を追加。端末Calendarの週開始・timezoneを尊重し、すべて開始inclusive／終了exclusiveで計算。
+- History Reviewの単一タグ絞り込み。期間＋タグをSQLite JOIN queryで絞り、期間、表示件数、Thoughtが存在した日数、タグ状態を概要表示。
+- Reviewの日別絶対日付・日別件数と、既存どおり古い日／古いThoughtから読む安定順。タグ切替時の即時再読込とDetail／Continuation件数を維持。
+- タグ絞り込みはReview表示だけへ適用し、AI要約・履歴・削除・preview・Exportは従来どおり期間全体を正本とする。タグ選択中は対象差をUIに明示。
 
 ## 未実装
 
@@ -87,12 +91,13 @@ Phase 3-B（Thoughtタグ v1）を実装済みです。Phase 3-Aと同様、Wind
 - App iconの実画像は未設定です。
 - Phase 3-AのSwift Testing、Xcode build、XCUITest、Light／Dark Mode、Dynamic Type、VoiceOverの実機／Simulator確認はWindows環境のため未実行です。
 - Phase 3-Bのschema v4 migration、タグunit test、XCUITest、Light／Dark Mode、Dynamic Type、VoiceOverの実機／Simulator確認はWindows環境のため未実行です。
+- Phase 3-Cの期間境界、期間＋タグquery、Review概要・日別表示、AI対象差、XCUITest、各アクセシビリティ表示はWindows環境のため未実行です。
 
 ## 次に行うこと
 
 ### Xcode環境が利用可能になったら行う検証
 
-1. macOSで`swift test`を実行し、schema v4 migration、本文検索、タグ、AI要約prompt、Mock生成、再要約保存を確認する。
+1. macOSで`swift test`を実行し、schema v4 migration、本文検索、タグ、Review期間・期間＋タグ、AI要約対象維持、Mock生成、再要約保存を確認する。
 2. iPhone SEと最新標準iPhone Simulatorでbuild／XCUITestを実行する。
 3. AI要約プレビューの期間・件数・文字数・Thought順序、キャンセル、確定後のMock表示、loading、通信失敗、再試行、Thoughtなし、再要約を手動確認する。
 4. プレビュー表示後に対象Thoughtが変わった場合、AIを呼ばず対象再読込エラーになることを確認する。
@@ -110,11 +115,11 @@ Phase 3-B（Thoughtタグ v1）を実装済みです。Phase 3-Aと同様、Wind
 
 1. Phase 3-A: Thought検索 v1 — コード実装済み／Mac確認待ち。
 2. Phase 3-B: Thoughtタグ v1 — コード実装済み／Mac確認待ち。
-3. Phase 3-C: History Review強化 — 次候補。期間表示にタグという新しい分類軸をどう活用するかを先に検証する。
-4. Phase 3-E: Quick Capture / Widget — 検索と整理の受け皿ができたため、入力頻度を高める導線を次点とする。
-5. Phase 3-D: ローカル分析 — 十分なThought／タグ利用データが蓄積してから有用な集計を設計する。
+3. Phase 3-C: History Review強化 v1 — コード実装済み／Mac確認待ち。
+4. Phase 3-E: Quick Capture / Widget — 次候補。検索・タグ・期間Reviewの受け皿が揃ったため、実際の入力頻度を増やす価値を優先する。Widget target／App Groupなど構成影響は実装前に調査する。
+5. Phase 3-D: ローカル分析 — Reviewで不足する指標と十分な利用データが確認できてから設計する。
 
-Phase 3-A／3-BのMac検証と実利用後に、本文検索とタグ絞り込みの役割分担、タグ編集の利用感、SQLite join性能を再確認する。現時点ではタグ構造をReviewへ活かせるPhase 3-Cを次とし、データ蓄積を促す3-E、蓄積後に意味が出る3-Dの順へ再評価した。
+Phase 3-A〜3-CのMac検証と実利用後に、検索・タグ・期間Reviewの利用感とSQLite join性能を再確認する。現時点では分析に十分な蓄積量は未確認であり、入力頻度を増やす価値が先にあるため3-Eを次とする。ただしWidgetは新target、データ共有、起動経路へ影響するため、実装前にQuick Capture単体とWidget追加の境界を調査する。3-Dはその利用データとReviewで不足した情報を根拠に後続で仕様化する。
 
 #### AIロードマップ
 

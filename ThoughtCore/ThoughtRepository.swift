@@ -117,6 +117,20 @@ public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRe
         }
     }
 
+    public func fetchThoughts(from startDate: Date, to endDate: Date, taggedWith tagID: UUID) throws -> [Thought] {
+        lock.withLock {
+            records.filter { thought in
+                thought.deletedAt == nil &&
+                thought.createdAt >= startDate && thought.createdAt < endDate &&
+                thoughtTagIDs[thought.id]?.contains(tagID) == true
+            }.sorted {
+                $0.createdAt == $1.createdAt
+                    ? $0.id.uuidString < $1.id.uuidString
+                    : $0.createdAt < $1.createdAt
+            }
+        }
+    }
+
     public func search(query: String) throws -> [Thought] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return [] }
@@ -266,6 +280,25 @@ public enum ThoughtReviewPeriod {
         let today = calendar.startOfDay(for: date)
         let start = calendar.date(byAdding: .day, value: -6, to: today)!
         let end = calendar.date(byAdding: .day, value: 1, to: today)!
+        return DateInterval(start: start, end: end)
+    }
+
+    public static func currentWeek(containing date: Date, calendar: Calendar = .current) -> DateInterval {
+        let start = calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)
+        let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date))!
+        return DateInterval(start: start, end: end)
+    }
+
+    public static func pastThirtyDays(containing date: Date, calendar: Calendar = .current) -> DateInterval {
+        let today = calendar.startOfDay(for: date)
+        let start = calendar.date(byAdding: .day, value: -29, to: today)!
+        let end = calendar.date(byAdding: .day, value: 1, to: today)!
+        return DateInterval(start: start, end: end)
+    }
+
+    public static func currentMonth(containing date: Date, calendar: Calendar = .current) -> DateInterval {
+        let start = calendar.dateInterval(of: .month, for: date)?.start ?? calendar.startOfDay(for: date)
+        let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date))!
         return DateInterval(start: start, end: end)
     }
 

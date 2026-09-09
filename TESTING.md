@@ -10,11 +10,11 @@ UI非依存のドメイン／永続化／ExportはSwift PackageとしてLinux/ma
 swift test
 ```
 
-入力境界、Unicode、SQLite順序、soft delete、再読込、本文部分一致検索（複数件、新しい順、0件、deleted除外、別Thought除外、前後空白、`%`、`_`、日本語、read-only）、タグ（新規／既存付与、複数、重複、解除、原文不変、trim、空拒否、日本語／Unicode、大文字小文字、タグ別取得、deleted／別タグ除外、Memory契約、v3→v4 migration）、内部2世代backup、JSON migration、Markdown／JSON Export、Continuation、分岐History、Review、AI要約promptの送信項目、各Review期間のpreview対象、件数／文字数、準備時client未呼出、確定request一致、変更後preview拒否、Mock生成、Firebase transportへの確定prompt／model変換、provider／model応答、空応答、未設定／network／rate limit／API／App Check分類、再要約と原文分離保存、要約ID単位削除、AI要約Markdown／JSON同値性と秘密情報除外、削除済み要約Export拒否、Thought原文・別期間・他要約の保持に加え、外部backup／Restoreを検証します。Firebase SDKと実通信はUnit Testに含めません。
+入力境界、Unicode、SQLite順序、soft delete、再読込、本文検索、タグ、v4 migration、Review全期間（今日／昨日／過去7日／今週／過去30日／今月／指定日、月跨ぎ、年跨ぎ、timezone）、期間＋単一タグ（タグなし全件、同タグ複数、別タグ・deleted・期間外除外、昇順）、AI要約がタグfilter後も期間全体を対象にする回帰、内部2世代backup、JSON migration、Export、Continuation、分岐History、AI要約prompt／preview／保存／削除／Export、外部backup／Restoreを検証します。Firebase SDKと実通信はUnit Testに含めません。
 
 ## UI Test
 
-`AiTextAppUITests`は空投稿不可、投稿後入力クリア、Timeline表示、削除確認、本文検索、Thought Detail→タグ追加→Timeline表示→タグ別一覧→Detail遷移に加え、DetailからのContinuation作成、History表示、History Reviewの古い順表示・件数・Detail遷移、Timeline反映、AI要約preview表示・キャンセル・確定後保存、Mock AI再要約後の要約履歴件数・最新表示・個別Export形式Menu・削除キャンセル・最新切替・全件削除後の空状態をidentifierベースで検証します。
+`AiTextAppUITests`は空投稿不可、投稿後入力クリア、Timeline、削除、本文検索、タグ基本flow、History Reviewの全体／日別件数・活動日数・古い順・Detail遷移、「今月→タグ選択→対象Thought→Detail」、Continuation、AI要約preview／保存／履歴／削除／Exportをidentifierベースで検証します。
 
 ```bash
 xcodebuild -project AiTextApp.xcodeproj -scheme AiTextApp \

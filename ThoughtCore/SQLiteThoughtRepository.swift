@@ -251,6 +251,24 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
         }
     }
 
+    public func fetchThoughts(from startDate: Date, to endDate: Date, taggedWith tagID: UUID) throws -> [Thought] {
+        try lock.withLock {
+            try query("""
+                SELECT thoughts.id, thoughts.body, thoughts.created_at, thoughts.updated_at, thoughts.deleted_at
+                FROM thoughts
+                JOIN thought_tags ON thought_tags.thought_id = thoughts.id
+                WHERE thought_tags.tag_id = ?
+                  AND thoughts.deleted_at IS NULL
+                  AND thoughts.created_at >= ? AND thoughts.created_at < ?
+                ORDER BY thoughts.created_at ASC, thoughts.id ASC
+                """, bind: { statement in
+                    try self.bind(tagID.uuidString, to: 1, in: statement)
+                    try self.bind(startDate.timeIntervalSince1970, to: 2, in: statement)
+                    try self.bind(endDate.timeIntervalSince1970, to: 3, in: statement)
+                })
+        }
+    }
+
     public func save(_ summary: ReviewSummary) throws {
         try lock.withLock {
             do {

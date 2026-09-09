@@ -28,7 +28,7 @@ SwiftUI TimelineView -> HistoryReviewView / ThoughtDetailView / Continuation Com
 ## Main Components
 
 - `TimelineView`: placeholder付きComposer、Lazy Timeline、Detail／Thought検索／History ReviewへのNavigation、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
-- `HistoryReviewView`: 今日／昨日／過去7日／日付指定の期間選択、日単位group、件数、古い順のThought、Continuation件数、最新AI要約と要約履歴への入口を表示。
+- `HistoryReviewView`: 今日／昨日／過去7日／今週／過去30日／今月／日付指定、単一タグ絞り込み、期間・表示件数・活動日数の概要、日単位group、古い順のThought、Continuation件数、最新AI要約と要約履歴への入口を表示。
 - `ReviewSummaryHistoryView`: 選択期間に保存された要約を新しい順に並べ、最新表示、生成日時、対象件数、provider／model、確認付き個別削除を提供。
 - `ReviewSummaryExporter`: 要約IDをRepositoryで再確認し、単一の保存済み要約をMarkdownまたはJSON schema v1へ変換して一時ファイルへatomic write。
 - `GenerateReviewSummary`: 選択期間のThought本文だけからpromptを作り、抽象化されたclientを呼び、原文と別の要約repositoryへ保存。
@@ -61,6 +61,10 @@ Timelineは`ScrollView`と`LazyVStack`で構成します。Composerは画面下�
 Thought DetailはrootからContinuationをdepth-firstで並べた静かな縦型Historyです。現在位置を控えめな背景とlabelで示し、削除済みThoughtはRelationを切らず「削除されたThought」と表示します。Continuation成功後は新Thoughtを現在位置にし、同じThoughtをTimelineにも即時反映します。
 
 History ReviewはCalendarの日境界から期間を作り、開始inclusive／終了exclusiveのSQLite queryで対象Thoughtだけを取得します。日付、`createdAt`、UUIDの順で古いThoughtから安定表示し、soft delete済みは除外します。Continuation件数は対象IDをまとめた1 queryで取得します。
+
+過去7日／過去30日は今日を含む連続した7／30暦日、今週は端末Calendarの週開始日から今日末まで、今月は月初から今日末までです。単一タグ選択時は`thoughts`と`thought_tags`をSQLiteでJOINし、同じ期間境界と昇順規則で絞ります。UIで期間全件を取得してからタグfilterはしません。概要の活動日数と日別groupは、絞り込み済みの少量なReview結果を端末Calendarの日境界でまとめます。
+
+AI要約の保存・履歴・previewは期間境界だけを正本としているため、タグ絞り込みは適用しません。Storeは期間全件数と表示用タグ絞り込み結果を分離し、AI準備処理は従来の`ThoughtRepository.fetchThoughts(from:to:)`を使います。タグ選択中はこの対象差をReview上部へ表示します。
 
 Thought検索はtrim後の空文字をUI stateで初期状態として扱い、非空文字だけを`ThoughtRepository.search(query:)`へ渡します。SQLite実装は`%`、`_`、escape文字をliteralへescapeしたbind parameterを`LIKE ... ESCAPE`へ渡し、`deleted_at IS NULL`で絞って作成日時・UUIDの降順で返します。SwiftUIはSQLを知らず、将来FTSへ移行する場合もRepository実装を差し替える境界です。検索はread-onlyでbackup作成を含むDB更新を行いません。
 

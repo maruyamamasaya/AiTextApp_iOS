@@ -23,6 +23,7 @@ final class ThoughtStore: ObservableObject {
     @Published private(set) var historyCurrentID: UUID?
     @Published var continuationDraft = ""
     @Published private(set) var reviewThoughts: [Thought] = []
+    @Published private(set) var reviewPeriodThoughtCount = 0
     @Published private(set) var reviewContinuationCounts: [UUID: Int] = [:]
     @Published private(set) var reviewSummary: ReviewSummary?
     @Published private(set) var reviewSummaries: [ReviewSummary] = []
@@ -43,6 +44,7 @@ final class ThoughtStore: ObservableObject {
     private var summaryExporter: ReviewSummaryExporter?
     private let summaryClient: any ReviewSummaryClient
     private var reviewInterval: DateInterval?
+    private var reviewTag: ThoughtTag?
 
     init(
         repository: (any ThoughtRepository)? = nil,
@@ -130,16 +132,29 @@ final class ThoughtStore: ObservableObject {
         }
     }
 
-    func loadReview(in interval: DateInterval) {
+    func loadReview(in interval: DateInterval, tag: ThoughtTag? = nil) {
         guard let thoughtRepository, let relationRepository else {
             errorMessage = "History Reviewを読み込めませんでした。"
             return
         }
         do {
-            let thoughts = try thoughtRepository.fetchThoughts(from: interval.start, to: interval.end)
-            reviewThoughts = thoughts
-            reviewContinuationCounts = try relationRepository.fetchContinuationCounts(for: thoughts.map(\.id))
+            let periodThoughts = try thoughtRepository.fetchThoughts(from: interval.start, to: interval.end)
+            let displayedThoughts: [Thought]
+            if let tag {
+                guard let tagRepository else { throw NSError(domain: "ThoughtTagRepository", code: 1) }
+                displayedThoughts = try tagRepository.fetchThoughts(
+                    from: interval.start,
+                    to: interval.end,
+                    taggedWith: tag.id
+                )
+            } else {
+                displayedThoughts = periodThoughts
+            }
+            reviewThoughts = displayedThoughts
+            reviewPeriodThoughtCount = periodThoughts.count
+            reviewContinuationCounts = try relationRepository.fetchContinuationCounts(for: displayedThoughts.map(\.id))
             reviewInterval = interval
+            reviewTag = tag
             reviewSummaries = try summaryRepository?.fetchSummaries(from: interval.start, to: interval.end) ?? []
             reviewSummary = reviewSummaries.first
             reviewSummaryError = nil
@@ -149,12 +164,14 @@ final class ThoughtStore: ObservableObject {
         } catch {
             reviewInterval = interval
             reviewThoughts = []
+            reviewPeriodThoughtCount = 0
             reviewContinuationCounts = [:]
             reviewSummary = nil
             reviewSummaries = []
             reviewSummaryDeletionError = nil
             reviewSummaryExportError = nil
             reviewSummaryPreview = nil
+            reviewTag = tag
             errorMessage = "History Reviewを読み込めませんでした。"
         }
     }
@@ -272,7 +289,7 @@ final class ThoughtStore: ObservableObject {
             do {
                 try ValidateReviewSummaryPreview(repository: thoughtRepository)(preview)
             } catch ReviewSummaryError.stalePreview {
-                loadReview(in: preview.interval)
+                loadReview(in: preview.interval, tag: reviewTag)
                 reviewSummaryError = "確認後にThoughtが変更されました。送信せず、対象を読み込み直しました。"
                 return
             }

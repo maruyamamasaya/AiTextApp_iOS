@@ -503,6 +503,82 @@ struct ThoughtHistoryReviewTests {
         #expect(try repository.fetchContinuationCounts(for: []).isEmpty)
     }
 
+    @Test func calculatesAllReviewPeriodsAcrossMonthAndYearBoundaries() throws {
+        var mondayCalendar = calendar
+        mondayCalendar.firstWeekday = 2
+        let now = mondayCalendar.date(from: DateComponents(year: 2026, month: 9, day: 9, hour: 15, minute: 30))!
+
+        #expect(ThoughtReviewPeriod.today(containing: now, calendar: mondayCalendar).start == mondayCalendar.date(from: DateComponents(year: 2026, month: 9, day: 9)))
+        #expect(ThoughtReviewPeriod.yesterday(containing: now, calendar: mondayCalendar).start == mondayCalendar.date(from: DateComponents(year: 2026, month: 9, day: 8)))
+        #expect(ThoughtReviewPeriod.pastSevenDays(containing: now, calendar: mondayCalendar).start == mondayCalendar.date(from: DateComponents(year: 2026, month: 9, day: 3)))
+        #expect(ThoughtReviewPeriod.currentWeek(containing: now, calendar: mondayCalendar).start == mondayCalendar.date(from: DateComponents(year: 2026, month: 9, day: 7)))
+        #expect(ThoughtReviewPeriod.pastThirtyDays(containing: now, calendar: mondayCalendar).start == mondayCalendar.date(from: DateComponents(year: 2026, month: 8, day: 11)))
+        #expect(ThoughtReviewPeriod.currentMonth(containing: now, calendar: mondayCalendar).start == mondayCalendar.date(from: DateComponents(year: 2026, month: 9, day: 1)))
+        #expect(ThoughtReviewPeriod.day(containing: now, calendar: mondayCalendar).end == mondayCalendar.date(from: DateComponents(year: 2026, month: 9, day: 10)))
+        let tomorrow = mondayCalendar.date(from: DateComponents(year: 2026, month: 9, day: 10))
+        #expect(ThoughtReviewPeriod.currentWeek(containing: now, calendar: mondayCalendar).end == tomorrow)
+        #expect(ThoughtReviewPeriod.pastThirtyDays(containing: now, calendar: mondayCalendar).end == tomorrow)
+        #expect(ThoughtReviewPeriod.currentMonth(containing: now, calendar: mondayCalendar).end == tomorrow)
+
+        let january = mondayCalendar.date(from: DateComponents(year: 2027, month: 1, day: 5, hour: 12))!
+        #expect(ThoughtReviewPeriod.pastSevenDays(containing: january, calendar: mondayCalendar).start == mondayCalendar.date(from: DateComponents(year: 2026, month: 12, day: 30)))
+        #expect(ThoughtReviewPeriod.pastThirtyDays(containing: january, calendar: mondayCalendar).start == mondayCalendar.date(from: DateComponents(year: 2026, month: 12, day: 7)))
+        #expect(ThoughtReviewPeriod.currentMonth(containing: january, calendar: mondayCalendar).start == mondayCalendar.date(from: DateComponents(year: 2027, month: 1, day: 1)))
+    }
+
+    @Test func reviewPeriodsRespectCalendarTimezoneBoundaries() {
+        var tokyo = Calendar(identifier: .gregorian)
+        tokyo.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        let instant = utc.date(from: DateComponents(year: 2026, month: 9, day: 9, hour: 15, minute: 30))!
+        let today = ThoughtReviewPeriod.today(containing: instant, calendar: tokyo)
+        #expect(tokyo.component(.day, from: today.start) == 10)
+        #expect(today.start == tokyo.startOfDay(for: instant))
+        #expect(today.end == tokyo.date(byAdding: .day, value: 1, to: tokyo.startOfDay(for: instant)))
+        #expect(ThoughtReviewPeriod.currentMonth(containing: instant, calendar: tokyo).start == tokyo.dateInterval(of: .month, for: instant)?.start)
+    }
+
+    @Test func filtersReviewInSQLiteByDateAndOneTag() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let start = Date(timeIntervalSince1970: 1_000)
+        let older = Thought(body: "work older", createdAt: start)
+        let otherTag = Thought(body: "personal", createdAt: start.addingTimeInterval(10))
+        let newer = Thought(body: "work newer", createdAt: start.addingTimeInterval(20))
+        let deleted = Thought(body: "work deleted", createdAt: start.addingTimeInterval(30))
+        let outside = Thought(body: "work outside", createdAt: start.addingTimeInterval(100))
+        for thought in [older, otherTag, newer, deleted, outside] { try repository.create(thought) }
+        guard case .added(let work) = try repository.addTag(named: "work", to: older.id) else { return }
+        _ = try repository.addTag(named: work.name, to: newer.id)
+        _ = try repository.addTag(named: work.name, to: deleted.id)
+        _ = try repository.addTag(named: work.name, to: outside.id)
+        guard case .added(let personal) = try repository.addTag(named: "personal", to: otherTag.id) else { return }
+        #expect(try repository.softDelete(id: deleted.id, at: start.addingTimeInterval(40)))
+
+        let end = start.addingTimeInterval(50)
+        #expect(try repository.fetchThoughts(from: start, to: end).map(\.id) == [older.id, otherTag.id, newer.id])
+        #expect(try repository.fetchThoughts(from: start, to: end, taggedWith: work.id).map(\.id) == [older.id, newer.id])
+        #expect(try repository.fetchThoughts(from: start, to: end, taggedWith: personal.id).map(\.id) == [otherTag.id])
+    }
+
+    @Test func tagFilteredDisplayDoesNotChangeAISummaryPeriodScope() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 100), end: Date(timeIntervalSince1970: 200))
+        let tagged = Thought(body: "tagged", createdAt: Date(timeIntervalSince1970: 120))
+        let untagged = Thought(body: "untagged", createdAt: Date(timeIntervalSince1970: 140))
+        try repository.create(tagged)
+        try repository.create(untagged)
+        guard case .added(let tag) = try repository.addTag(named: "review", to: tagged.id) else { return }
+
+        #expect(try repository.fetchThoughts(from: interval.start, to: interval.end, taggedWith: tag.id) == [tagged])
+        let preview = try PrepareReviewSummary(repository: repository)(interval: interval)
+        #expect(preview.thoughts.map(\.id) == [tagged.id, untagged.id])
+    }
+
     @Test func promptContainsOnlyOrderedBodiesAndNoInternalIdentifiers() throws {
         let firstID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
         let thoughts = [

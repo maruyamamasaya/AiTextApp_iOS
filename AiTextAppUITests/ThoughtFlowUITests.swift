@@ -92,6 +92,8 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(oldestText.waitForExistence(timeout: 2))
         XCTAssertTrue(newestText.waitForExistence(timeout: 2))
         XCTAssertLessThan(oldestText.frame.minY, newestText.frame.minY, "Reviewは古いThoughtから表示する")
+        XCTAssertEqual(app.staticTexts["historyReviewActiveDays"].label, "1日")
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "historyReviewDayCount_")).firstMatch.label, "2 Thoughts")
 
         let reviewThoughts = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "historyReviewThought_")
@@ -101,6 +103,46 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["writeContinuationButton"].waitForExistence(timeout: 2))
         app.navigationBars["Thought"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
+    }
+
+    func testHistoryReviewFiltersCurrentMonthByTagAndOpensDetail() {
+        let taggedBody = "今月の仕事Thought"
+        let otherBody = "今月の個人Thought"
+        let tagName = "仕事"
+        let composer = app.textViews["thoughtComposer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText(taggedBody)
+        app.buttons["postButton"].tap()
+        app.staticTexts[taggedBody].tap()
+        app.buttons["editThoughtTagsButton"].tap()
+        let tagField = app.textFields["newThoughtTagField"]
+        XCTAssertTrue(tagField.waitForExistence(timeout: 2))
+        tagField.tap()
+        tagField.typeText(tagName)
+        app.buttons["addThoughtTagButton"].tap()
+        app.buttons["closeThoughtTagEditor"].tap()
+        app.navigationBars["Thought"].buttons.element(boundBy: 0).tap()
+
+        composer.tap()
+        composer.typeText(otherBody)
+        app.buttons["postButton"].tap()
+        app.buttons["historyReviewButton"].tap()
+        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
+
+        app.buttons["historyReviewFilter"].tap()
+        app.buttons["今月"].tap()
+        app.buttons["historyReviewTagFilter"].tap()
+        app.buttons[tagName].tap()
+
+        XCTAssertEqual(app.staticTexts["historyReviewCount"].label, "1 Thoughts")
+        XCTAssertEqual(app.staticTexts["historyReviewTagStatus"].label, tagName)
+        XCTAssertTrue(app.staticTexts[taggedBody].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts[otherBody].exists)
+        XCTAssertTrue(app.staticTexts["historyReviewAIScopeNotice"].exists)
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "historyReviewThought_")).firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Thought"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts[taggedBody].exists)
     }
 
     func testSearchOpensResultAndNavigatesToThoughtDetail() {

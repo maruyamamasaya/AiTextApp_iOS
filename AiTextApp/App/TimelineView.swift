@@ -271,6 +271,9 @@ private struct HistoryReviewView: View {
         case today = "今日"
         case yesterday = "昨日"
         case sevenDays = "過去7日"
+        case week = "今週"
+        case thirtyDays = "過去30日"
+        case month = "今月"
         case date = "日付指定"
         var id: Self { self }
     }
@@ -278,12 +281,16 @@ private struct HistoryReviewView: View {
     @ObservedObject var store: ThoughtStore
     @State private var filter: Filter = .today
     @State private var selectedDate = Date()
+    @State private var selectedTag: ThoughtTag?
 
     private var interval: DateInterval {
         switch filter {
         case .today: ThoughtReviewPeriod.today(containing: Date())
         case .yesterday: ThoughtReviewPeriod.yesterday(containing: Date())
         case .sevenDays: ThoughtReviewPeriod.pastSevenDays(containing: Date())
+        case .week: ThoughtReviewPeriod.currentWeek(containing: Date())
+        case .thirtyDays: ThoughtReviewPeriod.pastThirtyDays(containing: Date())
+        case .month: ThoughtReviewPeriod.currentMonth(containing: Date())
         case .date: ThoughtReviewPeriod.day(containing: selectedDate)
         }
     }
@@ -293,6 +300,8 @@ private struct HistoryReviewView: View {
             .map { (date: $0.key, thoughts: $0.value) }
             .sorted { $0.date < $1.date }
     }
+
+    private var activeDayCount: Int { groupedThoughts.count }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -304,10 +313,14 @@ private struct HistoryReviewView: View {
                     .pickerStyle(.menu)
                     .accessibilityIdentifier("historyReviewFilter")
                     Spacer()
-                    Text("\(store.reviewThoughts.count) Thoughts")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("historyReviewCount")
+                    Picker("タグ", selection: $selectedTag) {
+                        Text("すべてのタグ").tag(Optional<ThoughtTag>.none)
+                        ForEach(store.allTags) { tag in
+                            Text(tag.name).tag(Optional(tag))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("historyReviewTagFilter")
                 }
 
                 if filter == .date {
@@ -320,6 +333,28 @@ private struct HistoryReviewView: View {
                     .datePickerStyle(.compact)
                     .accessibilityIdentifier("historyReviewDatePicker")
                 }
+                VStack(alignment: .leading, spacing: 5) {
+                    LabeledContent("期間", value: periodText)
+                    LabeledContent("表示") {
+                        Text("\(store.reviewThoughts.count) Thoughts")
+                            .accessibilityIdentifier("historyReviewCount")
+                    }
+                    LabeledContent("Thoughtがある日") {
+                        Text("\(activeDayCount)日").accessibilityIdentifier("historyReviewActiveDays")
+                    }
+                    LabeledContent("タグ") {
+                        Text(selectedTag?.name ?? "すべて").accessibilityIdentifier("historyReviewTagStatus")
+                    }
+                }
+                .font(.subheadline)
+                .accessibilityIdentifier("historyReviewOverview")
+
+                if selectedTag != nil {
+                    Text("AI要約はタグ絞り込みを含めず、期間全体の\(store.reviewPeriodThoughtCount) Thoughtsを対象にします。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("historyReviewAIScopeNotice")
+                }
                 Button {
                     store.prepareReviewSummary(in: interval)
                 } label: {
@@ -330,7 +365,7 @@ private struct HistoryReviewView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(store.reviewThoughts.isEmpty || store.isGeneratingReviewSummary)
+                .disabled(store.reviewPeriodThoughtCount == 0 || store.isGeneratingReviewSummary)
                 .accessibilityIdentifier("reviewAISummaryButton")
             }
             .padding(.horizontal, 16)
@@ -338,9 +373,9 @@ private struct HistoryReviewView: View {
             .background(Color(uiColor: .systemBackground))
             .overlay(alignment: .bottom) { Divider() }
 
-            if store.reviewThoughts.isEmpty {
+            if store.reviewThoughts.isEmpty && store.reviewSummary == nil && store.reviewSummaryError == nil {
                 VStack(spacing: 6) {
-                    Text(filter == .today ? "今日はまだThoughtがありません" : "この期間にThoughtはありません")
+                    Text(selectedTag == nil && filter == .today ? "今日はまだThoughtがありません" : "条件に一致するThoughtはありません")
                         .font(.headline)
                     Text("別の日付や期間も振り返れます。")
                         .font(.subheadline)
@@ -413,16 +448,18 @@ private struct HistoryReviewView: View {
                                 }
                             } header: {
                                 HStack {
-                                    Text(ReviewDateText.heading(for: group.date))
+                                    Text(group.date.formatted(.dateTime.year().month().day()))
                                         .font(.headline)
                                     Spacer()
                                     Text("\(group.thoughts.count) Thoughts")
                                         .font(.caption.monospacedDigit())
                                         .foregroundStyle(.secondary)
+                                        .accessibilityIdentifier("historyReviewDayCount_\(Int(group.date.timeIntervalSince1970))")
                                 }
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 9)
                                 .background(.regularMaterial)
+                                .accessibilityIdentifier("historyReviewDay_\(Int(group.date.timeIntervalSince1970))")
                             }
                         }
                     }
@@ -433,6 +470,7 @@ private struct HistoryReviewView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: reload)
         .onChange(of: filter) { _ in reload() }
+        .onChange(of: selectedTag) { _ in reload() }
         .onChange(of: selectedDate) { _ in if filter == .date { reload() } }
         .onChange(of: store.thoughts.map(\.id)) { _ in reload() }
         .sheet(item: Binding(
@@ -451,7 +489,14 @@ private struct HistoryReviewView: View {
     }
 
     private func reload() {
-        store.loadReview(in: interval)
+        store.loadAllTags()
+        store.loadReview(in: interval, tag: selectedTag)
+    }
+
+    private var periodText: String {
+        let start = interval.start.formatted(.dateTime.year().month().day())
+        let end = interval.end.addingTimeInterval(-1).formatted(.dateTime.year().month().day())
+        return start == end ? start : "\(start)〜\(end)"
     }
 
     private func reviewRow(_ thought: Thought) -> some View {
@@ -525,6 +570,7 @@ private struct TagStrip: View {
             }
         }
     }
+
 }
 
 private struct ThoughtSearchView: View {
