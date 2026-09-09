@@ -11,3 +11,5 @@ Use the Gemini Developer API backend and `gemini-3.7-flash`. Pass the immutable 
 ## Consequences
 
 Firebase conversion and error behavior are unit-testable without network access. Missing local configuration is visible but does not prevent app startup. `GoogleService-Info.plist` and App Check Debug tokens remain outside Git. Package compilation, Console configuration, Debug token registration, App Attest, and real requests require Xcode/Simulator/device verification.
+
+The App Attest production entitlement is attached only to the Release configuration. Debug continues to select `AppCheckDebugProviderFactory` but carries no App Attest entitlement, so a Personal Development Team can sign local device builds. An optional app-target build phase copies the ignored root `GoogleService-Info.plist` only when present, preserving successful builds when local Firebase configuration is absent.

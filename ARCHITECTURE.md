@@ -100,4 +100,4 @@ Widget Extensionは永続化層をリンクせず、固定表示とQuick Capture
 
 ## External Services / Authentication
 
-application composition rootはローカル`GoogleService-Info.plist`を検証し、DebugではApp Check Debug Provider、ReleaseではApp Attest Providerを設定してからFirebaseを初期化します。モデルは`ReviewSummaryAIConfiguration`の`gemini-3.7-flash`、providerは`firebase-ai-logic`を正本とし、実応答の保存メタデータへ渡します。Firebase未設定、App Check、rate limit、network、その他APIをtyped errorへ分類します。APIキーとDebug tokenはコード／Gitへ含めません。Files／iCloud DriveアクセスにはiOS標準document pickerとsecurity-scoped bookmarkだけを使います。
+application composition rootはローカル`GoogleService-Info.plist`を検証し、DebugではApp Check Debug Provider、ReleaseではApp Attest Providerを設定してからFirebaseを初期化します。App Attest entitlementはRelease configurationだけに付与し、Personal Teamを使うDebug実機buildでは要求しません。Git管理外のルート`GoogleService-Info.plist`は存在する場合だけapp bundleへcopyし、未配置でもbuildと起動を継続します。モデルは`ReviewSummaryAIConfiguration`の`gemini-3.7-flash`、providerは`firebase-ai-logic`を正本とし、実応答の保存メタデータへ渡します。Firebase未設定、App Check、rate limit、network、その他APIをtyped errorへ分類します。APIキーとDebug tokenはコード／Gitへ含めません。Files／iCloud DriveアクセスにはiOS標準document pickerとsecurity-scoped bookmarkだけを使います。

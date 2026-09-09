@@ -19,9 +19,9 @@ Firebase Apple SDKはSwift Package Managerで12.17.0以降を指定し、app tar
 ### Firebase AI Logic / App Check接続
 
 1. Firebase Consoleで実際のbundle identifierを持つiOS appを登録し、Firebase AI LogicのGet startedからGemini Developer APIを有効化する。
-2. Consoleから`GoogleService-Info.plist`を取得し、Xcodeで`AiTextApp` targetへ追加してCopy Bundle Resources対象にする。このファイルは`.gitignore`対象で、各開発環境へ安全に配布する。
+2. Consoleから`GoogleService-Info.plist`を取得してリポジトリrootへ配置する。app targetの`Copy Optional Firebase Configuration` build phaseが、存在する場合だけapp bundleへcopyする。このファイルは`.gitignore`対象で、各開発環境へ安全に配布する。
 3. Xcodeでpackageをresolveし、`FirebaseCore`、`FirebaseAILogic`、`FirebaseAppCheck`がapp targetへリンクされていることを確認する。
-4. Debug buildを起動する。`AppCheckDebugProviderFactory`が出力するDebug tokenをFirebase ConsoleのApp Check > Manage debug tokensへ登録する。tokenはScheme、ソース、文書へ記録・コミットしない。
+4. Debug buildを起動する。Debug configurationはApp Attest entitlementを持たず、Personal Teamでも署名可能にする。`AppCheckDebugProviderFactory`が出力するDebug tokenをFirebase ConsoleのApp Check > Manage debug tokensへ登録する。tokenはScheme、ソース、文書へ記録・コミットしない。
 5. Release buildは`AppAttestProviderFactory`と`AiTextApp.entitlements`のproduction App Attest環境を使う。ConsoleでApp Attestを登録し、実機で成功を確認してからenforcementを段階的に有効化する。
 6. Reviewでプレビュー内容を確認して明示送信し、保存された履歴のproviderが`firebase-ai-logic`、modelが`gemini-3.7-flash`であることを確認する。
 

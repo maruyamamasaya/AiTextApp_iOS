@@ -143,12 +143,12 @@ final class ThoughtFlowUITests: XCTestCase {
         post.tap()
 
         XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
-        XCTAssertEqual(app.staticTexts["Quick Capture Thought"].count, 1)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Quick Capture Thought")).count, 1)
     }
 
-    func testExternalQuickCaptureRouteFromColdLaunchPostsOnceAndReturnsToTimeline() {
+    func testExternalQuickCaptureRouteFromColdLaunchPostsOnceAndReturnsToTimeline() throws {
         app.terminate()
-        app.open(URL(string: "aitextapp://quick-capture")!)
+        try openAppRoute(URL(string: "aitextapp://quick-capture")!)
 
         XCTAssertTrue(app.navigationBars["Quick Capture"].waitForExistence(timeout: 5))
         let editor = app.textViews["quickCaptureEditor"]
@@ -158,15 +158,15 @@ final class ThoughtFlowUITests: XCTestCase {
         app.buttons["quickCapturePostButton"].tap()
 
         XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
-        XCTAssertEqual(app.staticTexts["Widget route Thought"].count, 1)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Widget route Thought")).count, 1)
         XCTAssertFalse(app.navigationBars["Quick Capture"].exists, "投稿後にrouteを消費してTimelineへ戻る")
     }
 
-    func testExternalQuickCaptureRouteWhileForegroundCanBeDismissedAndConsumed() {
+    func testExternalQuickCaptureRouteWhileForegroundCanBeDismissedAndConsumed() throws {
         XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Quick Capture"].exists, "通常起動ではQuick Captureを開かない")
 
-        app.open(URL(string: "aitextapp://quick-capture")!)
+        try openAppRoute(URL(string: "aitextapp://quick-capture")!)
         XCTAssertTrue(app.navigationBars["Quick Capture"].waitForExistence(timeout: 2))
         app.buttons["quickCaptureCancelButton"].tap()
 
@@ -174,10 +174,10 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertFalse(app.navigationBars["Quick Capture"].exists)
     }
 
-    func testMalformedExternalRouteDoesNotOpenQuickCapture() {
+    func testMalformedExternalRouteDoesNotOpenQuickCapture() throws {
         XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 5))
 
-        app.open(URL(string: "aitextapp://quick-capture?body=should-not-be-accepted")!)
+        try openAppRoute(URL(string: "aitextapp://quick-capture?body=should-not-be-accepted")!)
 
         XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.navigationBars["Quick Capture"].exists)
@@ -386,7 +386,7 @@ final class ThoughtFlowUITests: XCTestCase {
             NSPredicate(format: "identifier BEGINSWITH %@", "reviewAISummaryHistoryItem_")
         )
         XCTAssertEqual(items.count, 2)
-        XCTAssertEqual(app.staticTexts["reviewAISummaryLatest"].count, 1)
+        XCTAssertEqual(app.staticTexts.matching(identifier: "reviewAISummaryLatest").count, 1)
 
         let exportMenus = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "exportReviewSummary_")
@@ -410,7 +410,7 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(deletionAlert.waitForExistence(timeout: 2))
         deletionAlert.buttons["削除"].tap()
         XCTAssertEqual(deleteButtons.count, 1)
-        XCTAssertEqual(app.staticTexts["reviewAISummaryLatest"].count, 1, "残った最新要約へ表示を切り替える")
+        XCTAssertEqual(app.staticTexts.matching(identifier: "reviewAISummaryLatest").count, 1, "残った最新要約へ表示を切り替える")
 
         deleteButtons.element(boundBy: 0).tap()
         XCTAssertTrue(deletionAlert.waitForExistence(timeout: 2))
@@ -446,6 +446,13 @@ final class ThoughtFlowUITests: XCTestCase {
         let confirm = app.buttons["confirmReviewSummarySubmission"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 2))
         confirm.tap()
+    }
+
+    private func openAppRoute(_ url: URL) throws {
+        guard #available(iOS 16.4, *) else {
+            throw XCTSkip("XCUIApplication.open requires iOS 16.4 or newer")
+        }
+        app.open(url)
     }
 
     private func openThoughtMenuAndChooseDelete() {

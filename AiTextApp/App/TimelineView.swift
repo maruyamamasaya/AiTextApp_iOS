@@ -595,7 +595,6 @@ private struct TagStrip: View {
 private struct ThoughtSearchView: View {
     @ObservedObject var store: ThoughtStore
     @State private var query = ""
-    @FocusState private var searchIsFocused: Bool
 
     var body: some View {
         Group {
@@ -646,9 +645,7 @@ private struct ThoughtSearchView: View {
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Thought本文を検索"
         )
-        .searchFocused($searchIsFocused)
         .onChange(of: query) { store.search($0) }
-        .onAppear { searchIsFocused = true }
         .onDisappear { store.clearSearch() }
     }
 

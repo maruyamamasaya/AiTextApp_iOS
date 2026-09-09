@@ -8,7 +8,7 @@
 
 ## 現在のフェーズ
 
-Phase 3-D（ローカル分析 v1）までコード実装済みです。Phase 3-A〜3-E-2と同様、Windows環境のためSwift／Xcode検証は未実行で、Macでの確認後に完了判定します。
+Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-09にMac/Xcode 26.6でSwift Testing全60件、Firebase 12.18.0を含むDebug／Release Simulator build、Personal TeamのDebug実機向け署名buildを確認しました。XCUITest targetはcompile済みですが、Simulator serviceが起動時に停止するホスト環境障害のため実行確認は未完了です。
 
 ## 実装済み
 
@@ -74,7 +74,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。Phase 3-
 
 ## 未実装
 
-- Firebase ConsoleでのGemini Developer API有効化、iOS app登録、App Check provider／Debug token登録、ローカル`GoogleService-Info.plist`配置。
+- Firebase ConsoleでのGemini Developer API有効化、iOS app登録、App Check provider／Debug token登録。ローカル`GoogleService-Info.plist`のbundle copyは確認済みだが、実通信は未確認。
 - AI分類など要約以外の派生情報、クラウド同期、アカウント、その他の外部連携。
 - CI/CD、配布用の署名・bundle identifier設定。
 
@@ -82,8 +82,8 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。Phase 3-
 
 ロードマップ5-Aはコード実装まで完了していますが、Mac／Xcode環境でのFirebase実接続を確認するまでは完了扱いにしません。再開時は次を順に実施します。
 
-1. Firebase Apple SDKをresolveしてbuildする。
-2. `GoogleService-Info.plist`をローカルのXcode app targetへ追加する。
+1. 完了: Firebase Apple SDK 12.18.0をresolveし、3製品を含むDebug／Release buildを確認する。
+2. 完了: Git管理外の`GoogleService-Info.plist`を存在時だけapp bundleへcopyし、bundle identifier一致を確認する。
 3. SimulatorでApp Check Debug Providerを起動し、出力されたDebug tokenをFirebase Consoleへ登録する。
 4. Gemini実APIでAI要約を1回、送信前プレビューから明示実行する。
 5. その時点で実際に利用可能なGemini modelを確認し、必要なら中央設定を更新する。
