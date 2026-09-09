@@ -74,21 +74,21 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ## 未実装
 
-- Firebase ConsoleでのGemini Developer API有効化、iOS app登録、App Check provider／Debug token登録。ローカル`GoogleService-Info.plist`のbundle copyは確認済みだが、実通信は未確認。
+- Release用App Attest providerのFirebase Console登録と実機通信。Debug Providerは実機で実通信とSQLite保存を確認済み。
 - AI分類など要約以外の派生情報、クラウド同期、アカウント、その他の外部連携。
 - CI/CD、配布用の署名・bundle identifier設定。
 
-## AI要約：実接続確認待ち
+## AI要約：Release App Attest確認待ち
 
-ロードマップ5-Aはコード実装まで完了していますが、Mac／Xcode環境でのFirebase実接続を確認するまでは完了扱いにしません。再開時は次を順に実施します。
+ロードマップ5-Aはコード実装とDebug ProviderでのFirebase実接続まで確認済みです。Release App Attestの確認が残っています。
 
 1. 完了: Firebase Apple SDK 12.18.0をresolveし、3製品を含むDebug／Release buildを確認する。
 2. 完了: Git管理外の`GoogleService-Info.plist`を存在時だけapp bundleへcopyし、bundle identifier一致を確認する。
-3. SimulatorでApp Check Debug Providerを起動し、出力されたDebug tokenをFirebase Consoleへ登録する。
-4. Gemini実APIでAI要約を1回、送信前プレビューから明示実行する。
-5. その時点で実際に利用可能なGemini modelを確認し、必要なら中央設定を更新する。
-6. SQLiteに要約本文、実際のprovider／model、対象件数が保存され、履歴に表示されることを確認する。
-7. 可能であれば実機とApp Attestでも確認する。
+3. 完了: Debug ProviderのDebug tokenをFirebase Consoleへ登録し、Debug buildの実機でApp Check交換を通す。
+4. 完了: Gemini実APIでAI要約を実行する。
+5. 完了: `gemini-3.7-flash`で実応答を確認する。
+6. 完了: 実機SQLiteにprovider、model、対象件数を持つ要約が保存されることを確認する。
+7. Release buildとApp Attestで実通信を確認する。
 8. 問題がなければロードマップ5-Aを完了へ変更し、結果を踏まえて5-Bの仕様を再評価する。
 
 再開指示は「AI要約の続きを進める」「Gemini連携を再開する」などを目印とし、この地点から再開します。それまではAI機能設定画面や新たなFirebase依存機能を先行実装せず、別分野の開発を優先します。
