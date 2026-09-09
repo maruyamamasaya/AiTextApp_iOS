@@ -8,7 +8,7 @@
 
 ## 現在のフェーズ
 
-Phase 2-C（History Review / 時間軸でThoughtを振り返る）の実装を完了しています。
+Phase 3-B（Thoughtタグ v1）を実装済みです。Phase 3-Aと同様、Windows環境のためSwift／Xcode検証は未実行で、Macでの確認後に完了判定します。
 
 ## 実装済み
 
@@ -17,7 +17,7 @@ Phase 2-C（History Review / 時間軸でThoughtを振り返る）の実装を�
 - UUIDと作成・更新・削除日時を持つThought原文モデル。
 - Application Support配下のSQLiteを正本にしたローカル保存、query順序、ソフトデリート。
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
-- `PRAGMA user_version`によるschema version管理（現在v3）。
+- `PRAGMA user_version`によるschema version管理（現在v4）。
 - 画面下部に固定し、入力中だけ枠内右端に投稿ボタンを表示するコンパクトなComposer。
 - Lazy Timeline、自然な相対日時、メニュー内削除、Empty State。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。
@@ -52,6 +52,11 @@ Phase 2-C（History Review / 時間軸でThoughtを振り返る）の実装を�
 - Thought本文・promptを含まないAI要約専用Export modelと、将来の解析／再Importを見据えたJSON schema v1。
 - `latest`／`previous`の外部2世代、version・schema・サイズ・SHA-256を持つmanifest、作成後検証と失敗時rollback。
 - security-scoped bookmarkによる保存先再利用、Restore事前検証・確認UI・次回起動前のatomic適用と現DB rollback。
+- Timelineから開くThought検索画面。標準`.searchable`で本文の部分一致検索を入力中に更新し、空入力の初期状態、0件表示、日時、新しい順、Detail遷移を提供。
+- `ThoughtRepository.search(query:)`検索境界と、SQLiteのbind済み`LIKE ... ESCAPE` query、テスト用Memory Repository実装。前後空白、`%`／`_`のliteral検索、deleted除外に対応（検索導入自体ではschema変更なし）。
+- Thought原文と分離した`ThoughtTag`／`ThoughtTagRepository`、SQLite schema v4の`tags`／`thought_tags`。正規化名と複合主キーでタグ名・付与の重複を防止。
+- Thought Detailのタグ確認・編集、既存タグ付与、新規タグ作成、個別解除。Timeline／本文検索結果の最大2件＋省略表示、タグ一覧、タグ別Thought一覧、既存Detailへの遷移。
+- タグ追加／解除transaction、deleted Thoughtを除外するタグ一覧・タグ別query、v1〜v3から既存Thoughtを保持するmigration経路。
 
 ## 未実装
 
@@ -59,18 +64,35 @@ Phase 2-C（History Review / 時間軸でThoughtを振り返る）の実装を�
 - AI分類など要約以外の派生情報、クラウド同期、アカウント、その他の外部連携。
 - CI/CD、配布用の署名・bundle identifier設定。
 
+## AI要約：実接続確認待ち
+
+ロードマップ5-Aはコード実装まで完了していますが、Mac／Xcode環境でのFirebase実接続を確認するまでは完了扱いにしません。再開時は次を順に実施します。
+
+1. Firebase Apple SDKをresolveしてbuildする。
+2. `GoogleService-Info.plist`をローカルのXcode app targetへ追加する。
+3. SimulatorでApp Check Debug Providerを起動し、出力されたDebug tokenをFirebase Consoleへ登録する。
+4. Gemini実APIでAI要約を1回、送信前プレビューから明示実行する。
+5. その時点で実際に利用可能なGemini modelを確認し、必要なら中央設定を更新する。
+6. SQLiteに要約本文、実際のprovider／model、対象件数が保存され、履歴に表示されることを確認する。
+7. 可能であれば実機とApp Attestでも確認する。
+8. 問題がなければロードマップ5-Aを完了へ変更し、結果を踏まえて5-Bの仕様を再評価する。
+
+再開指示は「AI要約の続きを進める」「Gemini連携を再開する」などを目印とし、この地点から再開します。それまではAI機能設定画面や新たなFirebase依存機能を先行実装せず、別分野の開発を優先します。
+
 ## 既知の問題
 
 - iPhone SE (3rd generation, iOS 17.4)のbuildとXCUITestは確認済みですが、Light／Dark Modeの手動目視確認は未実施です。
 - 破損した移行元JSONは自動復旧せず、SQLiteへの移行を中止してエラー表示し、原本を保持します。
 - XCUITestは投稿・削除、Continuation、History Review主要フローをiPhone SE Simulatorで確認済みです。
 - App iconの実画像は未設定です。
+- Phase 3-AのSwift Testing、Xcode build、XCUITest、Light／Dark Mode、Dynamic Type、VoiceOverの実機／Simulator確認はWindows環境のため未実行です。
+- Phase 3-Bのschema v4 migration、タグunit test、XCUITest、Light／Dark Mode、Dynamic Type、VoiceOverの実機／Simulator確認はWindows環境のため未実行です。
 
 ## 次に行うこと
 
 ### Xcode環境が利用可能になったら行う検証
 
-1. macOSで`swift test`を実行し、schema v3 migration、AI要約prompt、Mock生成、再要約保存を確認する。
+1. macOSで`swift test`を実行し、schema v4 migration、本文検索、タグ、AI要約prompt、Mock生成、再要約保存を確認する。
 2. iPhone SEと最新標準iPhone Simulatorでbuild／XCUITestを実行する。
 3. AI要約プレビューの期間・件数・文字数・Thought順序、キャンセル、確定後のMock表示、loading、通信失敗、再試行、Thoughtなし、再要約を手動確認する。
 4. プレビュー表示後に対象Thoughtが変わった場合、AIを呼ばず対象再読込エラーになることを確認する。
@@ -84,10 +106,22 @@ Phase 2-C（History Review / 時間軸でThoughtを振り返る）の実装を�
 
 ### 次の実装候補
 
+#### 非AIロードマップ
+
+1. Phase 3-A: Thought検索 v1 — コード実装済み／Mac確認待ち。
+2. Phase 3-B: Thoughtタグ v1 — コード実装済み／Mac確認待ち。
+3. Phase 3-C: History Review強化 — 次候補。期間表示にタグという新しい分類軸をどう活用するかを先に検証する。
+4. Phase 3-E: Quick Capture / Widget — 検索と整理の受け皿ができたため、入力頻度を高める導線を次点とする。
+5. Phase 3-D: ローカル分析 — 十分なThought／タグ利用データが蓄積してから有用な集計を設計する。
+
+Phase 3-A／3-BのMac検証と実利用後に、本文検索とタグ絞り込みの役割分担、タグ編集の利用感、SQLite join性能を再確認する。現時点ではタグ構造をReviewへ活かせるPhase 3-Cを次とし、データ蓄積を促す3-E、蓄積後に意味が出る3-Dの順へ再評価した。
+
+#### AIロードマップ
+
 1. 完了: AI要約履歴画面 — 同期間の過去要約を新しい順に表示し、生成日時、対象件数、生成元を確認可能。
 2. 完了: AI要約の削除 — 要約ID単位の確認付き削除。Thought原文、別期間、他要約には影響しない。
 3. 完了: 要約対象の明示プレビュー — 期間、件数、文字数、日時順本文を確認し、確定したpayloadだけを送信する。
 4. 完了: 要約のExport — 選択した要約と安全なメタデータだけをMarkdown／JSONで個別共有する。
 5. 5-Aコード側完了／接続確認保留: Firebase AI Logic／App Checkをcomposition rootへ接続。Console、plist、Xcode build、Simulator／実機通信は上記のとおり未確認。
-6. 次候補 5-B: AI機能設定画面 — AI要約の利用可否、privacy説明の再表示、接続状態、provider／model、App Check環境を読み取り専用で表示する。API key入力やモデル自由入力、自動送信は設けない。
+6. 保留 5-B: AI機能設定画面 — 5-Aの実接続確認後に仕様を再評価する。確認前は先行実装しない。
 7. 数日間の実利用後にHistory／AI要約／バックアップ／Export運用を再評価する。

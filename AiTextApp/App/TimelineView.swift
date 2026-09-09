@@ -12,7 +12,7 @@ struct TimelineView: View {
                         emptyState
                     } else {
                         ForEach(store.thoughts) { thought in
-                            ThoughtRow(thought: thought) {
+                            ThoughtRow(thought: thought, tags: store.tagsByThoughtID[thought.id] ?? []) {
                                 store.requestDeletion(of: thought)
                             }
 
@@ -33,6 +33,9 @@ struct TimelineView: View {
             .navigationDestination(for: UUID.self) { thoughtID in
                 ThoughtDetailView(store: store, initialThoughtID: thoughtID)
             }
+            .navigationDestination(for: TagRoute.self) { route in
+                TaggedThoughtListView(store: store, tag: route.tag)
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     NavigationLink {
@@ -43,6 +46,25 @@ struct TimelineView: View {
                     .accessibilityLabel("History Reviewを開く")
                     .accessibilityHint("日付や期間から過去のThoughtを振り返ります")
                     .accessibilityIdentifier("historyReviewButton")
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    NavigationLink {
+                        ThoughtTagListView(store: store)
+                    } label: {
+                        Image(systemName: "tag")
+                    }
+                    .accessibilityLabel("タグ一覧を開く")
+                    .accessibilityIdentifier("thoughtTagListButton")
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    NavigationLink {
+                        ThoughtSearchView(store: store)
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel("Thought検索を開く")
+                    .accessibilityHint("キーワードから過去のThoughtを検索します")
+                    .accessibilityIdentifier("thoughtSearchButton")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
@@ -298,7 +320,6 @@ private struct HistoryReviewView: View {
                     .datePickerStyle(.compact)
                     .accessibilityIdentifier("historyReviewDatePicker")
                 }
-
                 Button {
                     store.prepareReviewSummary(in: interval)
                 } label: {
@@ -468,6 +489,138 @@ private struct HistoryReviewView: View {
     private func continuationAccessibilityText(for thought: Thought) -> String {
         guard let count = store.reviewContinuationCounts[thought.id], count > 0 else { return "" }
         return "、続き\(count)件"
+    }
+}
+
+private struct TagRoute: Hashable {
+    let tag: ThoughtTag
+}
+
+private struct TagStrip: View {
+    let tags: [ThoughtTag]
+
+    var body: some View {
+        if !tags.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(Array(tags.prefix(2))) { tag in
+                    NavigationLink(value: TagRoute(tag: tag)) {
+                        Text(tag.name)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.accentColor.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("タグ \(tag.name)")
+                    .accessibilityHint("このタグのThought一覧を開きます")
+                    .accessibilityIdentifier("thoughtTag_\(tag.id.uuidString)")
+                }
+                if tags.count > 2 {
+                    Text("+\(tags.count - 2)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("他\(tags.count - 2)個のタグ")
+                }
+            }
+        }
+    }
+}
+
+private struct ThoughtSearchView: View {
+    @ObservedObject var store: ThoughtStore
+    @State private var query = ""
+    @FocusState private var searchIsFocused: Bool
+
+    var body: some View {
+        Group {
+            if !store.hasSearchQuery {
+                searchInitialState
+            } else if store.searchResults.isEmpty {
+                searchEmptyState
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(store.searchResults) { thought in
+                            VStack(alignment: .leading, spacing: 8) {
+                                NavigationLink(value: thought.id) {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                    Text(thought.body)
+                                        .font(.body)
+                                        .lineSpacing(4)
+                                        .foregroundStyle(.primary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .multilineTextAlignment(.leading)
+                                    Text(ThoughtDateText.string(for: thought.createdAt))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("検索結果、\(thought.body)")
+                                .accessibilityHint("ダブルタップして詳細とHistoryを開きます")
+                                .accessibilityIdentifier("searchResult_\(thought.id.uuidString)")
+                                TagStrip(tags: store.tagsByThoughtID[thought.id] ?? [])
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            if thought.id != store.searchResults.last?.id {
+                                Divider().padding(.leading, 16)
+                            }
+                        }
+                    }
+                }
+                .scrollDismissesKeyboard(.interactively)
+            }
+        }
+        .navigationTitle("Thought検索")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(
+            text: $query,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Thought本文を検索"
+        )
+        .searchFocused($searchIsFocused)
+        .onChange(of: query) { store.search($0) }
+        .onAppear { searchIsFocused = true }
+        .onDisappear { store.clearSearch() }
+    }
+
+    private var searchInitialState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+            Text("キーワードでThoughtを探す")
+                .font(.headline)
+            Text("本文の一部を入力してください。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+        .multilineTextAlignment(.center)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("thoughtSearchInitialState")
+    }
+
+    private var searchEmptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "text.magnifyingglass")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+            Text("一致するThoughtはありません")
+                .font(.headline)
+            Text("別のキーワードを試してください。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+        .multilineTextAlignment(.center)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("thoughtSearchEmptyState")
     }
 }
 
@@ -712,11 +865,161 @@ private enum ReviewDateText {
     }
 }
 
+private struct ThoughtTagListView: View {
+    @ObservedObject var store: ThoughtStore
+
+    var body: some View {
+        Group {
+            if store.allTags.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "tag").font(.title2).foregroundStyle(.secondary)
+                    Text("タグはありません").font(.headline)
+                    Text("Thought Detailからタグを追加できます。").font(.subheadline).foregroundStyle(.secondary)
+                }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(24)
+                    .accessibilityIdentifier("thoughtTagListEmptyState")
+            } else {
+                List(store.allTags) { tag in
+                    NavigationLink(value: TagRoute(tag: tag)) {
+                        Label(tag.name, systemImage: "tag")
+                    }
+                    .accessibilityIdentifier("tagListItem_\(tag.id.uuidString)")
+                }
+            }
+        }
+        .navigationTitle("タグ")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { store.loadAllTags() }
+    }
+}
+
+private struct TaggedThoughtListView: View {
+    @ObservedObject var store: ThoughtStore
+    let tag: ThoughtTag
+
+    var body: some View {
+        Group {
+            if store.taggedThoughts.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "tag").font(.title2).foregroundStyle(.secondary)
+                    Text("Thoughtはありません").font(.headline)
+                    Text("削除されていないThoughtはありません。").font(.subheadline).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(store.taggedThoughts) { thought in
+                            VStack(alignment: .leading, spacing: 8) {
+                                NavigationLink(value: thought.id) {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text(thought.body)
+                                            .font(.body)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .multilineTextAlignment(.leading)
+                                        Text(ThoughtDateText.string(for: thought.createdAt))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("taggedThought_\(thought.id.uuidString)")
+                                TagStrip(tags: store.tagsByThoughtID[thought.id] ?? [])
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            if thought.id != store.taggedThoughts.last?.id { Divider().padding(.leading, 16) }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle(tag.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { store.loadThoughts(taggedWith: tag) }
+    }
+}
+
+private struct ThoughtTagEditorView: View {
+    @ObservedObject var store: ThoughtStore
+    let thought: Thought
+    @State private var newTagName = ""
+    @Environment(\.dismiss) private var dismiss
+
+    private var currentTags: [ThoughtTag] { store.tagsByThoughtID[thought.id] ?? [] }
+    private var availableTags: [ThoughtTag] {
+        let currentIDs = Set(currentTags.map(\.id))
+        return store.allTags.filter { !currentIDs.contains($0.id) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("現在のタグ") {
+                    if currentTags.isEmpty { Text("タグなし").foregroundStyle(.secondary) }
+                    ForEach(currentTags) { tag in
+                        HStack {
+                            Label(tag.name, systemImage: "tag")
+                            Spacer()
+                            Button("削除", role: .destructive) { store.removeTag(tag, from: thought.id) }
+                                .accessibilityIdentifier("removeThoughtTag_\(tag.id.uuidString)")
+                        }
+                    }
+                }
+                if !availableTags.isEmpty {
+                    Section("既存タグを追加") {
+                        ForEach(availableTags) { tag in
+                            Button { store.addTag(named: tag.name, to: thought.id) } label: {
+                                Label(tag.name, systemImage: "plus.circle")
+                            }
+                            .accessibilityIdentifier("attachExistingTag_\(tag.id.uuidString)")
+                        }
+                    }
+                }
+                Section("新しいタグ") {
+                    TextField("タグ名", text: $newTagName)
+                        .textInputAutocapitalization(.never)
+                        .submitLabel(.done)
+                        .accessibilityIdentifier("newThoughtTagField")
+                        .onSubmit(addNewTag)
+                    Button("タグを追加", action: addNewTag)
+                        .disabled(ThoughtTag.displayName(from: newTagName) == nil)
+                        .accessibilityIdentifier("addThoughtTagButton")
+                }
+                if let message = store.tagMessage {
+                    Section { Text(message).foregroundStyle(.secondary) }
+                }
+            }
+            .navigationTitle("タグを編集")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完了") { dismiss() }.accessibilityIdentifier("closeThoughtTagEditor")
+                }
+            }
+            .onAppear {
+                store.refreshTags(for: [thought.id])
+                store.loadAllTags()
+                store.tagMessage = nil
+            }
+        }
+    }
+
+    private func addNewTag() {
+        guard let displayName = ThoughtTag.displayName(from: newTagName) else { return }
+        store.addTag(named: displayName, to: thought.id)
+        if store.tagMessage == nil { newTagName = "" }
+    }
+}
+
 private struct ThoughtDetailView: View {
     @ObservedObject var store: ThoughtStore
     let initialThoughtID: UUID
     @State private var currentThoughtID: UUID
     @State private var showsComposer = false
+    @State private var showsTagEditor = false
     @FocusState private var composerIsFocused: Bool
 
     init(store: ThoughtStore, initialThoughtID: UUID) {
@@ -740,6 +1043,11 @@ private struct ThoughtDetailView: View {
                         Text(ThoughtDateText.string(for: currentThought.createdAt))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        TagStrip(tags: store.tagsByThoughtID[currentThought.id] ?? [])
+                        Button("タグを編集") { showsTagEditor = true }
+                            .buttonStyle(.bordered)
+                            .buttonBorderShape(.capsule)
+                            .accessibilityIdentifier("editThoughtTagsButton")
                         Button("続きを書く") {
                             showsComposer.toggle()
                             if showsComposer { composerIsFocused = true }
@@ -777,6 +1085,11 @@ private struct ThoughtDetailView: View {
         .navigationTitle("Thought")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { store.loadHistory(for: currentThoughtID) }
+        .sheet(isPresented: $showsTagEditor) {
+            if let currentThought {
+                ThoughtTagEditorView(store: store, thought: currentThought)
+            }
+        }
     }
 
     private func continuationComposer(parent: Thought) -> some View {
@@ -871,12 +1184,14 @@ private struct ThoughtDetailView: View {
 
 private struct ThoughtRow: View {
     let thought: Thought
+    let tags: [ThoughtTag]
     let onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
-            NavigationLink(value: thought.id) {
-                VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                NavigationLink(value: thought.id) {
+                    VStack(alignment: .leading, spacing: 8) {
                     Text(thought.body)
                         .font(.body)
                         .lineSpacing(4)
@@ -887,12 +1202,15 @@ private struct ThoughtRow: View {
                     Text(ThoughtDateText.string(for: thought.createdAt))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    }
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Thought、\(thought.body)")
+                .accessibilityHint("ダブルタップして詳細とHistoryを開きます")
+                .accessibilityIdentifier("timelineThought_\(thought.id.uuidString)")
+                TagStrip(tags: tags)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Thought、\(thought.body)")
-            .accessibilityHint("ダブルタップして詳細とHistoryを開きます")
-            .accessibilityIdentifier("timelineThought_\(thought.id.uuidString)")
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Menu {
                 Button("削除", role: .destructive, action: onDelete)

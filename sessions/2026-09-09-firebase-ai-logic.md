@@ -8,3 +8,4 @@
 - Ignored `GoogleService-Info.plist`; no API key, Debug token, or other secret was added.
 - Updated architecture, operations, testing, code map, decision, and current status documents.
 - Windows host has no Swift/Xcode. Package resolution, compile, Swift tests, Simulator/device communication, and App Check verification remain pending.
+- Product direction confirmed: mark AI summary as waiting for real connection verification. Resume from SDK resolution, local plist placement, Debug Provider/token, one real Gemini request, model and SQLite metadata verification, and optional device App Attest. Do not start 5-B or new Firebase-dependent features before those checks.

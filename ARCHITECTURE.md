@@ -8,7 +8,7 @@
 SwiftUI TimelineView -> HistoryReviewView / ThoughtDetailView / Continuation Composer
   -> ThoughtStore (presentation state)
     -> ThoughtTimeline (validation/order/delete use cases)
-      -> ThoughtRepository protocol
+      -> ThoughtRepository / ThoughtTagRepository protocols
         -> SQLiteThoughtRepository (Application Support SQLite)
       -> ThoughtContinuationRepository (Thought + Relation transaction)
     -> ThoughtRelationRepository (History relation queries)
@@ -27,7 +27,7 @@ SwiftUI TimelineView -> HistoryReviewView / ThoughtDetailView / Continuation Com
 
 ## Main Components
 
-- `TimelineView`: placeholder付きComposer、Lazy Timeline、Detail／History ReviewへのNavigation、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
+- `TimelineView`: placeholder付きComposer、Lazy Timeline、Detail／Thought検索／History ReviewへのNavigation、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
 - `HistoryReviewView`: 今日／昨日／過去7日／日付指定の期間選択、日単位group、件数、古い順のThought、Continuation件数、最新AI要約と要約履歴への入口を表示。
 - `ReviewSummaryHistoryView`: 選択期間に保存された要約を新しい順に並べ、最新表示、生成日時、対象件数、provider／model、確認付き個別削除を提供。
 - `ReviewSummaryExporter`: 要約IDをRepositoryで再確認し、単一の保存済み要約をMarkdownまたはJSON schema v1へ変換して一時ファイルへatomic write。
@@ -36,15 +36,16 @@ SwiftUI TimelineView -> HistoryReviewView / ThoughtDetailView / Continuation Com
 - `ReviewSummaryClient`: MockとFirebase AI Logic clientを差し替える通信境界。通常起動はFirebase、UIテスト／CoreテストはMockを使用。
 - `ReviewSummaryGeneratingTransport`: Firebase SDK importをapp layerへ閉じ込め、request変換、応答変換、空応答、typed errorを外部通信なしでテストする境界。
 - `ThoughtDetailView`: 現在Thought、縦型History、削除済みplaceholder、「続きを書く」Composerを表示。
-- `ThoughtStore`: Timeline／Continuation draftとHistory画面状態を各use caseへ接続。
+- `ThoughtStore`: Timeline／本文検索／タグ／Continuation draftとHistory画面状態を各use caseへ接続。
 - `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
 - `Thought` / `ThoughtDraft`: 原文モデルと140文字ルール。
-- `ThoughtRepository`: create、Timeline query、日付範囲query、ID取得、全件取得、soft deleteの保存境界。
+- `ThoughtRepository`: create、Timeline query、literal部分一致検索、日付範囲query、ID取得、全件取得、soft deleteの保存境界。
+- `ThoughtTag` / `ThoughtTagRepository`: Thought原文から独立したタグ、正規化、付与・解除transaction、Thought別／全タグ／タグ別Thought queryの境界。
 - `ThoughtRelation`: Thought本文から独立した文脈モデル。sourceは新しいThought、targetは元のThoughtで、Phase 2-Aは`continues`のみ。
 - `ThoughtRelationRepository`: Relation作成、source／target方向の1ステップ取得境界。
 - `ThoughtContinuationRepository`: 新規Thoughtと`continues` Relationを同一transactionで作成する境界。
 - `ThoughtHistory`: 現在Thoughtからrootを求め、Relation APIだけで分岐を安定順に取得するuse case。
-- `SQLiteThoughtRepository`: schema v3、Thought／Relation／期間要約query、旧JSON importと2世代backupを所有する正本実装。
+- `SQLiteThoughtRepository`: schema v4、Thought／Tag／Relation／期間要約query、旧JSON importと2世代backupを所有する正本実装。
 - `ThoughtExporter`: Repositoryから未削除Thoughtを取得し、Markdown／JSONを生成。
 - `ShareSheet`: ExportファイルをiOS標準共有UIへ渡すUIKit bridge。
 - `ExternalBackupManager`: Filesフォルダpicker、security-scoped bookmark、バックアップ状態と確認UIのpresentation境界。
@@ -61,6 +62,10 @@ Thought DetailはrootからContinuationをdepth-firstで並べた静かな縦型
 
 History ReviewはCalendarの日境界から期間を作り、開始inclusive／終了exclusiveのSQLite queryで対象Thoughtだけを取得します。日付、`createdAt`、UUIDの順で古いThoughtから安定表示し、soft delete済みは除外します。Continuation件数は対象IDをまとめた1 queryで取得します。
 
+Thought検索はtrim後の空文字をUI stateで初期状態として扱い、非空文字だけを`ThoughtRepository.search(query:)`へ渡します。SQLite実装は`%`、`_`、escape文字をliteralへescapeしたbind parameterを`LIKE ... ESCAPE`へ渡し、`deleted_at IS NULL`で絞って作成日時・UUIDの降順で返します。SwiftUIはSQLを知らず、将来FTSへ移行する場合もRepository実装を差し替える境界です。検索はread-onlyでbackup作成を含むDB更新を行いません。
+
+タグは表示名を前後trimしてUnicode正規合成し、POSIX localeの小文字表現を`normalized_name`として一意化します。Thought Detailからの追加は、タグの`INSERT OR IGNORE`と`thought_tags`付与を同一transactionで行います。解除も中間行だけをtransaction内で削除し、Thought本文とタグmasterは変更しません。Timeline／本文検索は本文queryと分離したタグ取得を表示に合成し、タグ絞り込みは`ThoughtTagRepository`の独立queryを使います。
+
 AI要約はHistory Reviewのボタン押下後に送信前プレビューを作り、対象期間、件数、payload／本文文字数、日時順のThought本文を表示します。キャンセルではclientを呼びません。送信確定時は期間内ThoughtをRepositoryから再取得し、プレビューのsnapshotと完全一致する場合だけ、プレビューに固定済みの同じ`ReviewSummaryRequest`をclientへ渡します。期間またはThoughtが変わっていれば送信を中止してReviewを再読込します。promptへUUID、Relation、SQLite情報、アプリ状態は含めません。成功結果は同一期間への追記として保存するため再要約履歴を失わず、Reviewには最新結果、履歴画面には全結果を新しい順で表示します。通常起動でFirebase未設定なら送信せず設定エラーとなり、UIテストはMockで同じ保存経路を確認します。
 
 AI要約の削除は`ReviewSummaryRepository.deleteSummary(id:)`を通じ、一意な要約IDに一致する1レコードだけを物理削除します。期間条件やThought tableをDELETE対象に使いません。成功後はStoreの現在期間一覧から同じIDだけを除き、先頭を最新要約として選び直します。0件ならReviewは要約未生成状態へ戻ります。
@@ -69,7 +74,7 @@ AI要約Exportは履歴内の明示操作で形式を選び、IDで再取得で�
 
 ## Persistence
 
-`Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。schema v3の`thought_relations`は両端を`thoughts.id`へ外部キー参照し、`review_summaries`は期間境界、生成結果、生成日時、provider／model、prompt version、対象件数を原文と分離して保存します。初回に旧`thoughts.json`があればtransaction内で`INSERT OR IGNORE`し、各IDの主要データを照合してmigration markerを記録します。JSONは削除しません。
+`Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。schema v4は`tags`と`thought_tags`を追加し、正規化名のUNIQUE制約、Thought／Tag外部キー、複合主キーを持ちます。soft deleteでは中間行を保持し、通常のタグqueryがdeleted Thoughtを除外します。既存の`thought_relations`と`review_summaries`は維持します。初回に旧`thoughts.json`があればtransaction内で`INSERT OR IGNORE`し、各IDの主要データを照合してmigration markerを記録します。JSONは削除しません。
 
 初期化成功後とcreate／soft delete成功後にSQLite Online Backup APIでスナップショットを作り、`.backup.1`と`.backup.2`だけを保持します。バックアップ失敗は成功済み投稿を失敗扱いにせずログへ記録し、破損時の自動巻き戻しは行いません。
 

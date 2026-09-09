@@ -25,8 +25,8 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ReviewSummaryRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 3
+public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ReviewSummaryRepository, @unchecked Sendable {
+    public static let schemaVersion: Int32 = 4
 
     private let databaseURL: URL
     private let legacyJSONURL: URL
@@ -141,6 +141,113 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
             let changed = sqlite3_changes(database) > 0
             if changed { createRollingBackupIfPossible() }
             return changed
+        }
+    }
+
+    public func search(query: String) throws -> [Thought] {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        let escaped = query
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        return try lock.withLock {
+            try self.query("""
+                SELECT id, body, created_at, updated_at, deleted_at
+                FROM thoughts
+                WHERE deleted_at IS NULL AND body LIKE ? ESCAPE '\\' COLLATE NOCASE
+                ORDER BY created_at DESC, id DESC
+                """, bind: { statement in
+                    try self.bind("%\(escaped)%", to: 1, in: statement)
+                })
+        }
+    }
+
+    public func addTag(named name: String, to thoughtID: UUID, at date: Date) throws -> ThoughtTagAssignment {
+        guard let displayName = ThoughtTag.displayName(from: name) else { return .invalidName }
+        let normalizedName = ThoughtTag.normalize(displayName)
+        return try lock.withLock {
+            var assignment: ThoughtTagAssignment = .invalidName
+            try transaction {
+                guard try queryByID(thoughtID)?.deletedAt == nil else {
+                    throw SQLiteThoughtRepositoryError.database("active Thought not found")
+                }
+                let candidate = ThoughtTag(name: displayName, normalizedName: normalizedName, createdAt: date)
+                let tagInsert = try prepare("INSERT OR IGNORE INTO tags(id, name, normalized_name, created_at) VALUES (?, ?, ?, ?)")
+                defer { sqlite3_finalize(tagInsert) }
+                try bind(candidate.id.uuidString, to: 1, in: tagInsert)
+                try bind(candidate.name, to: 2, in: tagInsert)
+                try bind(candidate.normalizedName, to: 3, in: tagInsert)
+                try bind(candidate.createdAt.timeIntervalSince1970, to: 4, in: tagInsert)
+                try stepDone(tagInsert)
+                guard let tag = try queryTag(normalizedName: normalizedName) else {
+                    throw SQLiteThoughtRepositoryError.invalidRecord
+                }
+
+                let linkInsert = try prepare("INSERT OR IGNORE INTO thought_tags(thought_id, tag_id, created_at) VALUES (?, ?, ?)")
+                defer { sqlite3_finalize(linkInsert) }
+                try bind(thoughtID.uuidString, to: 1, in: linkInsert)
+                try bind(tag.id.uuidString, to: 2, in: linkInsert)
+                try bind(date.timeIntervalSince1970, to: 3, in: linkInsert)
+                try stepDone(linkInsert)
+                assignment = sqlite3_changes(database) == 1 ? .added(tag) : .alreadyAttached(tag)
+            }
+            if case .added = assignment { createRollingBackupIfPossible() }
+            return assignment
+        }
+    }
+
+    public func removeTag(id tagID: UUID, from thoughtID: UUID) throws -> Bool {
+        try lock.withLock {
+            var removed = false
+            try transaction {
+                let statement = try prepare("DELETE FROM thought_tags WHERE thought_id = ? AND tag_id = ?")
+                defer { sqlite3_finalize(statement) }
+                try bind(thoughtID.uuidString, to: 1, in: statement)
+                try bind(tagID.uuidString, to: 2, in: statement)
+                try stepDone(statement)
+                removed = sqlite3_changes(database) == 1
+            }
+            if removed { createRollingBackupIfPossible() }
+            return removed
+        }
+    }
+
+    public func fetchTags(for thoughtID: UUID) throws -> [ThoughtTag] {
+        try lock.withLock {
+            try queryTags("""
+                SELECT tags.id, tags.name, tags.normalized_name, tags.created_at
+                FROM tags
+                JOIN thought_tags ON thought_tags.tag_id = tags.id
+                JOIN thoughts ON thoughts.id = thought_tags.thought_id
+                WHERE thoughts.id = ? AND thoughts.deleted_at IS NULL
+                ORDER BY tags.normalized_name ASC, tags.id ASC
+                """, bind: { try self.bind(thoughtID.uuidString, to: 1, in: $0) })
+        }
+    }
+
+    public func fetchAllTags() throws -> [ThoughtTag] {
+        try lock.withLock {
+            try queryTags("""
+                SELECT DISTINCT tags.id, tags.name, tags.normalized_name, tags.created_at
+                FROM tags
+                JOIN thought_tags ON thought_tags.tag_id = tags.id
+                JOIN thoughts ON thoughts.id = thought_tags.thought_id
+                WHERE thoughts.deleted_at IS NULL
+                ORDER BY tags.normalized_name ASC, tags.id ASC
+                """)
+        }
+    }
+
+    public func fetchThoughts(taggedWith tagID: UUID) throws -> [Thought] {
+        try lock.withLock {
+            try query("""
+                SELECT thoughts.id, thoughts.body, thoughts.created_at, thoughts.updated_at, thoughts.deleted_at
+                FROM thoughts
+                JOIN thought_tags ON thought_tags.thought_id = thoughts.id
+                WHERE thought_tags.tag_id = ? AND thoughts.deleted_at IS NULL
+                ORDER BY thoughts.created_at DESC, thoughts.id DESC
+                """, bind: { try self.bind(tagID.uuidString, to: 1, in: $0) })
         }
     }
 
@@ -433,6 +540,29 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
                 try execute("PRAGMA user_version = 3")
             }
         }
+        if version < 4 {
+            try transaction {
+                try execute("""
+                    CREATE TABLE tags (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        name TEXT NOT NULL,
+                        normalized_name TEXT NOT NULL UNIQUE,
+                        created_at REAL NOT NULL,
+                        CHECK (length(normalized_name) > 0)
+                    )
+                    """)
+                try execute("""
+                    CREATE TABLE thought_tags (
+                        thought_id TEXT NOT NULL REFERENCES thoughts(id),
+                        tag_id TEXT NOT NULL REFERENCES tags(id),
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY (thought_id, tag_id)
+                    )
+                    """)
+                try execute("CREATE INDEX thought_tags_tag_idx ON thought_tags(tag_id, thought_id)")
+                try execute("PRAGMA user_version = 4")
+            }
+        }
     }
 
     private func migrateLegacyJSONIfNeeded() throws {
@@ -642,6 +772,38 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
 
     private func bind(_ value: Double, to index: Int32, in statement: OpaquePointer) throws {
         guard sqlite3_bind_double(statement, index, value) == SQLITE_OK else { throw lastError() }
+    }
+
+    private func queryTag(normalizedName: String) throws -> ThoughtTag? {
+        try queryTags(
+            "SELECT id, name, normalized_name, created_at FROM tags WHERE normalized_name = ? LIMIT 1",
+            bind: { try self.bind(normalizedName, to: 1, in: $0) }
+        ).first
+    }
+
+    private func queryTags(_ sql: String, bind binder: (OpaquePointer) throws -> Void = { _ in }) throws -> [ThoughtTag] {
+        let statement = try prepare(sql)
+        defer { sqlite3_finalize(statement) }
+        try binder(statement)
+        var output: [ThoughtTag] = []
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            guard let idText = sqlite3_column_text(statement, 0),
+                  let nameText = sqlite3_column_text(statement, 1),
+                  let normalizedText = sqlite3_column_text(statement, 2),
+                  let id = UUID(uuidString: String(cString: idText)) else {
+                throw SQLiteThoughtRepositoryError.invalidRecord
+            }
+            output.append(ThoughtTag(
+                id: id,
+                name: String(cString: nameText),
+                normalizedName: String(cString: normalizedText),
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
+            ))
+            result = sqlite3_step(statement)
+        }
+        guard result == SQLITE_DONE else { throw lastError() }
+        return output
     }
 
     private func decodeReviewSummary(_ statement: OpaquePointer) throws -> ReviewSummary {

@@ -10,6 +10,12 @@ final class ThoughtStore: ObservableObject {
 
     @Published var draft = ""
     @Published private(set) var thoughts: [Thought] = []
+    @Published private(set) var searchResults: [Thought] = []
+    @Published private(set) var hasSearchQuery = false
+    @Published private(set) var tagsByThoughtID: [UUID: [ThoughtTag]] = [:]
+    @Published private(set) var allTags: [ThoughtTag] = []
+    @Published private(set) var taggedThoughts: [Thought] = []
+    @Published var tagMessage: String?
     @Published var deletionCandidate: Thought?
     @Published var errorMessage: String?
     @Published var exportArtifact: ExportArtifact?
@@ -32,6 +38,7 @@ final class ThoughtStore: ObservableObject {
     private var thoughtRepository: (any ThoughtRepository)?
     private var relationRepository: (any ThoughtRelationRepository)?
     private var continuationRepository: (any ThoughtContinuationRepository)?
+    private var tagRepository: (any ThoughtTagRepository)?
     private var summaryRepository: (any ReviewSummaryRepository)?
     private var summaryExporter: ReviewSummaryExporter?
     private let summaryClient: any ReviewSummaryClient
@@ -51,6 +58,7 @@ final class ThoughtStore: ObservableObject {
             thoughtRepository = repository
             relationRepository = repository as? any ThoughtRelationRepository
             continuationRepository = repository as? any ThoughtContinuationRepository
+            tagRepository = repository as? any ThoughtTagRepository
             if let reviewSummaryRepository = repository as? any ReviewSummaryRepository {
                 summaryRepository = reviewSummaryRepository
                 summaryExporter = ReviewSummaryExporter(repository: reviewSummaryRepository)
@@ -64,6 +72,8 @@ final class ThoughtStore: ObservableObject {
             errorMessage = "保存したThoughtを読み込めませんでした。"
         }
         externalBackupManager = backupManager
+        refreshTags(for: thoughts.map(\.id))
+        loadAllTags()
         if let startupError { errorMessage = startupError }
     }
 
@@ -114,6 +124,7 @@ final class ThoughtStore: ObservableObject {
                 relationRepository: relationRepository
             ).entries(containing: thoughtID)
             historyCurrentID = thoughtID
+            refreshTags(for: history.map(\.id))
         } catch {
             errorMessage = "Thought Historyを読み込めませんでした。"
         }
@@ -146,6 +157,82 @@ final class ThoughtStore: ObservableObject {
             reviewSummaryPreview = nil
             errorMessage = "History Reviewを読み込めませんでした。"
         }
+    }
+
+    func search(_ query: String) {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        hasSearchQuery = !normalized.isEmpty
+        guard hasSearchQuery else {
+            searchResults = []
+            return
+        }
+        guard let thoughtRepository else {
+            searchResults = []
+            errorMessage = "Thoughtを検索できませんでした。"
+            return
+        }
+        do {
+            searchResults = try thoughtRepository.search(query: normalized)
+            refreshTags(for: searchResults.map(\.id))
+        } catch {
+            searchResults = []
+            errorMessage = "Thoughtを検索できませんでした。保存済みデータは変更されていません。"
+        }
+    }
+
+    func clearSearch() {
+        hasSearchQuery = false
+        searchResults = []
+    }
+
+    func refreshTags(for thoughtIDs: [UUID]) {
+        guard let tagRepository else { return }
+        do {
+            for id in thoughtIDs { tagsByThoughtID[id] = try tagRepository.fetchTags(for: id) }
+        } catch { errorMessage = "タグを読み込めませんでした。" }
+    }
+
+    func loadAllTags() {
+        guard let tagRepository else { return }
+        do { allTags = try tagRepository.fetchAllTags() }
+        catch { errorMessage = "タグ一覧を読み込めませんでした。" }
+    }
+
+    func loadThoughts(taggedWith tag: ThoughtTag) {
+        guard let tagRepository else { return }
+        do {
+            taggedThoughts = try tagRepository.fetchThoughts(taggedWith: tag.id)
+            refreshTags(for: taggedThoughts.map(\.id))
+        } catch {
+            taggedThoughts = []
+            errorMessage = "タグのThoughtを読み込めませんでした。"
+        }
+    }
+
+    func addTag(named name: String, to thoughtID: UUID) {
+        guard let tagRepository else { return }
+        do {
+            switch try tagRepository.addTag(named: name, to: thoughtID) {
+            case .added:
+                tagMessage = nil
+                refreshTags(for: [thoughtID])
+                loadAllTags()
+            case .alreadyAttached:
+                tagMessage = "このタグはすでに付いています。"
+            case .invalidName:
+                tagMessage = "空のタグは追加できません。"
+            }
+        } catch { tagMessage = "タグを追加できませんでした。" }
+    }
+
+    func removeTag(_ tag: ThoughtTag, from thoughtID: UUID) {
+        guard let tagRepository else { return }
+        do {
+            _ = try tagRepository.removeTag(id: tag.id, from: thoughtID)
+            tagMessage = nil
+            refreshTags(for: [thoughtID])
+            loadAllTags()
+        } catch { tagMessage = "タグを削除できませんでした。" }
     }
 
     func prepareReviewSummary(in interval: DateInterval) {
@@ -259,6 +346,7 @@ final class ThoughtStore: ObservableObject {
             ) else { return nil }
             timeline = try ThoughtTimeline(repository: thoughtRepository)
             thoughts = timeline?.thoughts ?? []
+            refreshTags(for: thoughts.map(\.id))
             continuationDraft = ""
             loadHistory(for: thought.id)
             return thought
@@ -278,6 +366,7 @@ final class ThoughtStore: ObservableObject {
             guard try timeline.post(draft) != nil else { return false }
             self.timeline = timeline
             thoughts = timeline.thoughts
+            refreshTags(for: thoughts.map(\.id))
             draft = ""
             return true
         } catch {
@@ -300,6 +389,8 @@ final class ThoughtStore: ObservableObject {
             _ = try timeline.delete(id: candidate.id)
             self.timeline = timeline
             thoughts = timeline.thoughts
+            refreshTags(for: thoughts.map(\.id))
+            loadAllTags()
             deletionCandidate = nil
             if let historyCurrentID { loadHistory(for: historyCurrentID) }
         } catch {

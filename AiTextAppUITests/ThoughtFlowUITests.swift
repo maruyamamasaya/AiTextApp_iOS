@@ -103,6 +103,71 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
     }
 
+    func testSearchOpensResultAndNavigatesToThoughtDetail() {
+        let composer = app.textViews["thoughtComposer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        for body in ["検索対象のThought", "別のメモ"] {
+            composer.tap()
+            composer.typeText(body)
+            app.buttons["postButton"].tap()
+        }
+
+        app.buttons["thoughtSearchButton"].tap()
+        XCTAssertTrue(app.navigationBars["Thought検索"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.otherElements["thoughtSearchInitialState"].exists)
+
+        let searchField = app.searchFields.firstMatch
+        XCTAssertTrue(searchField.waitForExistence(timeout: 2))
+        searchField.tap()
+        searchField.typeText("検索対象")
+
+        let results = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "searchResult_")
+        )
+        XCTAssertEqual(results.count, 1)
+        XCTAssertTrue(app.staticTexts["検索対象のThought"].exists)
+        XCTAssertFalse(app.staticTexts["別のメモ"].exists)
+        results.element(boundBy: 0).tap()
+
+        XCTAssertTrue(app.navigationBars["Thought"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["writeContinuationButton"].exists)
+    }
+
+    func testAddsTagShowsItOnTimelineAndOpensTaggedThoughtDetail() {
+        let body = "タグUIフロー"
+        let tagName = "仕事"
+        let composer = app.textViews["thoughtComposer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText(body)
+        app.buttons["postButton"].tap()
+
+        app.staticTexts[body].tap()
+        XCTAssertTrue(app.buttons["editThoughtTagsButton"].waitForExistence(timeout: 2))
+        app.buttons["editThoughtTagsButton"].tap()
+        let tagField = app.textFields["newThoughtTagField"]
+        XCTAssertTrue(tagField.waitForExistence(timeout: 2))
+        tagField.tap()
+        tagField.typeText(tagName)
+        app.buttons["addThoughtTagButton"].tap()
+        XCTAssertTrue(app.staticTexts[tagName].waitForExistence(timeout: 2))
+        app.buttons["closeThoughtTagEditor"].tap()
+
+        app.navigationBars["Thought"].buttons.element(boundBy: 0).tap()
+        let tagButton = app.buttons.matching(NSPredicate(format: "label == %@", "タグ \(tagName)")).firstMatch
+        XCTAssertTrue(tagButton.waitForExistence(timeout: 2), "Timelineにタグが表示される")
+        tagButton.tap()
+
+        XCTAssertTrue(app.navigationBars[tagName].waitForExistence(timeout: 2))
+        let taggedThought = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "taggedThought_")
+        ).firstMatch
+        XCTAssertTrue(taggedThought.waitForExistence(timeout: 2))
+        taggedThought.tap()
+        XCTAssertTrue(app.navigationBars["Thought"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts[body].exists)
+    }
+
     func testReviewSummaryHistoryKeepsRegeneratedResultsNewestFirst() {
         let composer = app.textViews["thoughtComposer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5))

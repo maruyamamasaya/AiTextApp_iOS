@@ -3,6 +3,9 @@ import Foundation
 public protocol ThoughtRepository: Sendable {
     func create(_ thought: Thought) throws
     func fetchTimeline() throws -> [Thought]
+    /// Searches active Thought bodies using a literal, trimmed substring.
+    /// An empty normalized query returns no results.
+    func search(query: String) throws -> [Thought]
     func fetchByID(_ id: UUID) throws -> Thought?
     func fetchAll() throws -> [Thought]
     /// Returns active Thoughts in ascending creation order. `from` is inclusive
@@ -12,16 +15,20 @@ public protocol ThoughtRepository: Sendable {
 }
 
 /// A small repository useful for previews and domain tests. SQLite is the app's durable store.
-public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ReviewSummaryRepository, @unchecked Sendable {
+public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ReviewSummaryRepository, @unchecked Sendable {
     private var records: [Thought]
     private var relations: [ThoughtRelation]
     private var summaries: [ReviewSummary]
+    private var tags: [ThoughtTag]
+    private var thoughtTagIDs: [UUID: Set<UUID>]
     private let lock = NSLock()
 
-    public init(records: [Thought] = [], relations: [ThoughtRelation] = [], summaries: [ReviewSummary] = []) {
+    public init(records: [Thought] = [], relations: [ThoughtRelation] = [], summaries: [ReviewSummary] = [], tags: [ThoughtTag] = [], thoughtTagIDs: [UUID: Set<UUID>] = [:]) {
         self.records = records
         self.relations = relations
         self.summaries = summaries
+        self.tags = tags
+        self.thoughtTagIDs = thoughtTagIDs
     }
 
     public func create(_ thought: Thought) throws {
@@ -61,6 +68,62 @@ public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRe
             }
             records[index].deletedAt = date
             return true
+        }
+    }
+
+    public func addTag(named name: String, to thoughtID: UUID, at date: Date) throws -> ThoughtTagAssignment {
+        guard let displayName = ThoughtTag.displayName(from: name) else { return .invalidName }
+        return lock.withLock {
+            guard records.contains(where: { $0.id == thoughtID && $0.deletedAt == nil }) else { return .invalidName }
+            let normalized = ThoughtTag.normalize(displayName)
+            let tag: ThoughtTag
+            if let existing = tags.first(where: { $0.normalizedName == normalized }) {
+                tag = existing
+            } else {
+                tag = ThoughtTag(name: displayName, normalizedName: normalized, createdAt: date)
+                tags.append(tag)
+            }
+            if thoughtTagIDs[thoughtID, default: []].contains(tag.id) { return .alreadyAttached(tag) }
+            thoughtTagIDs[thoughtID, default: []].insert(tag.id)
+            return .added(tag)
+        }
+    }
+
+    public func removeTag(id tagID: UUID, from thoughtID: UUID) throws -> Bool {
+        lock.withLock { thoughtTagIDs[thoughtID]?.remove(tagID) != nil }
+    }
+
+    public func fetchTags(for thoughtID: UUID) throws -> [ThoughtTag] {
+        lock.withLock {
+            guard records.contains(where: { $0.id == thoughtID && $0.deletedAt == nil }) else { return [] }
+            let ids = thoughtTagIDs[thoughtID] ?? []
+            return tags.filter { ids.contains($0.id) }.sorted { $0.normalizedName < $1.normalizedName }
+        }
+    }
+
+    public func fetchAllTags() throws -> [ThoughtTag] {
+        lock.withLock {
+            let activeIDs = Set(records.filter { $0.deletedAt == nil }.map(\.id))
+            let usedTagIDs = Set(thoughtTagIDs.filter { activeIDs.contains($0.key) }.flatMap(\.value))
+            return tags.filter { usedTagIDs.contains($0.id) }.sorted { $0.normalizedName < $1.normalizedName }
+        }
+    }
+
+    public func fetchThoughts(taggedWith tagID: UUID) throws -> [Thought] {
+        lock.withLock {
+            records.filter { thought in
+                thought.deletedAt == nil && thoughtTagIDs[thought.id]?.contains(tagID) == true
+            }.sorted(by: Thought.timelineOrder)
+        }
+    }
+
+    public func search(query: String) throws -> [Thought] {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        return lock.withLock {
+            records
+                .filter { $0.deletedAt == nil && $0.body.localizedCaseInsensitiveContains(query) }
+                .sorted(by: Thought.timelineOrder)
         }
     }
 

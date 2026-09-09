@@ -156,6 +156,145 @@ struct ThoughtTimelineTests {
     }
 }
 
+@Suite("Thought search", .serialized)
+struct ThoughtSearchTests {
+    @Test func findsLiteralSubstringsNewestFirstAndExcludesOtherAndDeletedThoughts() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let oldest = Thought(body: "Search target oldest", createdAt: Date(timeIntervalSince1970: 100))
+        let unrelated = Thought(body: "another Thought", createdAt: Date(timeIntervalSince1970: 200))
+        let newest = Thought(body: "newest TARGET match", createdAt: Date(timeIntervalSince1970: 300))
+        let deleted = Thought(body: "deleted target", createdAt: Date(timeIntervalSince1970: 400))
+        for thought in [oldest, unrelated, newest, deleted] { try repository.create(thought) }
+        #expect(try repository.softDelete(id: deleted.id, at: Date(timeIntervalSince1970: 500)))
+
+        #expect(try repository.search(query: "target").map(\.id) == [newest.id, oldest.id])
+        #expect(try repository.search(query: "missing").isEmpty)
+    }
+
+    @Test func trimsWhitespaceAndTreatsLikeMetacharactersLiterally() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let percent = Thought(body: "進捗は100%です")
+        let percentWildcardTrap = Thought(body: "進捗は100Xです")
+        let underscore = Thought(body: "literal_name")
+        let wildcardOnly = Thought(body: "unrelated")
+        for thought in [percent, percentWildcardTrap, underscore, wildcardOnly] { try repository.create(thought) }
+
+        #expect(try repository.search(query: "  100% \n").map(\.id) == [percent.id])
+        #expect(try repository.search(query: "_").map(\.id) == [underscore.id])
+        #expect(try repository.search(query: "  \n\t ").isEmpty)
+    }
+
+    @Test func searchesUnicodeWithoutChangingSQLiteContents() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let japanese = Thought(body: "今日は日本語でメモする 🚀", createdAt: Date(timeIntervalSince1970: 100))
+        let other = Thought(body: "English note", createdAt: Date(timeIntervalSince1970: 200))
+        try repository.create(japanese)
+        try repository.create(other)
+        let before = try repository.fetchAll()
+
+        #expect(try repository.search(query: "日本語").map(\.id) == [japanese.id])
+        #expect(try repository.fetchAll() == before)
+    }
+
+    @Test func memoryRepositoryMatchesSearchContract() throws {
+        let older = Thought(body: "Mixed CASE keyword", createdAt: Date(timeIntervalSince1970: 100))
+        let newer = Thought(body: "keyword 日本語", createdAt: Date(timeIntervalSince1970: 200))
+        let deleted = Thought(body: "keyword deleted", deletedAt: Date(timeIntervalSince1970: 300))
+        let repository = MemoryThoughtRepository(records: [older, newer, deleted])
+
+        #expect(try repository.search(query: " KEYWORD ").map(\.id) == [newer.id, older.id])
+        #expect(try repository.search(query: "日本語").map(\.id) == [newer.id])
+    }
+}
+
+@Suite("Thought tags", .serialized)
+struct ThoughtTagTests {
+    @Test func createsAttachesMultipleNormalizesAndRemovesWithoutChangingBody() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let first = Thought(body: "原文は変更しない", createdAt: Date(timeIntervalSince1970: 100))
+        let second = Thought(body: "既存タグを付ける", createdAt: Date(timeIntervalSince1970: 200))
+        try repository.create(first)
+        try repository.create(second)
+
+        let work: ThoughtTag
+        switch try repository.addTag(named: "  Work  ", to: first.id, at: Date(timeIntervalSince1970: 300)) {
+        case .added(let tag): work = tag
+        default: Issue.record("新規タグが作成されませんでした"); return
+        }
+        #expect(work.name == "Work")
+        #expect(work.normalizedName == "work")
+        #expect(try repository.addTag(named: "work", to: first.id) == .alreadyAttached(work))
+        #expect(try repository.addTag(named: "WORK", to: second.id) == .added(work))
+
+        let unicode: ThoughtTag
+        switch try repository.addTag(named: "日本語🚀", to: first.id) {
+        case .added(let tag): unicode = tag
+        default: Issue.record("Unicodeタグが作成されませんでした"); return
+        }
+        #expect(try repository.fetchTags(for: first.id).map(\.id) == [work.id, unicode.id])
+        #expect(try repository.fetchAllTags().map(\.id) == [work.id, unicode.id])
+        #expect(try repository.fetchByID(first.id)?.body == "原文は変更しない")
+        #expect(try repository.addTag(named: "  \n ", to: first.id) == .invalidName)
+
+        #expect(try repository.removeTag(id: work.id, from: first.id))
+        #expect(try repository.fetchTags(for: first.id) == [unicode])
+        #expect(try repository.fetchByID(first.id) == first)
+    }
+
+    @Test func fetchesOnlyActiveThoughtsForTheSelectedTagNewestFirst() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let older = Thought(body: "older work", createdAt: Date(timeIntervalSince1970: 100))
+        let other = Thought(body: "personal", createdAt: Date(timeIntervalSince1970: 200))
+        let newest = Thought(body: "newest work", createdAt: Date(timeIntervalSince1970: 300))
+        let deleted = Thought(body: "deleted work", createdAt: Date(timeIntervalSince1970: 400))
+        for thought in [older, other, newest, deleted] { try repository.create(thought) }
+
+        guard case .added(let work) = try repository.addTag(named: "work", to: older.id) else { return }
+        guard case .added(let personal) = try repository.addTag(named: "personal", to: other.id) else { return }
+        _ = try repository.addTag(named: work.name, to: newest.id)
+        _ = try repository.addTag(named: work.name, to: deleted.id)
+        #expect(try repository.softDelete(id: deleted.id, at: Date(timeIntervalSince1970: 500)))
+
+        #expect(try repository.fetchThoughts(taggedWith: work.id).map(\.id) == [newest.id, older.id])
+        #expect(try repository.fetchThoughts(taggedWith: personal.id).map(\.id) == [other.id])
+        #expect(try repository.fetchTags(for: deleted.id).isEmpty)
+    }
+
+    @Test func memoryRepositoryMatchesTagContract() throws {
+        let thought = Thought(body: "memory")
+        let repository = MemoryThoughtRepository(records: [thought])
+        guard case .added(let tag) = try repository.addTag(named: "  Swift  ", to: thought.id) else { return }
+        #expect(try repository.addTag(named: "swift", to: thought.id) == .alreadyAttached(tag))
+        #expect(try repository.fetchThoughts(taggedWith: tag.id) == [thought])
+        #expect(try repository.removeTag(id: tag.id, from: thought.id))
+        #expect(try repository.fetchAllTags().isEmpty)
+    }
+
+    @Test func migratesV3AndPreservesExistingThoughtBeforeAddingTags() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let original = Thought(body: "v3から保持する原文", createdAt: Date(timeIntervalSince1970: 100))
+        try fixture.writeV3Database(thought: original)
+
+        let repository = try fixture.repository()
+        #expect(SQLiteThoughtRepository.schemaVersion == 4)
+        #expect(try repository.fetchByID(original.id) == original)
+        guard case .added(let tag) = try repository.addTag(named: "移行後", to: original.id) else { return }
+        #expect(try repository.fetchTags(for: original.id) == [tag])
+        #expect(try repository.fetchByID(original.id) == original)
+    }
+}
+
 @Suite("Thought history", .serialized)
 struct ThoughtHistoryTests {
     @Test func createsAndFetchesContinuationInBothDirections() throws {
@@ -288,7 +427,7 @@ struct ThoughtHistoryTests {
         try fixture.writeV1Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 3)
+        #expect(SQLiteThoughtRepository.schemaVersion == 4)
         #expect(try repository.fetchAll() == [original])
         #expect(try repository.fetchBySourceThoughtID(original.id).isEmpty)
     }
@@ -888,6 +1027,26 @@ private struct Fixture {
             CREATE TABLE migrations (name TEXT PRIMARY KEY NOT NULL, completed_at REAL NOT NULL);
             INSERT INTO thoughts VALUES ('\(thought.id.uuidString)', '\(escapedBody)', \(thought.createdAt.timeIntervalSince1970), \(thought.updatedAt.timeIntervalSince1970), \(deleted));
             PRAGMA user_version = 1;
+            """
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
+        }
+    }
+
+    func writeV3Database(thought: Thought) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
+            throw SQLiteThoughtRepositoryError.open("test setup")
+        }
+        defer { sqlite3_close(database) }
+        let escapedBody = thought.body.replacingOccurrences(of: "'", with: "''")
+        let sql = """
+            CREATE TABLE thoughts (id TEXT PRIMARY KEY NOT NULL, body TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, deleted_at REAL NULL);
+            CREATE TABLE migrations (name TEXT PRIMARY KEY NOT NULL, completed_at REAL NOT NULL);
+            CREATE TABLE thought_relations (id TEXT PRIMARY KEY NOT NULL, source_thought_id TEXT NOT NULL REFERENCES thoughts(id), target_thought_id TEXT NOT NULL REFERENCES thoughts(id), relation_type TEXT NOT NULL CHECK (relation_type = 'continues'), created_at REAL NOT NULL, CHECK (source_thought_id <> target_thought_id), UNIQUE (source_thought_id, target_thought_id, relation_type));
+            CREATE TABLE review_summaries (id TEXT PRIMARY KEY NOT NULL, period_start REAL NOT NULL, period_end REAL NOT NULL, content TEXT NOT NULL, created_at REAL NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, prompt_version INTEGER NOT NULL, thought_count INTEGER NOT NULL CHECK (thought_count > 0), CHECK (period_start < period_end));
+            INSERT INTO thoughts VALUES ('\(thought.id.uuidString)', '\(escapedBody)', \(thought.createdAt.timeIntervalSince1970), \(thought.updatedAt.timeIntervalSince1970), NULL);
+            PRAGMA user_version = 3;
             """
         guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
             throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))

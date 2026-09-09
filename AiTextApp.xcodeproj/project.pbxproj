@@ -27,6 +27,7 @@
 		A10000000000000000000018 /* ReviewSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* ReviewSummary.swift */; };
 		A10000000000000000000019 /* GeminiReviewSummaryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* GeminiReviewSummaryClient.swift */; };
 		A10000000000000000000020 /* ReviewSummaryExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022 /* ReviewSummaryExporter.swift */; };
+		A10000000000000000000021 /* ThoughtTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000024 /* ThoughtTag.swift */; };
 		D10000000000000000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000001 /* FirebaseCore */; };
 		D10000000000000000000002 /* FirebaseAILogic in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000002 /* FirebaseAILogic */; };
 		D10000000000000000000003 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000003 /* FirebaseAppCheck */; };
@@ -66,6 +67,7 @@
 		A20000000000000000000021 /* GeminiReviewSummaryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiReviewSummaryClient.swift; sourceTree = "<group>"; };
 		A20000000000000000000022 /* ReviewSummaryExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSummaryExporter.swift; sourceTree = "<group>"; };
 		A20000000000000000000023 /* AiTextApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AiTextApp.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000024 /* ThoughtTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThoughtTag.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -138,6 +140,7 @@
 				A20000000000000000000017 /* ExternalBackup.swift */,
 				A20000000000000000000020 /* ReviewSummary.swift */,
 				A20000000000000000000022 /* ReviewSummaryExporter.swift */,
+				A20000000000000000000024 /* ThoughtTag.swift */,
 			);
 			path = ThoughtCore;
 			sourceTree = "<group>";
@@ -291,6 +294,7 @@
 				A10000000000000000000018 /* ReviewSummary.swift in Sources */,
 				A10000000000000000000019 /* GeminiReviewSummaryClient.swift in Sources */,
 				A10000000000000000000020 /* ReviewSummaryExporter.swift in Sources */,
+				A10000000000000000000021 /* ThoughtTag.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
