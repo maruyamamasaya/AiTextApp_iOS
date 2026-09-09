@@ -40,13 +40,22 @@ Phase 2-C（History Review / 時間軸でThoughtを振り返る）の実装を�
 - Files／iCloud Driveのユーザー選択フォルダへSQLite Online Backup APIの完全snapshotを保存する外部災害復旧バックアップ。
 - History Reviewの選択期間を明示操作時だけ要約するAI要約UI、送信前確認、Mockクライアント、再要約、失敗時再試行。
 - Thought原文と分離したSQLite schema v3の`review_summaries`と、通信／保存を抽象化した要約use case。
-- Firebase AI Logic用Geminiクライアントadapter（SDK／Firebase設定未接続時はMockで動作）。
+- Firebase Apple SDK 12.17.0以降の`FirebaseAILogic`／`FirebaseAppCheck`／`FirebaseCore`依存と、通常起動でFirebase AI Logicを選ぶcomposition root。
+- `PrepareReviewSummary`の確定promptを変更せず送るFirebase transport、中央管理した`firebase-ai-logic`／`gemini-3.7-flash`、成功時だけ既存SQLite保存へ進む実クライアント。
+- Firebase未設定、App Check、rate limit、network、その他API、空応答を区別するエラー境界。DebugはApp Check Debug Provider、ReleaseはApp AttestをFirebase初期化前に設定する。
+- SDK非依存transportによるFirebaseクライアント変換テスト。MockクライアントはCore／UIテスト用として維持。
+- 選択期間ごとのAI要約履歴画面。再要約結果を新しい順に表示し、最新、生成日時、対象件数、生成元を確認可能。
+- AI要約履歴から要約ID単位で削除する確認付き操作。最新要約の再選択、全件削除後の未生成表示、失敗表示に対応。
+- AI要約の送信前プレビュー。対象期間、件数、最終payload文字数、本文文字数、日時順Thoughtを表示し、明示確定時だけ送信。
+- プレビュー時の最終requestを固定し、送信直前に期間内Thoughtを再取得して一致しない場合は送信を中止する整合性確認。
+- AI要約履歴の各レコードをMarkdown／JSONで個別Exportする形式選択とiOS標準Share Sheet導線。
+- Thought本文・promptを含まないAI要約専用Export modelと、将来の解析／再Importを見据えたJSON schema v1。
 - `latest`／`previous`の外部2世代、version・schema・サイズ・SHA-256を持つmanifest、作成後検証と失敗時rollback。
 - security-scoped bookmarkによる保存先再利用、Restore事前検証・確認UI・次回起動前のatomic適用と現DB rollback。
 
 ## 未実装
 
-- Firebase SDK追加、Firebase AI Logic／Gemini Developer API設定、App Check、実Geminiクライアントのcomposition rootへの接続。
+- Firebase ConsoleでのGemini Developer API有効化、iOS app登録、App Check provider／Debug token登録、ローカル`GoogleService-Info.plist`配置。
 - AI分類など要約以外の派生情報、クラウド同期、アカウント、その他の外部連携。
 - CI/CD、配布用の署名・bundle identifier設定。
 
@@ -63,17 +72,22 @@ Phase 2-C（History Review / 時間軸でThoughtを振り返る）の実装を�
 
 1. macOSで`swift test`を実行し、schema v3 migration、AI要約prompt、Mock生成、再要約保存を確認する。
 2. iPhone SEと最新標準iPhone Simulatorでbuild／XCUITestを実行する。
-3. AI要約の送信確認、Mock表示、loading、通信失敗、再試行、Thoughtなし、再要約を手動確認する。
-4. AI要約を含むReview画面をLight／Dark Mode、Dynamic Type、VoiceOverで確認する。
-5. Firebase設定完了後、`FirebaseAILogic`／`FirebaseAppCheck`を追加し、Debug App Check tokenを登録して実通信を確認する。
-6. 配布前にApp Attest等の本番App Check provider、quota超過、offline、timeout時の挙動を実機確認する。
-7. 実機でShare Sheet（Files、AirDrop）、外部backup／Restoreを回帰確認する。
+3. AI要約プレビューの期間・件数・文字数・Thought順序、キャンセル、確定後のMock表示、loading、通信失敗、再試行、Thoughtなし、再要約を手動確認する。
+4. プレビュー表示後に対象Thoughtが変わった場合、AIを呼ばず対象再読込エラーになることを確認する。
+5. AI要約履歴で削除キャンセル、個別削除、最新切替、全件削除後の空状態、削除失敗表示を確認する。
+6. AI要約履歴のMarkdown／JSON形式Menu、ファイル名、Share Sheet、Files／AirDrop保存、削除済み要約の拒否を確認する。
+7. AI要約を含むReview画面をLight／Dark Mode、Dynamic Type、VoiceOverで確認する。
+8. XcodeでFirebase Apple SDK 12.17.0以降をresolveし、`FirebaseCore`／`FirebaseAILogic`／`FirebaseAppCheck`のcompileを確認する（Windowsでは未実行）。
+9. Firebase Consoleから取得した`GoogleService-Info.plist`をローカルでapp targetへ追加し、Debug Providerの出力tokenをConsoleへ登録してSimulator実通信を確認する。plist／tokenは未配置・未コミット。
+10. 実機でApp Attest entitlement／provider、AI Logic実通信、保存されるprovider／model、Firebase未設定、App Check拒否、quota超過、offline、timeout、空応答を確認する（未実行）。
+11. 実機で既存Thought Share Sheet（Files、AirDrop）、外部backup／Restoreを回帰確認する。
 
 ### 次の実装候補
 
-1. AI要約履歴画面 — 同期間の過去要約を表示・比較し、再要約が追記保存されている価値を利用者へ返す。
-2. AI要約の削除 — Thought原文に触れず、不要な派生情報だけを端末から削除できるようにする。
-3. 要約対象の明示プレビュー — 送信確認前に対象件数と期間を表示し、送信範囲をさらに分かりやすくする。
-4. 要約のExport — Markdown／JSON Exportで、原文とは別セクションまたは別ファイルとして任意に出力する。
-5. AI機能設定 — AI要約の利用可否、privacy説明の再表示、provider／model状態を確認できる設定画面を追加する。
-6. 数日間の実利用後にHistory／AI要約／バックアップ／Export運用を再評価する。
+1. 完了: AI要約履歴画面 — 同期間の過去要約を新しい順に表示し、生成日時、対象件数、生成元を確認可能。
+2. 完了: AI要約の削除 — 要約ID単位の確認付き削除。Thought原文、別期間、他要約には影響しない。
+3. 完了: 要約対象の明示プレビュー — 期間、件数、文字数、日時順本文を確認し、確定したpayloadだけを送信する。
+4. 完了: 要約のExport — 選択した要約と安全なメタデータだけをMarkdown／JSONで個別共有する。
+5. 5-Aコード側完了／接続確認保留: Firebase AI Logic／App Checkをcomposition rootへ接続。Console、plist、Xcode build、Simulator／実機通信は上記のとおり未確認。
+6. 次候補 5-B: AI機能設定画面 — AI要約の利用可否、privacy説明の再表示、接続状態、provider／model、App Check環境を読み取り専用で表示する。API key入力やモデル自由入力、自動送信は設けない。
+7. 数日間の実利用後にHistory／AI要約／バックアップ／Export運用を再評価する。

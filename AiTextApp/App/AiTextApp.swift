@@ -24,7 +24,10 @@ struct AiTextApp: App {
             } catch {
                 restoreError = "Restoreを適用できなかったため、元のデータを維持しました。\n\(error.localizedDescription)"
             }
-            _store = StateObject(wrappedValue: ThoughtStore(startupError: restoreError))
+            _store = StateObject(wrappedValue: ThoughtStore(
+                summaryClient: ReviewSummaryClientFactory.makeProductionClient(),
+                startupError: restoreError
+            ))
         }
     }
 

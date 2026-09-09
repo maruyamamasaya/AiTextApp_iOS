@@ -68,6 +68,10 @@ public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRe
         lock.withLock { summaries.append(summary) }
     }
 
+    public func fetchSummary(id: UUID) throws -> ReviewSummary? {
+        lock.withLock { summaries.first { $0.id == id } }
+    }
+
     public func fetchSummaries(from startDate: Date, to endDate: Date) throws -> [ReviewSummary] {
         lock.withLock {
             summaries.filter { $0.periodStart == startDate && $0.periodEnd == endDate }
@@ -76,6 +80,14 @@ public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRe
                         ? $0.id.uuidString > $1.id.uuidString
                         : $0.createdAt > $1.createdAt
                 }
+        }
+    }
+
+    public func deleteSummary(id: UUID) throws -> Bool {
+        lock.withLock {
+            guard let index = summaries.firstIndex(where: { $0.id == id }) else { return false }
+            summaries.remove(at: index)
+            return true
         }
     }
 

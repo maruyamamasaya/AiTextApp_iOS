@@ -7,6 +7,41 @@ import SQLite3
 import CSQLite
 #endif
 
+private actor RecordingReviewSummaryClient: ReviewSummaryClient {
+    private var requests: [ReviewSummaryRequest] = []
+
+    func generateSummary(_ request: ReviewSummaryRequest) async throws -> ReviewSummaryResponse {
+        requests.append(request)
+        return ReviewSummaryResponse(text: "記録した要約", provider: "test", model: "recording")
+    }
+
+    func recordedRequests() -> [ReviewSummaryRequest] { requests }
+}
+
+private struct ReviewSummaryTransportCall: Equatable, Sendable {
+    let prompt: String
+    let modelName: String
+}
+
+private actor RecordingReviewSummaryTransport: ReviewSummaryGeneratingTransport {
+    private let response: String?
+    private let error: ReviewSummaryServiceError?
+    private var calls: [ReviewSummaryTransportCall] = []
+
+    init(response: String? = "Firebaseの要約", error: ReviewSummaryServiceError? = nil) {
+        self.response = response
+        self.error = error
+    }
+
+    func generateContent(prompt: String, modelName: String) async throws -> String? {
+        calls.append(ReviewSummaryTransportCall(prompt: prompt, modelName: modelName))
+        if let error { throw error }
+        return response
+    }
+
+    func recordedCalls() -> [ReviewSummaryTransportCall] { calls }
+}
+
 @Suite("Thought timeline", .serialized)
 struct ThoughtTimelineTests {
     @Test func createSupportsBoundariesAndUnicode() throws {
@@ -347,6 +382,81 @@ struct ThoughtHistoryReviewTests {
         }
     }
 
+    @Test func previewUsesExactReviewPeriodAndReportsPayloadCounts() throws {
+        let repository = MemoryThoughtRepository()
+        let now = Date(timeIntervalSince1970: 1_789_000_000)
+        let today = ThoughtReviewPeriod.today(containing: now, calendar: calendar)
+        let yesterday = ThoughtReviewPeriod.yesterday(containing: now, calendar: calendar)
+        let sevenDays = ThoughtReviewPeriod.pastSevenDays(containing: now, calendar: calendar)
+        let values = [
+            Thought(body: "七日前", createdAt: sevenDays.start.addingTimeInterval(1)),
+            Thought(body: "昨日", createdAt: yesterday.start.addingTimeInterval(1)),
+            Thought(body: "今日", createdAt: today.start.addingTimeInterval(1)),
+            Thought(body: "対象外", createdAt: sevenDays.start.addingTimeInterval(-1))
+        ]
+        for thought in values { try repository.create(thought) }
+        let prepare = PrepareReviewSummary(repository: repository)
+
+        let todayPreview = try prepare(interval: today)
+        let yesterdayPreview = try prepare(interval: yesterday)
+        let sevenDayPreview = try prepare(interval: sevenDays)
+        let selectedDatePreview = try prepare(interval: ThoughtReviewPeriod.day(
+            containing: yesterday.start.addingTimeInterval(100), calendar: calendar
+        ))
+
+        #expect(todayPreview.thoughts.map(\.body) == ["今日"])
+        #expect(yesterdayPreview.thoughts.map(\.body) == ["昨日"])
+        #expect(sevenDayPreview.thoughts.map(\.body) == ["七日前", "昨日", "今日"])
+        #expect(selectedDatePreview.thoughts.map(\.body) == ["昨日"])
+        #expect(sevenDayPreview.thoughtCount == 3)
+        #expect(sevenDayPreview.thoughtCharacterCount == "七日前昨日今日".count)
+        #expect(sevenDayPreview.payloadCharacterCount == sevenDayPreview.request.prompt.count)
+        #expect(!sevenDayPreview.request.prompt.contains("対象外"))
+    }
+
+    @Test func preparingOrCancellingDoesNotCallAIAndSubmissionUsesFrozenRequestOnce() async throws {
+        let repository = MemoryThoughtRepository(records: [Thought(body: "確認した本文")])
+        let interval = DateInterval(start: .distantPast, end: .distantFuture)
+        let preview = try PrepareReviewSummary(repository: repository)(interval: interval)
+        let client = RecordingReviewSummaryClient()
+        let beforeSubmission = await client.recordedRequests()
+        #expect(beforeSubmission.isEmpty)
+
+        _ = try await GenerateReviewSummary(client: client, repository: repository)(preview: preview)
+
+        let submitted = await client.recordedRequests()
+        #expect(submitted == [preview.request])
+        #expect(try repository.fetchSummaries(from: interval.start, to: interval.end).count == 1)
+    }
+
+    @Test func previewRejectsAnEmptyPeriodBeforeSubmission() throws {
+        let repository = MemoryThoughtRepository()
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 100), end: Date(timeIntervalSince1970: 200))
+        #expect(throws: ReviewSummaryError.noThoughts) {
+            try PrepareReviewSummary(repository: repository)(interval: interval)
+        }
+    }
+
+    @Test func stalePreviewIsRejectedBeforeTheAIClientCanBeCalled() async throws {
+        let interval = DateInterval(
+            start: Date(timeIntervalSince1970: 100),
+            end: Date(timeIntervalSince1970: 300)
+        )
+        let repository = MemoryThoughtRepository(records: [
+            Thought(body: "確認時の本文", createdAt: Date(timeIntervalSince1970: 150))
+        ])
+        let preview = try PrepareReviewSummary(repository: repository)(interval: interval)
+        try repository.create(Thought(body: "確認後に追加", createdAt: Date(timeIntervalSince1970: 200)))
+        let client = RecordingReviewSummaryClient()
+
+        #expect(throws: ReviewSummaryError.stalePreview) {
+            try ValidateReviewSummaryPreview(repository: repository)(preview)
+        }
+
+        let requests = await client.recordedRequests()
+        #expect(requests.isEmpty)
+    }
+
     @Test func generatedSummariesAreSavedSeparatelyAndCanBeRegenerated() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
@@ -357,22 +467,130 @@ struct ThoughtHistoryReviewTests {
         )
         let thoughts = [Thought(body: "原文は変えない", createdAt: Date(timeIntervalSince1970: 200))]
         try repository.create(thoughts[0])
+        let preview = try PrepareReviewSummary(repository: repository)(interval: interval)
         let generator = GenerateReviewSummary(
             client: MockReviewSummaryClient(text: "主な話題: 1回目"),
             repository: repository
         )
-        _ = try await generator(thoughts: thoughts, interval: interval, now: Date(timeIntervalSince1970: 300))
+        _ = try await generator(preview: preview, now: Date(timeIntervalSince1970: 300))
         let regenerated = GenerateReviewSummary(
             client: MockReviewSummaryClient(text: "主な話題: 2回目"),
             repository: repository
         )
-        _ = try await regenerated(thoughts: thoughts, interval: interval, now: Date(timeIntervalSince1970: 400))
+        _ = try await regenerated(preview: preview, now: Date(timeIntervalSince1970: 400))
 
         let reopened = try fixture.repository()
         let summaries = try reopened.fetchSummaries(from: interval.start, to: interval.end)
         #expect(summaries.map(\.content) == ["主な話題: 2回目", "主な話題: 1回目"])
         #expect(summaries.allSatisfy { $0.thoughtCount == 1 && $0.promptVersion == ReviewSummaryPrompt.version })
         #expect(try reopened.fetchByID(thoughts[0].id)?.body == "原文は変えない")
+    }
+
+    @Test func firebaseClientPassesTheCanonicalPromptAndRecordsActualProviderAndModel() async throws {
+        let transport = RecordingReviewSummaryTransport()
+        let client = FirebaseReviewSummaryClient(transport: transport)
+        let request = ReviewSummaryRequest(prompt: "PrepareReviewSummaryが確定したpayload")
+
+        let response = try await client.generateSummary(request)
+
+        #expect(await transport.recordedCalls() == [ReviewSummaryTransportCall(
+            prompt: request.prompt,
+            modelName: ReviewSummaryAIConfiguration.modelName
+        )])
+        #expect(response.text == "Firebaseの要約")
+        #expect(response.provider == ReviewSummaryAIConfiguration.providerName)
+        #expect(response.model == ReviewSummaryAIConfiguration.modelName)
+    }
+
+    @Test func firebaseClientRejectsEmptyResponsesAndPreservesTypedServiceErrors() async {
+        let request = ReviewSummaryRequest(prompt: "payload")
+        let emptyClient = FirebaseReviewSummaryClient(
+            transport: RecordingReviewSummaryTransport(response: nil)
+        )
+        await #expect(throws: ReviewSummaryError.emptyResponse) {
+            try await emptyClient.generateSummary(request)
+        }
+
+        for error in [
+            ReviewSummaryServiceError.firebaseNotConfigured,
+            .network, .rateLimited, .api, .appCheck
+        ] {
+            let client = FirebaseReviewSummaryClient(
+                transport: RecordingReviewSummaryTransport(error: error)
+            )
+            await #expect(throws: error) {
+                try await client.generateSummary(request)
+            }
+        }
+
+        let unavailable = UnavailableReviewSummaryClient(error: .firebaseNotConfigured)
+        await #expect(throws: ReviewSummaryServiceError.firebaseNotConfigured) {
+            try await unavailable.generateSummary(request)
+        }
+    }
+
+    @Test func firebaseErrorsAreClassifiedWithoutCallingTheSDK() {
+        #expect(ReviewSummaryServiceError.classify(
+            domain: NSURLErrorDomain, code: -1009, description: "offline"
+        ) == .network)
+        #expect(ReviewSummaryServiceError.classify(
+            domain: "FirebaseAILogic", code: 429, description: "RESOURCE_EXHAUSTED"
+        ) == .rateLimited)
+        #expect(ReviewSummaryServiceError.classify(
+            domain: "FIRAppCheckErrorDomain", code: 1, description: "attestation failed"
+        ) == .appCheck)
+        #expect(ReviewSummaryServiceError.classify(
+            domain: "FirebaseCore", code: 1, description: "GoogleService-Info.plist missing"
+        ) == .firebaseNotConfigured)
+        #expect(ReviewSummaryServiceError.classify(
+            domain: "FirebaseAILogic", code: 500, description: "server error"
+        ) == .api)
+    }
+
+    @Test func deletesExactlyOneSummaryWithoutAffectingThoughtsOrOtherPeriods() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let thought = Thought(body: "削除してはいけない原文", createdAt: Date(timeIntervalSince1970: 150))
+        try repository.create(thought)
+        let firstPeriod = DateInterval(
+            start: Date(timeIntervalSince1970: 100),
+            end: Date(timeIntervalSince1970: 200)
+        )
+        let otherPeriod = DateInterval(
+            start: Date(timeIntervalSince1970: 200),
+            end: Date(timeIntervalSince1970: 300)
+        )
+        let older = ReviewSummary(
+            periodStart: firstPeriod.start, periodEnd: firstPeriod.end,
+            content: "古い要約", createdAt: Date(timeIntervalSince1970: 160),
+            provider: "mock", model: "mock", promptVersion: 1, thoughtCount: 1
+        )
+        let latest = ReviewSummary(
+            periodStart: firstPeriod.start, periodEnd: firstPeriod.end,
+            content: "最新要約", createdAt: Date(timeIntervalSince1970: 170),
+            provider: "mock", model: "mock", promptVersion: 1, thoughtCount: 1
+        )
+        let anotherPeriodSummary = ReviewSummary(
+            periodStart: otherPeriod.start, periodEnd: otherPeriod.end,
+            content: "別期間", createdAt: Date(timeIntervalSince1970: 250),
+            provider: "mock", model: "mock", promptVersion: 1, thoughtCount: 1
+        )
+        for summary in [older, latest, anotherPeriodSummary] { try repository.save(summary) }
+
+        #expect(try repository.fetchSummary(id: latest.id) == latest)
+        #expect(try repository.deleteSummary(id: latest.id))
+        #expect(try repository.fetchSummary(id: latest.id) == nil)
+        #expect(try repository.fetchSummaries(from: firstPeriod.start, to: firstPeriod.end) == [older])
+        #expect(try repository.fetchByID(thought.id)?.body == "削除してはいけない原文")
+        #expect(try repository.fetchSummaries(from: otherPeriod.start, to: otherPeriod.end) == [anotherPeriodSummary])
+        #expect(try repository.fetchSummary(id: anotherPeriodSummary.id) == anotherPeriodSummary)
+
+        #expect(try repository.deleteSummary(id: older.id))
+        #expect(try repository.fetchSummaries(from: firstPeriod.start, to: firstPeriod.end).isEmpty)
+        #expect(try repository.deleteSummary(id: UUID()) == false)
+        #expect(try repository.fetchByID(thought.id) == thought)
+        #expect(try repository.fetchSummaries(from: otherPeriod.start, to: otherPeriod.end) == [anotherPeriodSummary])
     }
 }
 
@@ -432,6 +650,98 @@ struct ThoughtExporterTests {
     }
 
     private func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
+}
+
+@Suite("Review summary export")
+struct ReviewSummaryExporterTests {
+    private let utc = TimeZone(secondsFromGMT: 0)!
+
+    @Test func markdownAndJSONRepresentOnlyTheSelectedSummary() throws {
+        let repository = MemoryThoughtRepository(records: [
+            Thought(body: "PRIVATE_THOUGHT_BODY", createdAt: Date(timeIntervalSince1970: 100))
+        ])
+        let selected = ReviewSummary(
+            id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            periodStart: Date(timeIntervalSince1970: 0),
+            periodEnd: Date(timeIntervalSince1970: 86_400),
+            content: "選択したAI要約",
+            createdAt: Date(timeIntervalSince1970: 3_600),
+            provider: "firebase-ai-logic",
+            model: "gemini-test",
+            promptVersion: 1,
+            thoughtCount: 4
+        )
+        let other = ReviewSummary(
+            periodStart: selected.periodStart,
+            periodEnd: selected.periodEnd,
+            content: "別の履歴",
+            provider: "mock",
+            model: "other",
+            promptVersion: 1,
+            thoughtCount: 1
+        )
+        try repository.save(selected)
+        try repository.save(other)
+        let before = try repository.fetchSummaries(from: selected.periodStart, to: selected.periodEnd)
+        let exporter = ReviewSummaryExporter(repository: repository, timeZone: utc)
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("review-summary-export-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        let markdown = String(decoding: try exporter.data(for: selected.id, format: .markdown), as: UTF8.self)
+        let json = try exporter.data(for: selected.id, format: .json)
+        let writtenURL = try exporter.write(summaryID: selected.id, format: .json, to: outputDirectory)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let document = try decoder.decode(ReviewSummaryExportDocument.self, from: json)
+
+        #expect(markdown.contains("# AI Review Summary"))
+        #expect(markdown.contains("- Period: 1970-01-01"))
+        #expect(markdown.contains("- Generated At: 1970-01-01T01:00:00Z"))
+        #expect(markdown.contains("- Thought Count: 4"))
+        #expect(markdown.contains("- Provider: firebase-ai-logic"))
+        #expect(markdown.contains("- Model: gemini-test"))
+        #expect(markdown.contains("選択したAI要約"))
+        #expect(!markdown.contains("別の履歴"))
+        #expect(!markdown.contains("PRIVATE_THOUGHT_BODY"))
+        #expect(!markdown.contains("メモ（古い順）"))
+        #expect(!markdown.contains("API_KEY"))
+
+        #expect(document.schemaVersion == ReviewSummaryExportDocument.currentSchemaVersion)
+        #expect(document.summaryId == selected.id)
+        #expect(document.period == .init(start: selected.periodStart, endExclusive: selected.periodEnd))
+        #expect(document.summary == selected.content)
+        #expect(document.generatedAt == selected.createdAt)
+        #expect(document.thoughtCount == selected.thoughtCount)
+        #expect(document.provider == selected.provider)
+        #expect(document.model == selected.model)
+        #expect(!String(decoding: json, as: UTF8.self).contains("PRIVATE_THOUGHT_BODY"))
+        #expect(!String(decoding: json, as: UTF8.self).contains("prompt"))
+        #expect(try repository.fetchSummaries(from: selected.periodStart, to: selected.periodEnd) == before)
+        #expect(try repository.fetchTimeline().map(\.body) == ["PRIVATE_THOUGHT_BODY"])
+        #expect(exporter.fileName(for: selected, format: .markdown) == "review-summary-1970-01-01-aaaaaaaa.md")
+        #expect(writtenURL.lastPathComponent == "review-summary-1970-01-01-aaaaaaaa.json")
+        #expect(try Data(contentsOf: writtenURL) == json)
+    }
+
+    @Test func deletedSummaryCannotBeExported() throws {
+        let repository = MemoryThoughtRepository()
+        let summary = ReviewSummary(
+            periodStart: Date(timeIntervalSince1970: 0),
+            periodEnd: Date(timeIntervalSince1970: 86_400),
+            content: "削除対象",
+            provider: "mock",
+            model: "mock",
+            promptVersion: 1,
+            thoughtCount: 1
+        )
+        try repository.save(summary)
+        #expect(try repository.deleteSummary(id: summary.id))
+        let exporter = ReviewSummaryExporter(repository: repository, timeZone: utc)
+        #expect(throws: ReviewSummaryExportError.summaryNotFound) {
+            try exporter.data(for: summary.id, format: .json)
+        }
+    }
 }
 
 @Suite("External disaster recovery backup", .serialized)

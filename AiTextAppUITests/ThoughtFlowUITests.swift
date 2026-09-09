@@ -103,6 +103,91 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
     }
 
+    func testReviewSummaryHistoryKeepsRegeneratedResultsNewestFirst() {
+        let composer = app.textViews["thoughtComposer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText("AI summary history")
+        app.buttons["postButton"].tap()
+        app.buttons["historyReviewButton"].tap()
+        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
+
+        createReviewSummary()
+        XCTAssertTrue(app.buttons["reviewAISummaryHistoryButton"].waitForExistence(timeout: 2))
+        createReviewSummary()
+
+        let historyButton = app.buttons["reviewAISummaryHistoryButton"]
+        XCTAssertTrue(historyButton.waitForExistence(timeout: 2))
+        XCTAssertEqual(historyButton.label, "履歴 2件")
+        historyButton.tap()
+
+        XCTAssertTrue(app.navigationBars["AI要約履歴"].waitForExistence(timeout: 2))
+        let items = app.otherElements.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "reviewAISummaryHistoryItem_")
+        )
+        XCTAssertEqual(items.count, 2)
+        XCTAssertEqual(app.staticTexts["reviewAISummaryLatest"].count, 1)
+
+        let exportMenus = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "exportReviewSummary_")
+        )
+        XCTAssertEqual(exportMenus.count, 2)
+        exportMenus.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["Markdownを共有"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["JSONを共有"].exists)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.1)).tap()
+
+        let deleteButtons = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "deleteReviewSummary_")
+        )
+        deleteButtons.element(boundBy: 0).tap()
+        let deletionAlert = app.alerts["AI要約を削除しますか？"]
+        XCTAssertTrue(deletionAlert.waitForExistence(timeout: 2))
+        deletionAlert.buttons["キャンセル"].tap()
+        XCTAssertEqual(deleteButtons.count, 2, "キャンセル時は何も削除しない")
+
+        deleteButtons.element(boundBy: 0).tap()
+        XCTAssertTrue(deletionAlert.waitForExistence(timeout: 2))
+        deletionAlert.buttons["削除"].tap()
+        XCTAssertEqual(deleteButtons.count, 1)
+        XCTAssertEqual(app.staticTexts["reviewAISummaryLatest"].count, 1, "残った最新要約へ表示を切り替える")
+
+        deleteButtons.element(boundBy: 0).tap()
+        XCTAssertTrue(deletionAlert.waitForExistence(timeout: 2))
+        deletionAlert.buttons["削除"].tap()
+        XCTAssertTrue(app.staticTexts["AI要約履歴はありません"].waitForExistence(timeout: 2))
+    }
+
+    func testReviewSummaryPreviewShowsCurrentThoughtAndCanCancelWithoutGenerating() {
+        let composer = app.textViews["thoughtComposer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText("Preview only Thought")
+        app.buttons["postButton"].tap()
+        app.buttons["historyReviewButton"].tap()
+        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
+
+        app.buttons["reviewAISummaryButton"].tap()
+        XCTAssertTrue(app.navigationBars["AI要約プレビュー"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Preview only Thought"].exists)
+        XCTAssertTrue(app.otherElements["reviewSummaryPreviewMetadata"].exists)
+        XCTAssertTrue(app.buttons["confirmReviewSummarySubmission"].exists)
+        app.buttons["cancelReviewSummarySubmission"].tap()
+
+        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["reviewAISummaryHistoryButton"].waitForExistence(timeout: 1))
+    }
+
+    private func createReviewSummary() {
+        let summaryButton = app.buttons["reviewAISummaryButton"]
+        XCTAssertTrue(summaryButton.waitForExistence(timeout: 2))
+        summaryButton.tap()
+        XCTAssertTrue(app.navigationBars["AI要約プレビュー"].waitForExistence(timeout: 2))
+        let confirm = app.buttons["confirmReviewSummarySubmission"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 2))
+        confirm.tap()
+    }
+
     private func openThoughtMenuAndChooseDelete() {
         let menu = app.buttons.matching(identifier: "thoughtMenu").firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 2))

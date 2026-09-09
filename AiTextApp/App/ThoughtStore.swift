@@ -19,8 +19,12 @@ final class ThoughtStore: ObservableObject {
     @Published private(set) var reviewThoughts: [Thought] = []
     @Published private(set) var reviewContinuationCounts: [UUID: Int] = [:]
     @Published private(set) var reviewSummary: ReviewSummary?
+    @Published private(set) var reviewSummaries: [ReviewSummary] = []
     @Published private(set) var isGeneratingReviewSummary = false
     @Published var reviewSummaryError: String?
+    @Published var reviewSummaryDeletionError: String?
+    @Published var reviewSummaryExportError: String?
+    @Published private(set) var reviewSummaryPreview: ReviewSummaryPreview?
     let externalBackupManager: ExternalBackupManager?
 
     private var timeline: ThoughtTimeline?
@@ -29,6 +33,7 @@ final class ThoughtStore: ObservableObject {
     private var relationRepository: (any ThoughtRelationRepository)?
     private var continuationRepository: (any ThoughtContinuationRepository)?
     private var summaryRepository: (any ReviewSummaryRepository)?
+    private var summaryExporter: ReviewSummaryExporter?
     private let summaryClient: any ReviewSummaryClient
     private var reviewInterval: DateInterval?
 
@@ -46,7 +51,10 @@ final class ThoughtStore: ObservableObject {
             thoughtRepository = repository
             relationRepository = repository as? any ThoughtRelationRepository
             continuationRepository = repository as? any ThoughtContinuationRepository
-            summaryRepository = repository as? any ReviewSummaryRepository
+            if let reviewSummaryRepository = repository as? any ReviewSummaryRepository {
+                summaryRepository = reviewSummaryRepository
+                summaryExporter = ReviewSummaryExporter(repository: reviewSummaryRepository)
+            }
             exporter = ThoughtExporter(repository: repository)
             thoughts = timeline.thoughts
             if let sqliteRepository = repository as? SQLiteThoughtRepository {
@@ -121,44 +129,120 @@ final class ThoughtStore: ObservableObject {
             reviewThoughts = thoughts
             reviewContinuationCounts = try relationRepository.fetchContinuationCounts(for: thoughts.map(\.id))
             reviewInterval = interval
-            reviewSummary = try summaryRepository?.fetchSummaries(from: interval.start, to: interval.end).first
+            reviewSummaries = try summaryRepository?.fetchSummaries(from: interval.start, to: interval.end) ?? []
+            reviewSummary = reviewSummaries.first
             reviewSummaryError = nil
+            reviewSummaryDeletionError = nil
+            reviewSummaryExportError = nil
+            reviewSummaryPreview = nil
         } catch {
             reviewInterval = interval
             reviewThoughts = []
             reviewContinuationCounts = [:]
             reviewSummary = nil
+            reviewSummaries = []
+            reviewSummaryDeletionError = nil
+            reviewSummaryExportError = nil
+            reviewSummaryPreview = nil
             errorMessage = "History Reviewを読み込めませんでした。"
         }
     }
 
-    func generateReviewSummary(in interval: DateInterval) async {
-        guard reviewInterval == interval else {
+    func prepareReviewSummary(in interval: DateInterval) {
+        guard reviewInterval == interval, let thoughtRepository else {
             reviewSummaryError = "選択期間を読み込み直してから再試行してください。"
             return
         }
-        guard !reviewThoughts.isEmpty else {
+        do {
+            reviewSummaryPreview = try PrepareReviewSummary(repository: thoughtRepository)(interval: interval)
+            reviewSummaryError = nil
+        } catch ReviewSummaryError.noThoughts {
+            reviewSummaryPreview = nil
             reviewSummaryError = ReviewSummaryError.noThoughts.localizedDescription
-            return
+        } catch {
+            reviewSummaryPreview = nil
+            reviewSummaryError = "要約対象を準備できませんでした。もう一度お試しください。"
         }
+    }
+
+    func cancelReviewSummaryPreview() {
+        reviewSummaryPreview = nil
+    }
+
+    func generateReviewSummary(from preview: ReviewSummaryPreview) async {
         guard let summaryRepository else {
             reviewSummaryError = "AI要約の保存先を利用できません。"
             return
         }
-        let targetThoughts = reviewThoughts
+        guard let thoughtRepository, reviewInterval == preview.interval else {
+            reviewSummaryError = "選択期間が変わりました。現在の期間でもう一度確認してください。"
+            return
+        }
         isGeneratingReviewSummary = true
         reviewSummaryError = nil
         defer { isGeneratingReviewSummary = false }
         do {
+            do {
+                try ValidateReviewSummaryPreview(repository: thoughtRepository)(preview)
+            } catch ReviewSummaryError.stalePreview {
+                loadReview(in: preview.interval)
+                reviewSummaryError = "確認後にThoughtが変更されました。送信せず、対象を読み込み直しました。"
+                return
+            }
             let summary = try await GenerateReviewSummary(
                 client: summaryClient,
                 repository: summaryRepository
-            )(thoughts: targetThoughts, interval: interval)
-            if reviewInterval == interval { reviewSummary = summary }
+            )(preview: preview)
+            if reviewInterval == preview.interval {
+                reviewSummaries.insert(summary, at: 0)
+                reviewSummary = summary
+            }
+        } catch let error as ReviewSummaryServiceError {
+            if reviewInterval == preview.interval {
+                reviewSummaryError = error.localizedDescription
+            }
+        } catch ReviewSummaryError.emptyResponse {
+            if reviewInterval == preview.interval {
+                reviewSummaryError = ReviewSummaryError.emptyResponse.localizedDescription
+            }
         } catch {
-            if reviewInterval == interval {
+            if reviewInterval == preview.interval {
                 reviewSummaryError = "AI要約を作成できませんでした。通信状態を確認して再試行してください。"
             }
+        }
+    }
+
+    func deleteReviewSummary(id: UUID) {
+        guard let summaryRepository else {
+            reviewSummaryDeletionError = "AI要約の保存先を利用できません。"
+            return
+        }
+        do {
+            guard try summaryRepository.deleteSummary(id: id) else {
+                reviewSummaryDeletionError = "選択したAI要約はすでに削除されています。"
+                return
+            }
+            reviewSummaries.removeAll { $0.id == id }
+            reviewSummary = reviewSummaries.first
+            reviewSummaryDeletionError = nil
+            reviewSummaryExportError = nil
+        } catch {
+            reviewSummaryDeletionError = "AI要約を削除できませんでした。もう一度お試しください。"
+        }
+    }
+
+    func exportReviewSummary(id: UUID, format: ReviewSummaryExportFormat) {
+        guard let summaryExporter else {
+            reviewSummaryExportError = "AI要約をExportできませんでした。"
+            return
+        }
+        do {
+            exportArtifact = ExportArtifact(url: try summaryExporter.write(summaryID: id, format: format))
+            reviewSummaryExportError = nil
+        } catch ReviewSummaryExportError.summaryNotFound {
+            reviewSummaryExportError = "選択したAI要約は削除されているためExportできません。"
+        } catch {
+            reviewSummaryExportError = "AI要約をExportできませんでした。保存済みデータは変更されていません。"
         }
     }
 

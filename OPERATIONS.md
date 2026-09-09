@@ -2,7 +2,7 @@
 
 ## Local Development
 
-`AiTextApp.xcodeproj`をXcode 16以降で開き、`AiTextApp` schemeと任意のiPhone Simulatorを選んで実行します。iOS 16.0以降が対象です。Firebase未設定時のAI要約はMockで動作し、外部dependencyや秘密情報は不要です。
+`AiTextApp.xcodeproj`をFirebase AI Logicが要求するXcode 26.2以降で開き、`AiTextApp` schemeと任意のiPhone Simulatorを選んで実行します。iOS 16.0以降が対象です。通常起動はFirebaseクライアントを使い、Firebase未設定時は外部送信せず設定エラーを表示します。UIテストはMemory repositoryとMock AIクライアントを使います。
 
 ## Local Data
 
@@ -14,7 +14,18 @@ Xcodeの`AiTextApp` shared schemeでbuildします。CLIコマンドとCore test
 
 ## Environment / External Services
 
-現在のbuildは環境変数、secret、外部サービスを必要としません。実AI接続時はFirebase Apple SDKの`FirebaseAILogic`と`FirebaseAppCheck`、Firebase構成ファイル、App Check設定を追加します。APIキーやApp Check debug tokenはソースへ記載・コミットしません。
+Firebase Apple SDKはSwift Package Managerで12.17.0以降を指定し、app targetへ`FirebaseCore`、`FirebaseAILogic`、`FirebaseAppCheck`をリンクします。APIキーをSwiftコードへ追加しません。
+
+### Firebase AI Logic / App Check接続
+
+1. Firebase Consoleで実際のbundle identifierを持つiOS appを登録し、Firebase AI LogicのGet startedからGemini Developer APIを有効化する。
+2. Consoleから`GoogleService-Info.plist`を取得し、Xcodeで`AiTextApp` targetへ追加してCopy Bundle Resources対象にする。このファイルは`.gitignore`対象で、各開発環境へ安全に配布する。
+3. Xcodeでpackageをresolveし、`FirebaseCore`、`FirebaseAILogic`、`FirebaseAppCheck`がapp targetへリンクされていることを確認する。
+4. Debug buildを起動する。`AppCheckDebugProviderFactory`が出力するDebug tokenをFirebase ConsoleのApp Check > Manage debug tokensへ登録する。tokenはScheme、ソース、文書へ記録・コミットしない。
+5. Release buildは`AppAttestProviderFactory`と`AiTextApp.entitlements`のproduction App Attest環境を使う。ConsoleでApp Attestを登録し、実機で成功を確認してからenforcementを段階的に有効化する。
+6. Reviewでプレビュー内容を確認して明示送信し、保存された履歴のproviderが`firebase-ai-logic`、modelが`gemini-3.7-flash`であることを確認する。
+
+`GoogleService-Info.plist`がない場合は起動を継続し、AI送信時に未設定エラーを表示します。App Check、429／quota、network、その他API、空応答はユーザー向けの別エラーへ変換します。Firebase ConsoleのenforcementはDebug tokenと実機App Attestの確認後に有効化してください。
 
 ## Deploy
 
@@ -25,6 +36,8 @@ CI/CD、配布用bundle identifier、code signing、provisioning、TestFlight/Ap
 正常なDB初期化後とThoughtの書き込み後には、`thought-timeline.sqlite3.backup.1`（最新）と`.backup.2`（ひとつ前）をSQLite Online Backup APIで更新します。自動復元は行いません。DB初期化失敗時はアプリを削除せず、正本を退避してからバックアップコピーを復元します。調査なしに新規DBで上書きしないでください。
 
 通常の持ち出しは画面右上のExportからMarkdown（人間向け）またはJSON（原文バックアップ／将来Import向け）を選び、標準Share SheetでFilesやAirDropへ保存します。Export失敗はSQLiteとComposerを変更しません。
+
+AI要約の持ち出しはHistory ReviewのAI要約履歴で対象レコードの共有Menuを開き、MarkdownまたはJSONを選びます。選択したAI要約と期間／生成メタデータだけを一時ファイルへ書き、標準Share Sheetへ渡します。Thought原文やGemini送信promptは含めず、SQLiteも変更しません。
 
 ### External Full Backup
 

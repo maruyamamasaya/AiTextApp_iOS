@@ -184,28 +184,42 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
             var output: [ReviewSummary] = []
             var result = sqlite3_step(statement)
             while result == SQLITE_ROW {
-                guard let idText = sqlite3_column_text(statement, 0),
-                      let contentText = sqlite3_column_text(statement, 3),
-                      let providerText = sqlite3_column_text(statement, 5),
-                      let modelText = sqlite3_column_text(statement, 6),
-                      let id = UUID(uuidString: String(cString: idText)) else {
-                    throw SQLiteThoughtRepositoryError.invalidRecord
-                }
-                output.append(ReviewSummary(
-                    id: id,
-                    periodStart: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)),
-                    periodEnd: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
-                    content: String(cString: contentText),
-                    createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
-                    provider: String(cString: providerText),
-                    model: String(cString: modelText),
-                    promptVersion: Int(sqlite3_column_int(statement, 7)),
-                    thoughtCount: Int(sqlite3_column_int(statement, 8))
-                ))
+                output.append(try decodeReviewSummary(statement))
                 result = sqlite3_step(statement)
             }
             guard result == SQLITE_DONE else { throw lastError() }
             return output
+        }
+    }
+
+    public func fetchSummary(id: UUID) throws -> ReviewSummary? {
+        try lock.withLock {
+            let statement = try prepare("""
+                SELECT id, period_start, period_end, content, created_at,
+                       provider, model, prompt_version, thought_count
+                FROM review_summaries WHERE id = ? LIMIT 1
+                """)
+            defer { sqlite3_finalize(statement) }
+            try bind(id.uuidString, to: 1, in: statement)
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE { return nil }
+            guard result == SQLITE_ROW else { throw lastError() }
+            return try decodeReviewSummary(statement)
+        }
+    }
+
+    public func deleteSummary(id: UUID) throws -> Bool {
+        try lock.withLock {
+            let changed: Bool
+            do {
+                let statement = try prepare("DELETE FROM review_summaries WHERE id = ?")
+                defer { sqlite3_finalize(statement) }
+                try bind(id.uuidString, to: 1, in: statement)
+                try stepDone(statement)
+                changed = sqlite3_changes(database) == 1
+            }
+            if changed { createRollingBackupIfPossible() }
+            return changed
         }
     }
 
@@ -628,6 +642,27 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
 
     private func bind(_ value: Double, to index: Int32, in statement: OpaquePointer) throws {
         guard sqlite3_bind_double(statement, index, value) == SQLITE_OK else { throw lastError() }
+    }
+
+    private func decodeReviewSummary(_ statement: OpaquePointer) throws -> ReviewSummary {
+        guard let idText = sqlite3_column_text(statement, 0),
+              let contentText = sqlite3_column_text(statement, 3),
+              let providerText = sqlite3_column_text(statement, 5),
+              let modelText = sqlite3_column_text(statement, 6),
+              let id = UUID(uuidString: String(cString: idText)) else {
+            throw SQLiteThoughtRepositoryError.invalidRecord
+        }
+        return ReviewSummary(
+            id: id,
+            periodStart: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)),
+            periodEnd: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
+            content: String(cString: contentText),
+            createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+            provider: String(cString: providerText),
+            model: String(cString: modelText),
+            promptVersion: Int(sqlite3_column_int(statement, 7)),
+            thoughtCount: Int(sqlite3_column_int(statement, 8))
+        )
     }
 
     private func bind(_ value: Int32, to index: Int32, in statement: OpaquePointer) throws {

@@ -1,24 +1,65 @@
 import Foundation
 
-#if canImport(FirebaseAILogic)
+#if canImport(FirebaseAILogic) && canImport(FirebaseAppCheck) && canImport(FirebaseCore)
 import FirebaseAILogic
+import FirebaseAppCheck
+import FirebaseCore
 
-/// Production adapter for Firebase AI Logic using the Gemini Developer API.
-/// Firebase configuration and App Check initialization intentionally live at
-/// the application composition root, not in this client.
-struct GeminiReviewSummaryClient: ReviewSummaryClient {
-    let modelName: String
+enum FirebaseAIBootstrap {
+    static func configureIfPossible(bundle: Bundle = .main) -> ReviewSummaryServiceError? {
+        if FirebaseApp.app() != nil { return nil }
 
-    init(modelName: String = "gemini-3.7-flash") {
-        self.modelName = modelName
+        guard let path = bundle.path(forResource: "GoogleService-Info", ofType: "plist"),
+              let options = FirebaseOptions(contentsOfFile: path) else {
+            return .firebaseNotConfigured
+        }
+
+        #if DEBUG
+        AppCheck.setAppCheckProviderFactory(AppCheckDebugProviderFactory())
+        #else
+        AppCheck.setAppCheckProviderFactory(AppAttestProviderFactory())
+        #endif
+        FirebaseApp.configure(options: options)
+        return FirebaseApp.app() == nil ? .firebaseNotConfigured : nil
     }
+}
 
-    func generateSummary(_ request: ReviewSummaryRequest) async throws -> ReviewSummaryResponse {
-        let ai = FirebaseAI.firebaseAI(backend: .googleAI())
-        let model = ai.generativeModel(modelName: modelName)
-        let response = try await model.generateContent(request.prompt)
-        guard let text = response.text else { throw ReviewSummaryError.emptyResponse }
-        return ReviewSummaryResponse(text: text, provider: "firebase-ai-logic", model: modelName)
+struct FirebaseAILogicTransport: ReviewSummaryGeneratingTransport {
+    func generateContent(prompt: String, modelName: String) async throws -> String? {
+        guard FirebaseApp.app() != nil else {
+            throw ReviewSummaryServiceError.firebaseNotConfigured
+        }
+
+        do {
+            let ai = FirebaseAI.firebaseAI(backend: .googleAI())
+            let model = ai.generativeModel(modelName: modelName)
+            return try await model.generateContent(prompt).text
+        } catch let error as ReviewSummaryServiceError {
+            throw error
+        } catch {
+            let underlying = error as NSError
+            let detail = [underlying.localizedDescription, underlying.localizedFailureReason]
+                .compactMap { $0 }
+                .joined(separator: " ")
+            throw ReviewSummaryServiceError.classify(
+                domain: underlying.domain,
+                code: underlying.code,
+                description: detail
+            )
+        }
     }
 }
 #endif
+
+enum ReviewSummaryClientFactory {
+    static func makeProductionClient() -> any ReviewSummaryClient {
+        #if canImport(FirebaseAILogic) && canImport(FirebaseAppCheck) && canImport(FirebaseCore)
+        if let error = FirebaseAIBootstrap.configureIfPossible() {
+            return UnavailableReviewSummaryClient(error: error)
+        }
+        return FirebaseReviewSummaryClient(transport: FirebaseAILogicTransport())
+        #else
+        return UnavailableReviewSummaryClient(error: .firebaseNotConfigured)
+        #endif
+    }
+}

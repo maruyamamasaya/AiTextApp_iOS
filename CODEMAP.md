@@ -10,7 +10,8 @@
 - `AiTextApp/App/ShareSheet.swift` — Exportファイルを標準Share Sheetへ渡すbridge。
 - `AiTextApp/App/ExternalBackupManager.swift` — security-scoped bookmark、外部backup／RestoreのUI state。
 - `AiTextApp/App/FolderPicker.swift` — iOS標準Filesフォルダpicker bridge。
-- `AiTextApp/App/GeminiReviewSummaryClient.swift` — Firebase AI Logicを使うGemini Developer API adapter（SDK追加後に有効）。
+- `AiTextApp/App/GeminiReviewSummaryClient.swift` — Firebase／App Check bootstrap、Firebase AI Logic transport、通常起動用client factory。
+- `AiTextApp/AiTextApp.entitlements` — Release App Attestのproduction environment entitlement。
 - `AiTextApp.xcodeproj` — iPhone app projectとshared scheme。
 
 Search: `@main|TimelineView|ThoughtStore|confirmationDialog`
@@ -28,7 +29,8 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 
 - `ThoughtCore/ThoughtRepository.swift` — CRUD・日付範囲repository境界、Review期間計算、テスト用メモリ実装。
 - `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v3、Thought日付範囲／Relation件数／期間要約query、Continuation transaction、旧JSON migration／2世代backup。
-- `ThoughtCore/ReviewSummary.swift` — AI要約model、通信／保存protocol、prompt、生成・保存use case、Mock client。
+- `ThoughtCore/ReviewSummary.swift` — AI要約model、immutable送信preview、通信／transport／保存protocol、中央provider／model設定、typed service error、対象準備／鮮度検証／生成・保存use case、Mock client。
+- `ThoughtCore/ReviewSummaryExporter.swift` — AI要約専用Markdown／JSON schema v1、ID再確認、判別可能なファイル名とatomic write。
 - `ThoughtCore/ThoughtExporter.swift` — Repository経由のMarkdown／JSON生成。
 - `ThoughtCore/ExternalBackup.swift` — manifest、外部2世代backup、検証、pending Restore／rollback。
 

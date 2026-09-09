@@ -9,3 +9,14 @@
 - `swift test` could not run on this Windows host because the Swift executable is unavailable. Static diff checks were run; Xcode build, Simulator UI, Firebase, and App Check remain to be verified on macOS.
 - Recorded the complete Xcode/Simulator/device/Firebase verification checklist in `CURRENT.md` so it remains pending until an Xcode environment is available.
 - Recorded follow-up candidates: summary history, derived-summary deletion, send-scope preview, optional export, and AI settings.
+- Implemented roadmap item 1: a period-scoped AI summary history screen, newest-first ordering, latest marker, generation metadata, and immediate insertion after re-generation.
+- Added an XCUITest flow that creates two Mock summaries, opens the period history, and checks the two entries and newest marker; execution remains pending on Xcode.
+- Implemented roadmap item 2 with exact-ID summary deletion in memory and SQLite repositories, Store-driven immediate state updates, confirmation UI, deletion error display, latest reassignment, and empty history behavior.
+- Added SQLite tests protecting Thought text, sibling summaries, and summaries from other periods, plus XCUITest coverage for cancellation and full deletion; execution remains pending on Xcode.
+- Implemented roadmap item 3 with an immutable send preview showing period, count, final payload characters, body characters, and ordered Thought content.
+- Separated preparation from submission, revalidated the current interval contents immediately before submission, and reused the preview's exact request so displayed targets and the AI payload cannot diverge.
+- Added Core tests for all Review period shapes, counts, payload identity, empty periods, and client call count, plus XCUITest preview cancellation and confirmed submission flows; execution remains pending on Xcode.
+- Implemented roadmap item 4 with per-history-record Markdown／JSON selection, exact-ID revalidation, atomic temporary files, and the existing iOS Share Sheet.
+- Added JSON schema v1 and a constrained export document that cannot contain Thought bodies, prompts, credentials, Firebase configuration, debug data, or internal paths.
+- Added Core tests for Markdown／JSON equivalence, metadata, exclusions, non-mutation, filename, selected-history isolation, and deleted-summary rejection; added XCUITest coverage through format selection. Execution remains pending on Xcode.
+- Refined roadmap item 5 into 5-A Firebase AI Logic／App Check composition and 5-B settings UI so the settings reflect the real provider state rather than a temporary mock-only configuration.

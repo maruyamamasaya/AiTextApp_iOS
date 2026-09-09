@@ -13,6 +13,7 @@ SwiftUI TimelineView -> HistoryReviewView / ThoughtDetailView / Continuation Com
       -> ThoughtContinuationRepository (Thought + Relation transaction)
     -> ThoughtRelationRepository (History relation queries)
     -> GenerateReviewSummary -> ReviewSummaryClient / ReviewSummaryRepository
+    -> ReviewSummaryExporter -> ReviewSummaryRepository -> ShareSheet
     -> ThoughtExporter -> ThoughtRepository
     -> ShareSheet (UIActivityViewController)
     -> ExternalBackupManager -> ExternalBackupService / RestoreCoordinator
@@ -21,15 +22,19 @@ SwiftUI TimelineView -> HistoryReviewView / ThoughtDetailView / Continuation Com
 ## Technology Stack
 
 - Swift 5 language mode、SwiftUI、Combine、Foundation。
-- iPhone / iOS 16.0以降、外部依存なし。
+- iPhone / iOS 16.0以降。Firebase Apple SDK（FirebaseCore／FirebaseAILogic／FirebaseAppCheck）はapp targetだけが依存し、ThoughtCoreはSDK非依存。
 - Xcode projectと、CoreのLinuxテストにも使うSwift Package。
 
 ## Main Components
 
 - `TimelineView`: placeholder付きComposer、Lazy Timeline、Detail／History ReviewへのNavigation、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
-- `HistoryReviewView`: 今日／昨日／過去7日／日付指定の期間選択、日単位group、件数、古い順のThought、Continuation件数を表示。
+- `HistoryReviewView`: 今日／昨日／過去7日／日付指定の期間選択、日単位group、件数、古い順のThought、Continuation件数、最新AI要約と要約履歴への入口を表示。
+- `ReviewSummaryHistoryView`: 選択期間に保存された要約を新しい順に並べ、最新表示、生成日時、対象件数、provider／model、確認付き個別削除を提供。
+- `ReviewSummaryExporter`: 要約IDをRepositoryで再確認し、単一の保存済み要約をMarkdownまたはJSON schema v1へ変換して一時ファイルへatomic write。
 - `GenerateReviewSummary`: 選択期間のThought本文だけからpromptを作り、抽象化されたclientを呼び、原文と別の要約repositoryへ保存。
-- `ReviewSummaryClient`: MockとFirebase AI Logic adapterを差し替える通信境界。現在のcomposition rootはMockを使用。
+- `PrepareReviewSummary`: Repositoryから指定Review期間を再取得し、表示対象Thoughtと最終`ReviewSummaryRequest`を同じimmutable previewへ固定。
+- `ReviewSummaryClient`: MockとFirebase AI Logic clientを差し替える通信境界。通常起動はFirebase、UIテスト／CoreテストはMockを使用。
+- `ReviewSummaryGeneratingTransport`: Firebase SDK importをapp layerへ閉じ込め、request変換、応答変換、空応答、typed errorを外部通信なしでテストする境界。
 - `ThoughtDetailView`: 現在Thought、縦型History、削除済みplaceholder、「続きを書く」Composerを表示。
 - `ThoughtStore`: Timeline／Continuation draftとHistory画面状態を各use caseへ接続。
 - `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
@@ -56,7 +61,11 @@ Thought DetailはrootからContinuationをdepth-firstで並べた静かな縦型
 
 History ReviewはCalendarの日境界から期間を作り、開始inclusive／終了exclusiveのSQLite queryで対象Thoughtだけを取得します。日付、`createdAt`、UUIDの順で古いThoughtから安定表示し、soft delete済みは除外します。Continuation件数は対象IDをまとめた1 queryで取得します。
 
-AI要約はHistory Reviewのボタン押下後、毎回の送信確認を経た場合だけ実行します。現在表示中の期間で取得済みのThought本文を古い順でpromptへ含め、UUID、Relation、SQLite情報、アプリ状態は含めません。成功結果は同一期間への追記として保存するため再要約履歴を失わず、画面には最新結果を表示します。Firebase未接続時はMockが同じ経路を通ります。
+AI要約はHistory Reviewのボタン押下後に送信前プレビューを作り、対象期間、件数、payload／本文文字数、日時順のThought本文を表示します。キャンセルではclientを呼びません。送信確定時は期間内ThoughtをRepositoryから再取得し、プレビューのsnapshotと完全一致する場合だけ、プレビューに固定済みの同じ`ReviewSummaryRequest`をclientへ渡します。期間またはThoughtが変わっていれば送信を中止してReviewを再読込します。promptへUUID、Relation、SQLite情報、アプリ状態は含めません。成功結果は同一期間への追記として保存するため再要約履歴を失わず、Reviewには最新結果、履歴画面には全結果を新しい順で表示します。通常起動でFirebase未設定なら送信せず設定エラーとなり、UIテストはMockで同じ保存経路を確認します。
+
+AI要約の削除は`ReviewSummaryRepository.deleteSummary(id:)`を通じ、一意な要約IDに一致する1レコードだけを物理削除します。期間条件やThought tableをDELETE対象に使いません。成功後はStoreの現在期間一覧から同じIDだけを除き、先頭を最新要約として選び直します。0件ならReviewは要約未生成状態へ戻ります。
+
+AI要約Exportは履歴内の明示操作で形式を選び、IDで再取得できた1件だけを既存Share Sheetへ渡します。Export documentは期間、要約本文、生成日時、対象件数、provider、modelだけを持ち、Thought本文、送信prompt、secret、Firebase設定、内部pathのfieldを持ちません。JSONの`period.endExclusive`はReview queryと同じ終了排他境界です。ExportはSQLiteを更新しません。
 
 ## Persistence
 
@@ -68,4 +77,4 @@ AI要約はHistory Reviewのボタン押下後、毎回の送信確認を経た�
 
 ## External Services / Authentication
 
-Firebase AI Logic経由のGemini Developer API adapterを用意していますが、Firebase SDK／設定は未接続で、現在はMock clientを使用します。将来の実接続ではFirebase構成とApp Checkをapplication composition rootで初期化し、APIキーをアプリへ埋め込みません。Files／iCloud DriveアクセスにはiOS標準document pickerとsecurity-scoped bookmarkだけを使います。
+application composition rootはローカル`GoogleService-Info.plist`を検証し、DebugではApp Check Debug Provider、ReleaseではApp Attest Providerを設定してからFirebaseを初期化します。モデルは`ReviewSummaryAIConfiguration`の`gemini-3.7-flash`、providerは`firebase-ai-logic`を正本とし、実応答の保存メタデータへ渡します。Firebase未設定、App Check、rate limit、network、その他APIをtyped errorへ分類します。APIキーとDebug tokenはコード／Gitへ含めません。Files／iCloud DriveアクセスにはiOS標準document pickerとsecurity-scoped bookmarkだけを使います。

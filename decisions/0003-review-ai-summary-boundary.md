@@ -9,8 +9,8 @@ History Review needs an explicitly requested AI summary while Firebase AI Logic 
 
 ## Decision
 
-Build prompts only from the active, ordered Review Thought bodies. Put generation behind `ReviewSummaryClient` and persistence behind `ReviewSummaryRepository`. Store every successful generation in the schema v3 `review_summaries` table, keyed by exact period boundaries, without modifying or referencing canonical Thought rows. Use a Mock client at the application composition root until Firebase is configured. Keep the Firebase AI Logic adapter conditionally compiled and initialize Firebase and App Check outside it.
+Build prompts only from the active, ordered Review Thought bodies. `PrepareReviewSummary` freezes the displayed Thoughts and final request into one immutable preview. Before submission, re-fetch the exact interval and require equality with that snapshot; pass the already frozen request to the client rather than rebuilding it. Put generation behind `ReviewSummaryClient` and persistence behind `ReviewSummaryRepository`. Store every successful generation in the schema v3 `review_summaries` table, keyed by exact period boundaries, without modifying or referencing canonical Thought rows. The normal application composition root uses Firebase AI Logic; UI/Core tests keep the Mock. Initialize Firebase and App Check outside the provider-independent client.
 
 ## Consequences
 
-No network request occurs until the user confirms from the Review screen. Re-generation appends a new result and the newest result is displayed. The production client can replace the Mock without changing Review UI or persistence. The app does not build the Firebase adapter until `FirebaseAILogic` is installed, so current local development remains independent of incomplete service setup.
+No network request occurs until the user confirms the preview. Cancellation and stale previews never call the client. Re-generation appends a new result and the newest result is displayed. Missing Firebase configuration installs an unavailable client that reports a typed setup error without sending data. Provider-independent transport tests remain independent of live service setup.

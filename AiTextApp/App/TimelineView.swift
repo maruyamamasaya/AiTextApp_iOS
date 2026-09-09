@@ -256,7 +256,6 @@ private struct HistoryReviewView: View {
     @ObservedObject var store: ThoughtStore
     @State private var filter: Filter = .today
     @State private var selectedDate = Date()
-    @State private var showingAISummaryConfirmation = false
 
     private var interval: DateInterval {
         switch filter {
@@ -301,7 +300,7 @@ private struct HistoryReviewView: View {
                 }
 
                 Button {
-                    showingAISummaryConfirmation = true
+                    store.prepareReviewSummary(in: interval)
                 } label: {
                     HStack(spacing: 8) {
                         if store.isGeneratingReviewSummary { ProgressView() }
@@ -340,10 +339,20 @@ private struct HistoryReviewView: View {
                                     Label("AI要約", systemImage: "sparkles")
                                         .font(.headline)
                                     Spacer()
-                                    Text(summary.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    NavigationLink {
+                                        ReviewSummaryHistoryView(
+                                            store: store,
+                                            interval: interval
+                                        )
+                                    } label: {
+                                        Text("履歴 \(store.reviewSummaries.count)件")
+                                            .font(.caption)
+                                    }
+                                    .accessibilityIdentifier("reviewAISummaryHistoryButton")
                                 }
+                                Text(summary.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                                 Text(summary.content)
                                     .font(.body)
                                     .textSelection(.enabled)
@@ -357,7 +366,6 @@ private struct HistoryReviewView: View {
                             .background(Color(uiColor: .secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                             .padding(16)
-                            .accessibilityElement(children: .combine)
                             .accessibilityIdentifier("reviewAISummaryResult")
                         }
 
@@ -366,7 +374,7 @@ private struct HistoryReviewView: View {
                                 Text(message)
                                     .font(.subheadline)
                                     .foregroundStyle(.red)
-                                Button("再試行") { showingAISummaryConfirmation = true }
+                                Button("再試行") { store.prepareReviewSummary(in: interval) }
                                     .disabled(store.isGeneratingReviewSummary)
                                     .accessibilityIdentifier("reviewAISummaryRetryButton")
                             }
@@ -406,13 +414,18 @@ private struct HistoryReviewView: View {
         .onChange(of: filter) { _ in reload() }
         .onChange(of: selectedDate) { _ in if filter == .date { reload() } }
         .onChange(of: store.thoughts.map(\.id)) { _ in reload() }
-        .alert("AI要約を作成しますか？", isPresented: $showingAISummaryConfirmation) {
-            Button("キャンセル", role: .cancel) {}
-            Button("送信して要約") {
-                Task { await store.generateReviewSummary(in: interval) }
-            }
-        } message: {
-            Text("選択期間内のThought本文を、要約のためFirebase AI Logic経由でGeminiへ送信します。UUID、データベース情報、アプリ内部情報は送信しません。")
+        .sheet(item: Binding(
+            get: { store.reviewSummaryPreview },
+            set: { if $0 == nil { store.cancelReviewSummaryPreview() } }
+        )) { preview in
+            ReviewSummaryPreviewView(
+                preview: preview,
+                onCancel: { store.cancelReviewSummaryPreview() },
+                onSubmit: {
+                    store.cancelReviewSummaryPreview()
+                    Task { await store.generateReviewSummary(from: preview) }
+                }
+            )
         }
     }
 
@@ -455,6 +468,235 @@ private struct HistoryReviewView: View {
     private func continuationAccessibilityText(for thought: Thought) -> String {
         guard let count = store.reviewContinuationCounts[thought.id], count > 0 else { return "" }
         return "、続き\(count)件"
+    }
+}
+
+private struct ReviewSummaryPreviewView: View {
+    let preview: ReviewSummaryPreview
+    let onCancel: () -> Void
+    let onSubmit: () -> Void
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("送信内容の確認", systemImage: "sparkles")
+                                .font(.headline)
+                            Text("以下のThought本文がAIサービスへ送信されます。自動送信は行わず、この画面で送信を選んだ時だけ実行します。")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            previewMetadata("対象期間", value: periodText)
+                            previewMetadata("対象Thought", value: "\(preview.thoughtCount)件")
+                            previewMetadata("送信予定", value: "\(preview.payloadCharacterCount)文字")
+                            Text("送信予定文字数には、以下の本文と要約形式の指示文を含みます。本文は合計\(preview.thoughtCharacterCount)文字です。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(14)
+                        .background(Color(uiColor: .secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .accessibilityIdentifier("reviewSummaryPreviewMetadata")
+
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("送信するThought")
+                                .font(.headline)
+                                .padding(.bottom, 8)
+                            ForEach(preview.thoughts) { thought in
+                                HStack(alignment: .top, spacing: 12) {
+                                    Text(thought.createdAt.formatted(date: .omitted, time: .shortened))
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 40, alignment: .leading)
+                                    Text(thought.body)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .padding(.vertical, 10)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityIdentifier("reviewSummaryPreviewThought_\(thought.id.uuidString)")
+                                if thought.id != preview.thoughts.last?.id { Divider() }
+                            }
+                        }
+                    }
+                    .padding(16)
+                }
+
+                Divider()
+                Button("AIへ送信して要約", action: onSubmit)
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                    .padding(16)
+                    .accessibilityIdentifier("confirmReviewSummarySubmission")
+            }
+            .navigationTitle("AI要約プレビュー")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル", action: onCancel)
+                        .accessibilityIdentifier("cancelReviewSummarySubmission")
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private func previewMetadata(_ label: String, value: String) -> some View {
+        HStack {
+            Text(label).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).fontWeight(.medium)
+        }
+        .font(.subheadline)
+    }
+
+    private var periodText: String {
+        let start = preview.interval.start.formatted(date: .abbreviated, time: .omitted)
+        let inclusiveEnd = preview.interval.end.addingTimeInterval(-1)
+            .formatted(date: .abbreviated, time: .omitted)
+        return start == inclusiveEnd ? start : "\(start)〜\(inclusiveEnd)"
+    }
+}
+
+private struct ReviewSummaryHistoryView: View {
+    @ObservedObject var store: ThoughtStore
+    let interval: DateInterval
+    @State private var deletionCandidate: ReviewSummary?
+    @State private var showingDeletionConfirmation = false
+
+    private var summaries: [ReviewSummary] { store.reviewSummaries }
+
+    var body: some View {
+        Group {
+            if summaries.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                    Text("AI要約履歴はありません")
+                        .font(.headline)
+                    Text("この期間でAI要約を作成すると、ここに履歴が残ります。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+                .multilineTextAlignment(.center)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        Text(periodText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+
+                        if let message = store.reviewSummaryDeletionError {
+                            Text(message)
+                                .font(.subheadline)
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 16)
+                                .accessibilityIdentifier("reviewAISummaryDeletionError")
+                        }
+
+                        if let message = store.reviewSummaryExportError {
+                            Text(message)
+                                .font(.subheadline)
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 16)
+                                .accessibilityIdentifier("reviewAISummaryExportError")
+                        }
+
+                        ForEach(summaries) { summary in
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(summary.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.headline)
+                                    if summary.id == summaries.first?.id {
+                                        Text("最新")
+                                            .font(.caption.weight(.semibold))
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(Color.accentColor.opacity(0.12))
+                                            .clipShape(Capsule())
+                                            .accessibilityIdentifier("reviewAISummaryLatest")
+                                    }
+                                    Spacer()
+                                    Menu {
+                                        Button("Markdownを共有") {
+                                            store.exportReviewSummary(id: summary.id, format: .markdown)
+                                        }
+                                        .accessibilityIdentifier("exportReviewSummaryMarkdown_\(summary.id.uuidString)")
+                                        Button("JSONを共有") {
+                                            store.exportReviewSummary(id: summary.id, format: .json)
+                                        }
+                                        .accessibilityIdentifier("exportReviewSummaryJSON_\(summary.id.uuidString)")
+                                    } label: {
+                                        Image(systemName: "square.and.arrow.up")
+                                            .frame(width: 32, height: 32)
+                                    }
+                                    .accessibilityLabel("このAI要約をExport")
+                                    .accessibilityHint("MarkdownまたはJSONとして共有します")
+                                    .accessibilityIdentifier("exportReviewSummary_\(summary.id.uuidString)")
+                                    Button(role: .destructive) {
+                                        deletionCandidate = summary
+                                        showingDeletionConfirmation = true
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .frame(width: 32, height: 32)
+                                    }
+                                    .accessibilityLabel("このAI要約を削除")
+                                    .accessibilityHint("確認後、このAI要約だけを削除します")
+                                    .accessibilityIdentifier("deleteReviewSummary_\(summary.id.uuidString)")
+                                }
+
+                                Text(summary.content)
+                                    .font(.body)
+                                    .textSelection(.enabled)
+
+                                Text("対象 \(summary.thoughtCount) Thoughts ・ \(providerText(summary))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(16)
+                            .background(Color(uiColor: .secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .padding(.horizontal, 16)
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("reviewAISummaryHistoryItem_\(summary.id.uuidString)")
+                        }
+                    }
+                    .padding(.vertical, 16)
+                }
+            }
+        }
+        .navigationTitle("AI要約履歴")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("AI要約を削除しますか？", isPresented: $showingDeletionConfirmation, presenting: deletionCandidate) { summary in
+            Button("キャンセル", role: .cancel) {
+                deletionCandidate = nil
+            }
+            Button("削除", role: .destructive) {
+                store.deleteReviewSummary(id: summary.id)
+                deletionCandidate = nil
+            }
+        } message: { _ in
+            Text("選択したAI要約だけを削除します。Thought原文と他のAI要約は削除されません。")
+        }
+    }
+
+    private var periodText: String {
+        let start = interval.start.formatted(date: .abbreviated, time: .omitted)
+        let inclusiveEnd = interval.end.addingTimeInterval(-1)
+            .formatted(date: .abbreviated, time: .omitted)
+        return start == inclusiveEnd ? start : "\(start)〜\(inclusiveEnd)"
+    }
+
+    private func providerText(_ summary: ReviewSummary) -> String {
+        if summary.provider == "mock" { return "Mock" }
+        return "\(summary.provider) / \(summary.model)"
     }
 }
 
