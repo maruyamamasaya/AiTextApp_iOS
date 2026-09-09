@@ -32,6 +32,8 @@ final class ThoughtStore: ObservableObject {
     @Published var reviewSummaryDeletionError: String?
     @Published var reviewSummaryExportError: String?
     @Published private(set) var reviewSummaryPreview: ReviewSummaryPreview?
+    @Published private(set) var analytics: ThoughtAnalyticsSnapshot?
+    @Published private(set) var isLoadingAnalytics = false
     let externalBackupManager: ExternalBackupManager?
 
     private var timeline: ThoughtTimeline?
@@ -40,11 +42,13 @@ final class ThoughtStore: ObservableObject {
     private var relationRepository: (any ThoughtRelationRepository)?
     private var continuationRepository: (any ThoughtContinuationRepository)?
     private var tagRepository: (any ThoughtTagRepository)?
+    private var analyticsRepository: (any ThoughtAnalyticsRepository)?
     private var summaryRepository: (any ReviewSummaryRepository)?
     private var summaryExporter: ReviewSummaryExporter?
     private let summaryClient: any ReviewSummaryClient
     private var reviewInterval: DateInterval?
     private var reviewTag: ThoughtTag?
+    private var isPosting = false
 
     init(
         repository: (any ThoughtRepository)? = nil,
@@ -61,6 +65,7 @@ final class ThoughtStore: ObservableObject {
             relationRepository = repository as? any ThoughtRelationRepository
             continuationRepository = repository as? any ThoughtContinuationRepository
             tagRepository = repository as? any ThoughtTagRepository
+            analyticsRepository = repository as? any ThoughtAnalyticsRepository
             if let reviewSummaryRepository = repository as? any ReviewSummaryRepository {
                 summaryRepository = reviewSummaryRepository
                 summaryExporter = ReviewSummaryExporter(repository: reviewSummaryRepository)
@@ -77,6 +82,25 @@ final class ThoughtStore: ObservableObject {
         refreshTags(for: thoughts.map(\.id))
         loadAllTags()
         if let startupError { errorMessage = startupError }
+    }
+
+    func loadAnalytics(containing date: Date = Date(), calendar: Calendar = .current) {
+        guard let analyticsRepository else {
+            analytics = nil
+            errorMessage = "ローカル分析を読み込めませんでした。"
+            return
+        }
+        isLoadingAnalytics = true
+        defer { isLoadingAnalytics = false }
+        do {
+            analytics = try LoadThoughtAnalytics(
+                repository: analyticsRepository,
+                calendar: calendar
+            )(containing: date)
+        } catch {
+            analytics = nil
+            errorMessage = "ローカル分析を読み込めませんでした。保存済みデータは変更されていません。"
+        }
     }
 
     func export(_ format: ThoughtExportFormat) {
@@ -375,16 +399,27 @@ final class ThoughtStore: ObservableObject {
 
     @discardableResult
     func post() -> Bool {
+        guard post(draft) else { return false }
+        draft = ""
+        return true
+    }
+
+    /// Shared posting boundary for Timeline Composer and Quick Capture.
+    /// The caller owns and clears its draft only after this returns success.
+    @discardableResult
+    func post(_ body: String) -> Bool {
+        guard !isPosting else { return false }
         guard var timeline else {
             errorMessage = "保存先を利用できないため投稿できません。入力内容は残しています。"
             return false
         }
+        isPosting = true
+        defer { isPosting = false }
         do {
-            guard try timeline.post(draft) != nil else { return false }
+            guard try timeline.post(body) != nil else { return false }
             self.timeline = timeline
             thoughts = timeline.thoughts
             refreshTags(for: thoughts.map(\.id))
-            draft = ""
             return true
         } catch {
             errorMessage = "Thoughtを保存できませんでした。"

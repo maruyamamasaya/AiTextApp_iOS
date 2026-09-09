@@ -105,6 +105,159 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
     }
 
+    func testTimelineOpensLocalAnalyticsAndShowsSummary() {
+        let composer = app.textViews["thoughtComposer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText("分析対象Thought")
+        app.buttons["postButton"].tap()
+
+        let analyticsButton = app.buttons["thoughtAnalyticsButton"]
+        XCTAssertTrue(analyticsButton.waitForExistence(timeout: 2))
+        analyticsButton.tap()
+
+        XCTAssertTrue(app.navigationBars["ローカル分析"].waitForExistence(timeout: 2))
+        let elements = app.descendants(matching: .any)
+        XCTAssertEqual(elements["analyticsTodayCount"].label, "今日、1件")
+        XCTAssertEqual(elements["analyticsSevenDayCount"].label, "過去7日、1件")
+        XCTAssertEqual(elements["analyticsThirtyDayCount"].label, "過去30日、1件")
+        XCTAssertEqual(elements["analyticsActiveDayCount"].label, "過去30日の活動日、1日")
+        XCTAssertEqual(elements["analyticsAveragePerActiveDay"].label, "1活動日あたり平均、1.0件")
+    }
+
+    func testQuickCapturePostsTrimmedThoughtOnceAndReturnsToTimeline() {
+        let quickCapture = app.buttons["quickCaptureButton"]
+        XCTAssertTrue(quickCapture.waitForExistence(timeout: 5))
+        quickCapture.tap()
+
+        XCTAssertTrue(app.navigationBars["Quick Capture"].waitForExistence(timeout: 2))
+        let editor = app.textViews["quickCaptureEditor"]
+        let post = app.buttons["quickCapturePostButton"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 2))
+        XCTAssertEqual(editor.value as? String, "")
+        XCTAssertFalse(post.isEnabled)
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2), "表示時に入力へfocusする")
+
+        editor.typeText("  Quick Capture Thought  ")
+        XCTAssertTrue(post.isEnabled)
+        post.tap()
+
+        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
+        XCTAssertEqual(app.staticTexts["Quick Capture Thought"].count, 1)
+    }
+
+    func testExternalQuickCaptureRouteFromColdLaunchPostsOnceAndReturnsToTimeline() {
+        app.terminate()
+        app.open(URL(string: "aitextapp://quick-capture")!)
+
+        XCTAssertTrue(app.navigationBars["Quick Capture"].waitForExistence(timeout: 5))
+        let editor = app.textViews["quickCaptureEditor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2), "外部routeでも入力へfocusする")
+        editor.typeText("Widget route Thought")
+        app.buttons["quickCapturePostButton"].tap()
+
+        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
+        XCTAssertEqual(app.staticTexts["Widget route Thought"].count, 1)
+        XCTAssertFalse(app.navigationBars["Quick Capture"].exists, "投稿後にrouteを消費してTimelineへ戻る")
+    }
+
+    func testExternalQuickCaptureRouteWhileForegroundCanBeDismissedAndConsumed() {
+        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars["Quick Capture"].exists, "通常起動ではQuick Captureを開かない")
+
+        app.open(URL(string: "aitextapp://quick-capture")!)
+        XCTAssertTrue(app.navigationBars["Quick Capture"].waitForExistence(timeout: 2))
+        app.buttons["quickCaptureCancelButton"].tap()
+
+        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.navigationBars["Quick Capture"].exists)
+    }
+
+    func testMalformedExternalRouteDoesNotOpenQuickCapture() {
+        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 5))
+
+        app.open(URL(string: "aitextapp://quick-capture?body=should-not-be-accepted")!)
+
+        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.navigationBars["Quick Capture"].exists)
+    }
+
+    func testQuickCaptureRejectsEmptyAndOverLimitDraft() {
+        app.buttons["quickCaptureButton"].tap()
+        let editor = app.textViews["quickCaptureEditor"]
+        let post = app.buttons["quickCapturePostButton"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 2))
+        editor.typeText("   ")
+        XCTAssertFalse(post.isEnabled, "空白だけのThoughtは投稿できない")
+        app.buttons["quickCaptureCancelButton"].tap()
+        app.alerts["入力中のThoughtを破棄しますか？"].buttons["破棄"].tap()
+        app.buttons["quickCaptureButton"].tap()
+        let reopenedEditor = app.textViews["quickCaptureEditor"]
+        let reopenedPost = app.buttons["quickCapturePostButton"]
+        XCTAssertTrue(reopenedEditor.waitForExistence(timeout: 2))
+        reopenedEditor.typeText(String(repeating: "あ", count: 141))
+        XCTAssertEqual(app.staticTexts["quickCaptureCharacterCount"].label, "文字数 141、上限 140")
+        XCTAssertFalse(reopenedPost.isEnabled, "141文字を超えるThoughtは投稿できない")
+    }
+
+    func testQuickCapturePostsExactly140Characters() {
+        let body = String(repeating: "a", count: 140)
+        app.buttons["quickCaptureButton"].tap()
+        let editor = app.textViews["quickCaptureEditor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 2))
+        editor.typeText(body)
+        XCTAssertEqual(app.staticTexts["quickCaptureCharacterCount"].label, "文字数 140、上限 140")
+        XCTAssertTrue(app.buttons["quickCapturePostButton"].isEnabled)
+        app.buttons["quickCapturePostButton"].tap()
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "timelineThought_")).count, 1)
+    }
+
+    func testQuickCaptureConfirmsDiscardAndKeepsDraftWhenContinuing() {
+        app.buttons["quickCaptureButton"].tap()
+        let editor = app.textViews["quickCaptureEditor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 2))
+        editor.typeText("破棄確認する入力")
+        app.buttons["quickCaptureCancelButton"].tap()
+
+        let alert = app.alerts["入力中のThoughtを破棄しますか？"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 2))
+        alert.buttons["続ける"].tap()
+        XCTAssertEqual(editor.value as? String, "破棄確認する入力")
+
+        app.buttons["quickCaptureCancelButton"].tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 2))
+        alert.buttons["破棄"].tap()
+        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["破棄確認する入力"].exists)
+    }
+
+    func testQuickCaptureCancelWithEmptyDraftClosesImmediately() {
+        app.buttons["quickCaptureButton"].tap()
+        XCTAssertTrue(app.navigationBars["Quick Capture"].waitForExistence(timeout: 2))
+        app.buttons["quickCaptureCancelButton"].tap()
+        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.alerts["入力中のThoughtを破棄しますか？"].exists)
+    }
+
+    func testQuickCaptureFailureKeepsDraftAndScreenOpen() {
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments = ["--ui-testing-fail-posts"]
+        app.launch()
+        app.buttons["quickCaptureButton"].tap()
+        let editor = app.textViews["quickCaptureEditor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 2))
+        editor.typeText("失敗しても保持")
+        app.buttons["quickCapturePostButton"].tap()
+
+        let alert = app.alerts["投稿できませんでした"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 2))
+        alert.buttons["OK"].tap()
+        XCTAssertTrue(app.navigationBars["Quick Capture"].exists)
+        XCTAssertEqual(editor.value as? String, "失敗しても保持")
+    }
+
     func testHistoryReviewFiltersCurrentMonthByTagAndOpensDetail() {
         let taggedBody = "今月の仕事Thought"
         let otherBody = "今月の個人Thought"

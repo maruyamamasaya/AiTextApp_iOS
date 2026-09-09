@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TimelineView: View {
     @ObservedObject var store: ThoughtStore
+    @Binding var presentedRoute: AppRoute?
     @FocusState private var composerIsFocused: Bool
 
     var body: some View {
@@ -47,6 +48,14 @@ struct TimelineView: View {
                     .accessibilityHint("日付や期間から過去のThoughtを振り返ります")
                     .accessibilityIdentifier("historyReviewButton")
                 }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { presentedRoute = .quickCapture } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("Quick Captureを開く")
+                    .accessibilityHint("入力に集中してThoughtを投稿します")
+                    .accessibilityIdentifier("quickCaptureButton")
+                }
                 ToolbarItem(placement: .navigationBarLeading) {
                     NavigationLink {
                         ThoughtTagListView(store: store)
@@ -65,6 +74,16 @@ struct TimelineView: View {
                     .accessibilityLabel("Thought検索を開く")
                     .accessibilityHint("キーワードから過去のThoughtを検索します")
                     .accessibilityIdentifier("thoughtSearchButton")
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    NavigationLink {
+                        ThoughtAnalyticsView(store: store)
+                    } label: {
+                        Image(systemName: "chart.bar.xaxis")
+                    }
+                    .accessibilityLabel("ローカル分析を開く")
+                    .accessibilityHint("端末内の過去30日のThought傾向を確認します")
+                    .accessibilityIdentifier("thoughtAnalyticsButton")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
@@ -1294,5 +1313,5 @@ enum ThoughtDateText {
     TimelineView(store: ThoughtStore(repository: MemoryThoughtRepository(records: [
         Thought(body: "AIを入れる前に、まず毎日使える入力体験を完成させたい。"),
         Thought(body: "SQLite化まで終わったので、次はUIをもっと軽くしたい。", createdAt: .now.addingTimeInterval(-3_600))
-    ])))
+    ])), presentedRoute: .constant(nil))
 }

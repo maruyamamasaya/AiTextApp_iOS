@@ -25,7 +25,7 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ReviewSummaryRepository, @unchecked Sendable {
+public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, @unchecked Sendable {
     public static let schemaVersion: Int32 = 4
 
     private let databaseURL: URL
@@ -160,6 +160,39 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
                 """, bind: { statement in
                     try self.bind("%\(escaped)%", to: 1, in: statement)
                 })
+        }
+    }
+
+    public func fetchAnalytics(_ request: ThoughtAnalyticsRequest) throws -> ThoughtAnalyticsSnapshot {
+        try lock.withLock {
+            let daily = try queryDailyAnalytics(request.days)
+            let weekdayOrder = (0..<7).map { (($0 + request.firstWeekday - 1) % 7) + 1 }
+            let weekday = weekdayOrder.map { value in
+                WeekdayThoughtCount(
+                    weekday: value,
+                    count: zip(request.days, daily).filter { $0.0.weekday == value }.reduce(0) { $0 + $1.1.count }
+                )
+            }
+            let timeCounts = try queryTimeOfDayAnalytics(request.timeWindows)
+            let todayCount = daily.last?.count ?? 0
+            let sevenDayCount = daily.suffix(7).reduce(0) { $0 + $1.count }
+            let thirtyDayCount = daily.reduce(0) { $0 + $1.count }
+            return ThoughtAnalyticsSnapshot(
+                period: request.period,
+                summary: .init(
+                    todayCount: todayCount,
+                    pastSevenDaysCount: sevenDayCount,
+                    pastThirtyDaysCount: thirtyDayCount,
+                    activeDayCount: daily.filter { $0.count > 0 }.count
+                ),
+                dailyCounts: daily,
+                weekdayCounts: weekday,
+                timeOfDayCounts: TimeOfDay.allCases.map {
+                    TimeOfDayThoughtCount(timeOfDay: $0, count: timeCounts[$0, default: 0])
+                },
+                topTags: try queryTopTags(in: request.period, limit: 5),
+                thoughtsWithContinuationsCount: try queryThoughtsWithContinuationsCount(in: request.period)
+            )
         }
     }
 
@@ -435,6 +468,131 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
             createRollingBackupIfPossible()
             return thought
         }
+    }
+
+    private func queryDailyAnalytics(_ days: [ThoughtAnalyticsDay]) throws -> [DailyThoughtCount] {
+        let values = Array(repeating: "(?, ?, ?)", count: days.count).joined(separator: ",")
+        let statement = try prepare("""
+            WITH periods(day_index, day_start, day_end) AS (VALUES \(values))
+            SELECT periods.day_index, COUNT(thoughts.id)
+            FROM periods
+            LEFT JOIN thoughts ON thoughts.deleted_at IS NULL
+              AND thoughts.created_at >= periods.day_start
+              AND thoughts.created_at < periods.day_end
+            GROUP BY periods.day_index
+            ORDER BY periods.day_index ASC
+            """)
+        defer { sqlite3_finalize(statement) }
+        for (index, day) in days.enumerated() {
+            let position = Int32(index * 3 + 1)
+            try bind(Int32(index), to: position, in: statement)
+            try bind(day.interval.start.timeIntervalSince1970, to: position + 1, in: statement)
+            try bind(day.interval.end.timeIntervalSince1970, to: position + 2, in: statement)
+        }
+        var counts = Array(repeating: 0, count: days.count)
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            let index = Int(sqlite3_column_int(statement, 0))
+            guard counts.indices.contains(index) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+            counts[index] = Int(sqlite3_column_int64(statement, 1))
+            result = sqlite3_step(statement)
+        }
+        guard result == SQLITE_DONE else { throw lastError() }
+        return zip(days, counts).map { DailyThoughtCount(date: $0.interval.start, count: $1) }
+    }
+
+    private func queryTimeOfDayAnalytics(
+        _ windows: [ThoughtAnalyticsTimeWindow]
+    ) throws -> [TimeOfDay: Int] {
+        let values = Array(repeating: "(?, ?, ?)", count: windows.count).joined(separator: ",")
+        let statement = try prepare("""
+            WITH windows(bucket, window_start, window_end) AS (VALUES \(values))
+            SELECT windows.bucket, COUNT(thoughts.id)
+            FROM windows
+            LEFT JOIN thoughts ON thoughts.deleted_at IS NULL
+              AND thoughts.created_at >= windows.window_start
+              AND thoughts.created_at < windows.window_end
+            GROUP BY windows.bucket
+            ORDER BY windows.bucket ASC
+            """)
+        defer { sqlite3_finalize(statement) }
+        for (index, window) in windows.enumerated() {
+            let position = Int32(index * 3 + 1)
+            try bind(Int32(window.timeOfDay.rawValue), to: position, in: statement)
+            try bind(window.interval.start.timeIntervalSince1970, to: position + 1, in: statement)
+            try bind(window.interval.end.timeIntervalSince1970, to: position + 2, in: statement)
+        }
+        var counts: [TimeOfDay: Int] = [:]
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            guard let bucket = TimeOfDay(rawValue: Int(sqlite3_column_int(statement, 0))) else {
+                throw SQLiteThoughtRepositoryError.invalidRecord
+            }
+            counts[bucket] = Int(sqlite3_column_int64(statement, 1))
+            result = sqlite3_step(statement)
+        }
+        guard result == SQLITE_DONE else { throw lastError() }
+        return counts
+    }
+
+    private func queryTopTags(in period: DateInterval, limit: Int) throws -> [TagThoughtCount] {
+        let statement = try prepare("""
+            SELECT tags.id, tags.name, tags.normalized_name, tags.created_at, COUNT(thought_tags.thought_id)
+            FROM tags
+            JOIN thought_tags ON thought_tags.tag_id = tags.id
+            JOIN thoughts ON thoughts.id = thought_tags.thought_id
+            WHERE thoughts.deleted_at IS NULL
+              AND thoughts.created_at >= ? AND thoughts.created_at < ?
+            GROUP BY tags.id, tags.name, tags.normalized_name, tags.created_at
+            ORDER BY COUNT(thought_tags.thought_id) DESC, tags.normalized_name ASC, tags.id ASC
+            LIMIT ?
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bind(period.start.timeIntervalSince1970, to: 1, in: statement)
+        try bind(period.end.timeIntervalSince1970, to: 2, in: statement)
+        try bind(Int32(limit), to: 3, in: statement)
+        var output: [TagThoughtCount] = []
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            guard let idText = sqlite3_column_text(statement, 0),
+                  let id = UUID(uuidString: String(cString: idText)),
+                  let nameText = sqlite3_column_text(statement, 1),
+                  let normalizedText = sqlite3_column_text(statement, 2) else {
+                throw SQLiteThoughtRepositoryError.invalidRecord
+            }
+            output.append(.init(
+                tag: ThoughtTag(
+                    id: id,
+                    name: String(cString: nameText),
+                    normalizedName: String(cString: normalizedText),
+                    createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
+                ),
+                count: Int(sqlite3_column_int64(statement, 4))
+            ))
+            result = sqlite3_step(statement)
+        }
+        guard result == SQLITE_DONE else { throw lastError() }
+        return output
+    }
+
+    private func queryThoughtsWithContinuationsCount(in period: DateInterval) throws -> Int {
+        let statement = try prepare("""
+            SELECT COUNT(DISTINCT parent.id)
+            FROM thought_relations AS relation
+            JOIN thoughts AS parent ON parent.id = relation.target_thought_id
+            JOIN thoughts AS child ON child.id = relation.source_thought_id
+            WHERE relation.relation_type = 'continues'
+              AND parent.deleted_at IS NULL AND child.deleted_at IS NULL
+              AND parent.created_at >= ? AND parent.created_at < ?
+              AND child.created_at >= ? AND child.created_at < ?
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bind(period.start.timeIntervalSince1970, to: 1, in: statement)
+        try bind(period.end.timeIntervalSince1970, to: 2, in: statement)
+        try bind(period.start.timeIntervalSince1970, to: 3, in: statement)
+        try bind(period.end.timeIntervalSince1970, to: 4, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw lastError() }
+        return Int(sqlite3_column_int64(statement, 0))
     }
 
     /// Keeps two SQLite-native snapshots beside the canonical database. Backup

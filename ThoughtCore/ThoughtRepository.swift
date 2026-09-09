@@ -15,7 +15,7 @@ public protocol ThoughtRepository: Sendable {
 }
 
 /// A small repository useful for previews and domain tests. SQLite is the app's durable store.
-public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ReviewSummaryRepository, @unchecked Sendable {
+public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, @unchecked Sendable {
     private var records: [Thought]
     private var relations: [ThoughtRelation]
     private var summaries: [ReviewSummary]
@@ -138,6 +138,78 @@ public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRe
             records
                 .filter { $0.deletedAt == nil && $0.body.localizedCaseInsensitiveContains(query) }
                 .sorted(by: Thought.timelineOrder)
+        }
+    }
+
+    public func fetchAnalytics(_ request: ThoughtAnalyticsRequest) throws -> ThoughtAnalyticsSnapshot {
+        lock.withLock {
+            let period = request.period
+            let active = records.filter {
+                $0.deletedAt == nil && $0.createdAt >= period.start && $0.createdAt < period.end
+            }
+            let daily = request.days.map { day in
+                DailyThoughtCount(
+                    date: day.interval.start,
+                    count: active.filter { $0.createdAt >= day.interval.start && $0.createdAt < day.interval.end }.count
+                )
+            }
+            let weekdayOrder = (0..<7).map { (($0 + request.firstWeekday - 1) % 7) + 1 }
+            let weekday = weekdayOrder.map { value in
+                WeekdayThoughtCount(
+                    weekday: value,
+                    count: zip(request.days, daily).filter { $0.0.weekday == value }.reduce(0) { $0 + $1.1.count }
+                )
+            }
+            let timeOfDay = TimeOfDay.allCases.map { bucket in
+                TimeOfDayThoughtCount(
+                    timeOfDay: bucket,
+                    count: request.timeWindows
+                        .filter { $0.timeOfDay == bucket }
+                        .reduce(0) { result, window in
+                            result + active.filter {
+                                $0.createdAt >= window.interval.start && $0.createdAt < window.interval.end
+                            }.count
+                        }
+                )
+            }
+            let countsByTagID = thoughtTagIDs.reduce(into: [UUID: Int]()) { result, item in
+                guard active.contains(where: { $0.id == item.key }) else { return }
+                for tagID in item.value { result[tagID, default: 0] += 1 }
+            }
+            let topTags = tags.compactMap { tag -> TagThoughtCount? in
+                guard let count = countsByTagID[tag.id] else { return nil }
+                return TagThoughtCount(tag: tag, count: count)
+            }.sorted {
+                if $0.count != $1.count { return $0.count > $1.count }
+                if $0.tag.normalizedName != $1.tag.normalizedName {
+                    return $0.tag.normalizedName < $1.tag.normalizedName
+                }
+                return $0.tag.id.uuidString < $1.tag.id.uuidString
+            }.prefix(5)
+            let activeIDs = Set(active.map(\.id))
+            let continuationParents = Set(relations.compactMap { relation -> UUID? in
+                guard relation.type == .continues,
+                      activeIDs.contains(relation.sourceThoughtID),
+                      activeIDs.contains(relation.targetThoughtID) else { return nil }
+                return relation.targetThoughtID
+            })
+            let todayCount = daily.last?.count ?? 0
+            let sevenDayCount = daily.suffix(7).reduce(0) { $0 + $1.count }
+            let thirtyDayCount = daily.reduce(0) { $0 + $1.count }
+            return ThoughtAnalyticsSnapshot(
+                period: period,
+                summary: .init(
+                    todayCount: todayCount,
+                    pastSevenDaysCount: sevenDayCount,
+                    pastThirtyDaysCount: thirtyDayCount,
+                    activeDayCount: daily.filter { $0.count > 0 }.count
+                ),
+                dailyCounts: daily,
+                weekdayCounts: weekday,
+                timeOfDayCounts: timeOfDay,
+                topTags: Array(topTags),
+                thoughtsWithContinuationsCount: continuationParents.count
+            )
         }
     }
 

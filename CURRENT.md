@@ -8,7 +8,7 @@
 
 ## 現在のフェーズ
 
-Phase 3-C（History Review強化 v1）を実装済みです。Phase 3-A／3-Bと同様、Windows環境のためSwift／Xcode検証は未実行で、Macでの確認後に完了判定します。
+Phase 3-D（ローカル分析 v1）までコード実装済みです。Phase 3-A〜3-E-2と同様、Windows環境のためSwift／Xcode検証は未実行で、Macでの確認後に完了判定します。
 
 ## 実装済み
 
@@ -61,6 +61,16 @@ Phase 3-C（History Review強化 v1）を実装済みです。Phase 3-A／3-Bと
 - History Reviewの単一タグ絞り込み。期間＋タグをSQLite JOIN queryで絞り、期間、表示件数、Thoughtが存在した日数、タグ状態を概要表示。
 - Reviewの日別絶対日付・日別件数と、既存どおり古い日／古いThoughtから読む安定順。タグ切替時の即時再読込とDetail／Continuation件数を維持。
 - タグ絞り込みはReview表示だけへ適用し、AI要約・履歴・削除・preview・Exportは従来どおり期間全体を正本とする。タグ選択中は対象差をUIに明示。
+- Timelineから1操作で開き、本文入力へ自動focusするQuick Capture。本文、140文字、文字数、投稿、キャンセルだけに絞り、既存Timeline Composerを維持。
+- Timeline ComposerとQuick Captureが`ThoughtStore.post(_:)`から既存`ThoughtTimeline.post`を共用する投稿境界。Quick専用Repository API、タグ入力、自動draft保存は追加しない。
+- Quick Capture表示中だけ保持する独立draft、入力中キャンセルの破棄確認、interactive dismiss抑止、投稿中の再入防止、失敗時の画面・draft保持、成功時dismissとTimeline即時反映。
+- scene直下の`AppRoute.quickCapture`。Widgetのcustom URLは検証後にこのrouteへ変換し、将来のApp Shortcut／Action Buttonも同じ表示routeを要求できる構成。
+- iOS 16対応の小型Quick Capture Widget。固定文言だけを表示し、全体タップの`widgetURL`から`aitextapp://quick-capture`を開く。
+- app／Widgetで共有する厳密な外部route契約と、SwiftUI `onOpenURL`から既存`AppRoute.quickCapture`へ変換するcold launch／foreground共通導線。
+- `AiTextAppWidget` Extension targetとappへの埋め込み設定。WidgetはSQLite、Repository、Firebase、Thought本文へ依存せず、App Group／entitlement／schema変更を行わない。
+- Timelineから開くローカル分析画面。今日／過去7日／過去30日、活動日数、1活動日平均、30日の日別・曜日別・時間帯別分布、上位5タグ、Continuationを持つThought数を表示。
+- typed分析model、端末Calendarから30日の日／時間帯境界を構築する`LoadThoughtAnalytics`、CRUDから分離したread-only `ThoughtAnalyticsRepository`。
+- SQLiteの境界CTE＋`COUNT`／`GROUP BY`、タグJOIN集計、activeな期間内親子のRelation集計。原文全件をViewへ取得せず、deleted／期間外ThoughtをSQLで除外する。
 
 ## 未実装
 
@@ -92,12 +102,15 @@ Phase 3-C（History Review強化 v1）を実装済みです。Phase 3-A／3-Bと
 - Phase 3-AのSwift Testing、Xcode build、XCUITest、Light／Dark Mode、Dynamic Type、VoiceOverの実機／Simulator確認はWindows環境のため未実行です。
 - Phase 3-Bのschema v4 migration、タグunit test、XCUITest、Light／Dark Mode、Dynamic Type、VoiceOverの実機／Simulator確認はWindows環境のため未実行です。
 - Phase 3-Cの期間境界、期間＋タグquery、Review概要・日別表示、AI対象差、XCUITest、各アクセシビリティ表示はWindows環境のため未実行です。
+- Phase 3-E-1の自動focus、140／141文字、二重投稿防止、失敗時draft保持、破棄確認、小型iPhone keyboard layout、XCUITest、VoiceOverはWindows環境のため未実行です。
+- Phase 3-E-2のXcode project読込、app／Widget compile・署名、Widget preview、SimulatorへのWidget配置、cold launch／foreground URL route XCUITest、iOS 16／17以降の背景表示、Dynamic Type／Dark Mode／VoiceOverはWindows環境のため未実行です。
+- Phase 3-DのSwift Testing、SQLite集計SQL、timezone／時間帯境界、分析画面XCUITest、小型iPhoneでのバー表示、Dynamic Type／Dark Mode／VoiceOverはWindows環境のため未実行です。
 
 ## 次に行うこと
 
 ### Xcode環境が利用可能になったら行う検証
 
-1. macOSで`swift test`を実行し、schema v4 migration、本文検索、タグ、Review期間・期間＋タグ、AI要約対象維持、Mock生成、再要約保存を確認する。
+1. macOSで`swift test`を実行し、schema v4 migration、本文検索、タグ、Review、既存投稿境界、AI要約対象維持を確認する。
 2. iPhone SEと最新標準iPhone Simulatorでbuild／XCUITestを実行する。
 3. AI要約プレビューの期間・件数・文字数・Thought順序、キャンセル、確定後のMock表示、loading、通信失敗、再試行、Thoughtなし、再要約を手動確認する。
 4. プレビュー表示後に対象Thoughtが変わった場合、AIを呼ばず対象再読込エラーになることを確認する。
@@ -108,6 +121,10 @@ Phase 3-C（History Review強化 v1）を実装済みです。Phase 3-A／3-Bと
 9. Firebase Consoleから取得した`GoogleService-Info.plist`をローカルでapp targetへ追加し、Debug Providerの出力tokenをConsoleへ登録してSimulator実通信を確認する。plist／tokenは未配置・未コミット。
 10. 実機でApp Attest entitlement／provider、AI Logic実通信、保存されるprovider／model、Firebase未設定、App Check拒否、quota超過、offline、timeout、空応答を確認する（未実行）。
 11. 実機で既存Thought Share Sheet（Files、AirDrop）、外部backup／Restoreを回帰確認する。
+12. `AiTextAppWidget`をbuild・署名し、systemSmallをホーム画面へ配置して、cold launch／foregroundの両方でQuick Captureへ遷移し自動focusすることを確認する。
+13. Widget経由で既存の空／140／141文字validation、trim、単一投稿、失敗時draft保持、投稿後Timeline反映を確認する。
+14. `swift test`でローカル分析の件数、日別／曜日／時間帯、タグ、Continuation、read-only性と既存Repository回帰を確認する。
+15. Timelineから分析画面を開き、小型iPhone、Dynamic Type、Dark Mode、VoiceOverで30日分の可読性を確認する。
 
 ### 次の実装候補
 
@@ -116,10 +133,12 @@ Phase 3-C（History Review強化 v1）を実装済みです。Phase 3-A／3-Bと
 1. Phase 3-A: Thought検索 v1 — コード実装済み／Mac確認待ち。
 2. Phase 3-B: Thoughtタグ v1 — コード実装済み／Mac確認待ち。
 3. Phase 3-C: History Review強化 v1 — コード実装済み／Mac確認待ち。
-4. Phase 3-E: Quick Capture / Widget — 次候補。検索・タグ・期間Reviewの受け皿が揃ったため、実際の入力頻度を増やす価値を優先する。Widget target／App Groupなど構成影響は実装前に調査する。
-5. Phase 3-D: ローカル分析 — Reviewで不足する指標と十分な利用データが確認できてから設計する。
+4. Phase 3-E-1: Quick Capture v1 — コード実装済み／Mac確認待ち。
+5. Phase 3-E-2: Widget／外部起動導線 v1 — コード実装済み／Mac確認待ち。WidgetはQuick Captureを開くだけで、データ共有・直接投稿を行わない。
+6. Phase 3-E-3候補: 「Thoughtを書く」App Shortcut／App Intent — 既存外部routeを再利用できるが、WidgetのMac検証後に必要性を判断する。
+7. Phase 3-D: ローカル分析 v1 — コード実装済み／Mac確認待ち。SQLite集計基盤と直近30日の小さな分析画面まで。
 
-Phase 3-A〜3-CのMac検証と実利用後に、検索・タグ・期間Reviewの利用感とSQLite join性能を再確認する。現時点では分析に十分な蓄積量は未確認であり、入力頻度を増やす価値が先にあるため3-Eを次とする。ただしWidgetは新target、データ共有、起動経路へ影響するため、実装前にQuick Capture単体とWidget追加の境界を調査する。3-Dはその利用データとReviewで不足した情報を根拠に後続で仕様化する。
+Phase 3の機能追加は一度止め、次はMac検証を最優先する。3-A〜3-E-2と3-Dにcompile／Simulator未確認が蓄積し、特にWidget targetとSQLite分析SQLは実環境確認が完了条件になるためである。検証と実利用後、入力導線の不足が明確なら3-E-3 App Shortcut、分析画面で具体的な意思決定が不足する場合だけ分析v2を検討する。根拠がなければPhase 4の別テーマを決める。
 
 #### AIロードマップ
 

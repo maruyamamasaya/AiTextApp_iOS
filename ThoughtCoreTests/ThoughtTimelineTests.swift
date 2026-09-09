@@ -1048,6 +1048,145 @@ struct ExternalBackupTests {
         #expect(try sqliteUserVersion(at: restored.databaseURL) == SQLiteThoughtRepository.schemaVersion)
     }
 
+    @Test func localAnalyticsSummarizesThirtyDaysAndIsReadOnly() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let calendar = analyticsCalendar()
+        let now = analyticsDate(2026, 9, 9, 12, 0, calendar: calendar)
+        let values = [
+            Thought(body: "today", createdAt: analyticsDate(2026, 9, 9, 8, 0, calendar: calendar)),
+            Thought(body: "today second", createdAt: analyticsDate(2026, 9, 9, 20, 0, calendar: calendar)),
+            Thought(body: "six days", createdAt: analyticsDate(2026, 9, 3, 9, 0, calendar: calendar)),
+            Thought(body: "old edge", createdAt: analyticsDate(2026, 8, 11, 10, 0, calendar: calendar)),
+            Thought(body: "outside", createdAt: analyticsDate(2026, 8, 10, 23, 59, calendar: calendar)),
+            Thought(body: "deleted", createdAt: analyticsDate(2026, 9, 9, 10, 0, calendar: calendar))
+        ]
+        for thought in values { try repository.create(thought) }
+        _ = try repository.softDelete(id: values[5].id, at: now)
+        let before = try repository.fetchAll()
+
+        let analytics = try LoadThoughtAnalytics(repository: repository, calendar: calendar)(containing: now)
+
+        #expect(analytics.summary.todayCount == 2)
+        #expect(analytics.summary.pastSevenDaysCount == 3)
+        #expect(analytics.summary.pastThirtyDaysCount == 4)
+        #expect(analytics.summary.activeDayCount == 3)
+        #expect(analytics.summary.averagePerActiveDay == 4.0 / 3.0)
+        #expect(analytics.dailyCounts.count == 30)
+        #expect(analytics.dailyCounts.first?.count == 1)
+        #expect(analytics.dailyCounts.last?.count == 2)
+        #expect(try repository.fetchAll() == before)
+        #expect(SQLiteThoughtRepository.schemaVersion == 4)
+    }
+
+    @Test func emptyLocalAnalyticsReturnsZeroFilledDistributions() throws {
+        let repository = MemoryThoughtRepository()
+        let calendar = analyticsCalendar()
+        let analytics = try LoadThoughtAnalytics(repository: repository, calendar: calendar)(
+            containing: analyticsDate(2026, 9, 9, 12, 0, calendar: calendar)
+        )
+        #expect(analytics.summary == .init(todayCount: 0, pastSevenDaysCount: 0, pastThirtyDaysCount: 0, activeDayCount: 0))
+        #expect(analytics.summary.averagePerActiveDay == 0)
+        #expect(analytics.dailyCounts.count == 30)
+        #expect(analytics.dailyCounts.allSatisfy { $0.count == 0 })
+        #expect(analytics.weekdayCounts.count == 7)
+        #expect(analytics.timeOfDayCounts.map(\.count) == [0, 0, 0, 0])
+        #expect(analytics.topTags.isEmpty)
+        #expect(analytics.thoughtsWithContinuationsCount == 0)
+    }
+
+    @Test func localAnalyticsRespectsTimezoneWeekdaysAndTimeBoundaries() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let calendar = analyticsCalendar()
+        let now = analyticsDate(2026, 9, 9, 23, 59, calendar: calendar)
+        let boundaryTimes = [(5, 59), (6, 0), (11, 59), (12, 0), (17, 59), (18, 0), (23, 59), (0, 0)]
+        for (index, value) in boundaryTimes.enumerated() {
+            try repository.create(Thought(
+                body: "boundary \(index)",
+                createdAt: analyticsDate(2026, 9, 9, value.0, value.1, calendar: calendar)
+            ))
+        }
+        try repository.create(Thought(
+            body: "previous local day",
+            createdAt: analyticsDate(2026, 9, 8, 23, 59, calendar: calendar)
+        ))
+
+        let analytics = try LoadThoughtAnalytics(repository: repository, calendar: calendar)(containing: now)
+
+        #expect(analytics.timeOfDayCounts.map(\.count) == [2, 2, 2, 3])
+        let wednesday = calendar.component(.weekday, from: analyticsDate(2026, 9, 9, 12, 0, calendar: calendar))
+        let tuesday = calendar.component(.weekday, from: analyticsDate(2026, 9, 8, 12, 0, calendar: calendar))
+        #expect(analytics.weekdayCounts.first { $0.weekday == wednesday }?.count == 8)
+        #expect(analytics.weekdayCounts.first { $0.weekday == tuesday }?.count == 1)
+        #expect(analytics.dailyCounts.suffix(2).map(\.count) == [1, 8])
+    }
+
+    @Test func localAnalyticsRanksTagsAndExcludesDeletedAndOutsideThoughts() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let calendar = analyticsCalendar()
+        let now = analyticsDate(2026, 9, 9, 12, 0, calendar: calendar)
+        let first = Thought(body: "first", createdAt: analyticsDate(2026, 9, 9, 8, 0, calendar: calendar))
+        let second = Thought(body: "second", createdAt: analyticsDate(2026, 9, 8, 8, 0, calendar: calendar))
+        let deleted = Thought(body: "deleted", createdAt: analyticsDate(2026, 9, 7, 8, 0, calendar: calendar))
+        let outside = Thought(body: "outside", createdAt: analyticsDate(2026, 8, 1, 8, 0, calendar: calendar))
+        for thought in [first, second, deleted, outside] { try repository.create(thought) }
+        guard case .added(let alpha) = try repository.addTag(named: "Alpha", to: first.id, at: now),
+              case .added(let beta) = try repository.addTag(named: "ベータ", to: first.id, at: now) else {
+            Issue.record("tags should be created")
+            return
+        }
+        _ = try repository.addTag(named: "Alpha", to: second.id, at: now)
+        _ = try repository.addTag(named: "ベータ", to: second.id, at: now)
+        _ = try repository.addTag(named: "除外", to: deleted.id, at: now)
+        _ = try repository.addTag(named: "期間外", to: outside.id, at: now)
+        _ = try repository.softDelete(id: deleted.id, at: now)
+
+        let analytics = try LoadThoughtAnalytics(repository: repository, calendar: calendar)(containing: now)
+
+        #expect(analytics.topTags.map(\.tag.id) == [alpha.id, beta.id])
+        #expect(analytics.topTags.map(\.count) == [2, 2])
+    }
+
+    @Test func localAnalyticsCountsOnlyActiveInPeriodContinuationParents() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let calendar = analyticsCalendar()
+        let now = analyticsDate(2026, 9, 9, 12, 0, calendar: calendar)
+        let parent = Thought(body: "parent", createdAt: analyticsDate(2026, 9, 7, 8, 0, calendar: calendar))
+        let child = Thought(body: "child", createdAt: analyticsDate(2026, 9, 8, 8, 0, calendar: calendar))
+        let deletedChild = Thought(body: "deleted child", createdAt: analyticsDate(2026, 9, 9, 8, 0, calendar: calendar))
+        for thought in [parent, child, deletedChild] { try repository.create(thought) }
+        try repository.create(ThoughtRelation(sourceThoughtID: child.id, targetThoughtID: parent.id, createdAt: child.createdAt))
+        try repository.create(ThoughtRelation(sourceThoughtID: deletedChild.id, targetThoughtID: parent.id, createdAt: deletedChild.createdAt))
+        _ = try repository.softDelete(id: deletedChild.id, at: now)
+
+        let analytics = try LoadThoughtAnalytics(repository: repository, calendar: calendar)(containing: now)
+        #expect(analytics.thoughtsWithContinuationsCount == 1)
+    }
+
+    private func analyticsCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "ja_JP")
+        calendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        calendar.firstWeekday = 2
+        return calendar
+    }
+
+    private func analyticsDate(
+        _ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int, calendar: Calendar
+    ) -> Date {
+        calendar.date(from: DateComponents(
+            timeZone: calendar.timeZone,
+            year: year,
+            month: month,
+            day: day,
+            hour: hour,
+            minute: minute
+        ))!
+    }
+
     private func repositoryBodies(at generation: URL) throws -> [String] {
         let database = generation.appendingPathComponent(ExternalBackupService.databaseFileName)
         return try SQLiteThoughtRepository(databaseURL: database).fetchAll().map(\.body)
