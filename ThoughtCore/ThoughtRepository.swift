@@ -12,14 +12,16 @@ public protocol ThoughtRepository: Sendable {
 }
 
 /// A small repository useful for previews and domain tests. SQLite is the app's durable store.
-public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, @unchecked Sendable {
+public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ReviewSummaryRepository, @unchecked Sendable {
     private var records: [Thought]
     private var relations: [ThoughtRelation]
+    private var summaries: [ReviewSummary]
     private let lock = NSLock()
 
-    public init(records: [Thought] = [], relations: [ThoughtRelation] = []) {
+    public init(records: [Thought] = [], relations: [ThoughtRelation] = [], summaries: [ReviewSummary] = []) {
         self.records = records
         self.relations = relations
+        self.summaries = summaries
     }
 
     public func create(_ thought: Thought) throws {
@@ -59,6 +61,21 @@ public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRe
             }
             records[index].deletedAt = date
             return true
+        }
+    }
+
+    public func save(_ summary: ReviewSummary) throws {
+        lock.withLock { summaries.append(summary) }
+    }
+
+    public func fetchSummaries(from startDate: Date, to endDate: Date) throws -> [ReviewSummary] {
+        lock.withLock {
+            summaries.filter { $0.periodStart == startDate && $0.periodEnd == endDate }
+                .sorted {
+                    $0.createdAt == $1.createdAt
+                        ? $0.id.uuidString > $1.id.uuidString
+                        : $0.createdAt > $1.createdAt
+                }
         }
     }
 

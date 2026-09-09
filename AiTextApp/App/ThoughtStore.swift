@@ -18,6 +18,9 @@ final class ThoughtStore: ObservableObject {
     @Published var continuationDraft = ""
     @Published private(set) var reviewThoughts: [Thought] = []
     @Published private(set) var reviewContinuationCounts: [UUID: Int] = [:]
+    @Published private(set) var reviewSummary: ReviewSummary?
+    @Published private(set) var isGeneratingReviewSummary = false
+    @Published var reviewSummaryError: String?
     let externalBackupManager: ExternalBackupManager?
 
     private var timeline: ThoughtTimeline?
@@ -25,8 +28,16 @@ final class ThoughtStore: ObservableObject {
     private var thoughtRepository: (any ThoughtRepository)?
     private var relationRepository: (any ThoughtRelationRepository)?
     private var continuationRepository: (any ThoughtContinuationRepository)?
+    private var summaryRepository: (any ReviewSummaryRepository)?
+    private let summaryClient: any ReviewSummaryClient
+    private var reviewInterval: DateInterval?
 
-    init(repository: (any ThoughtRepository)? = nil, startupError: String? = nil) {
+    init(
+        repository: (any ThoughtRepository)? = nil,
+        summaryClient: any ReviewSummaryClient = MockReviewSummaryClient(),
+        startupError: String? = nil
+    ) {
+        self.summaryClient = summaryClient
         var backupManager: ExternalBackupManager?
         do {
             let repository = try repository ?? SQLiteThoughtRepository()
@@ -35,6 +46,7 @@ final class ThoughtStore: ObservableObject {
             thoughtRepository = repository
             relationRepository = repository as? any ThoughtRelationRepository
             continuationRepository = repository as? any ThoughtContinuationRepository
+            summaryRepository = repository as? any ReviewSummaryRepository
             exporter = ThoughtExporter(repository: repository)
             thoughts = timeline.thoughts
             if let sqliteRepository = repository as? SQLiteThoughtRepository {
@@ -108,8 +120,45 @@ final class ThoughtStore: ObservableObject {
             let thoughts = try thoughtRepository.fetchThoughts(from: interval.start, to: interval.end)
             reviewThoughts = thoughts
             reviewContinuationCounts = try relationRepository.fetchContinuationCounts(for: thoughts.map(\.id))
+            reviewInterval = interval
+            reviewSummary = try summaryRepository?.fetchSummaries(from: interval.start, to: interval.end).first
+            reviewSummaryError = nil
         } catch {
+            reviewInterval = interval
+            reviewThoughts = []
+            reviewContinuationCounts = [:]
+            reviewSummary = nil
             errorMessage = "History Reviewを読み込めませんでした。"
+        }
+    }
+
+    func generateReviewSummary(in interval: DateInterval) async {
+        guard reviewInterval == interval else {
+            reviewSummaryError = "選択期間を読み込み直してから再試行してください。"
+            return
+        }
+        guard !reviewThoughts.isEmpty else {
+            reviewSummaryError = ReviewSummaryError.noThoughts.localizedDescription
+            return
+        }
+        guard let summaryRepository else {
+            reviewSummaryError = "AI要約の保存先を利用できません。"
+            return
+        }
+        let targetThoughts = reviewThoughts
+        isGeneratingReviewSummary = true
+        reviewSummaryError = nil
+        defer { isGeneratingReviewSummary = false }
+        do {
+            let summary = try await GenerateReviewSummary(
+                client: summaryClient,
+                repository: summaryRepository
+            )(thoughts: targetThoughts, interval: interval)
+            if reviewInterval == interval { reviewSummary = summary }
+        } catch {
+            if reviewInterval == interval {
+                reviewSummaryError = "AI要約を作成できませんでした。通信状態を確認して再試行してください。"
+            }
         }
     }
 

@@ -2,7 +2,7 @@
 
 ## Local Development
 
-`AiTextApp.xcodeproj`をXcode 16以降で開き、`AiTextApp` schemeと任意のiPhone Simulatorを選んで実行します。iOS 16.0以降が対象で、外部dependencyや初回セットアップはありません。
+`AiTextApp.xcodeproj`をXcode 16以降で開き、`AiTextApp` schemeと任意のiPhone Simulatorを選んで実行します。iOS 16.0以降が対象です。Firebase未設定時のAI要約はMockで動作し、外部dependencyや秘密情報は不要です。
 
 ## Local Data
 
@@ -14,7 +14,7 @@ Xcodeの`AiTextApp` shared schemeでbuildします。CLIコマンドとCore test
 
 ## Environment / External Services
 
-環境変数、secret、外部サービスはありません。
+現在のbuildは環境変数、secret、外部サービスを必要としません。実AI接続時はFirebase Apple SDKの`FirebaseAILogic`と`FirebaseAppCheck`、Firebase構成ファイル、App Check設定を追加します。APIキーやApp Check debug tokenはソースへ記載・コミットしません。
 
 ## Deploy
 

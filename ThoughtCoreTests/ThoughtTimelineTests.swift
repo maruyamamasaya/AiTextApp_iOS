@@ -253,7 +253,7 @@ struct ThoughtHistoryTests {
         try fixture.writeV1Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 2)
+        #expect(SQLiteThoughtRepository.schemaVersion == 3)
         #expect(try repository.fetchAll() == [original])
         #expect(try repository.fetchBySourceThoughtID(original.id).isEmpty)
     }
@@ -327,6 +327,52 @@ struct ThoughtHistoryReviewTests {
 
         #expect(try repository.fetchContinuationCounts(for: [parent.id]) == [parent.id: 2])
         #expect(try repository.fetchContinuationCounts(for: []).isEmpty)
+    }
+
+    @Test func promptContainsOnlyOrderedBodiesAndNoInternalIdentifiers() throws {
+        let firstID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let thoughts = [
+            Thought(id: firstID, body: "最初の本文", createdAt: Date(timeIntervalSince1970: 100)),
+            Thought(body: "次の本文", createdAt: Date(timeIntervalSince1970: 200))
+        ]
+
+        let prompt = try ReviewSummaryPrompt.make(thoughts: thoughts)
+
+        #expect(prompt.contains("1. 最初の本文\n2. 次の本文"))
+        #expect(!prompt.contains(firstID.uuidString))
+        #expect(!prompt.contains("createdAt"))
+        #expect(!prompt.contains("SQLite"))
+        #expect(throws: ReviewSummaryError.noThoughts) {
+            try ReviewSummaryPrompt.make(thoughts: [])
+        }
+    }
+
+    @Test func generatedSummariesAreSavedSeparatelyAndCanBeRegenerated() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let interval = DateInterval(
+            start: Date(timeIntervalSince1970: 100),
+            end: Date(timeIntervalSince1970: 500)
+        )
+        let thoughts = [Thought(body: "原文は変えない", createdAt: Date(timeIntervalSince1970: 200))]
+        try repository.create(thoughts[0])
+        let generator = GenerateReviewSummary(
+            client: MockReviewSummaryClient(text: "主な話題: 1回目"),
+            repository: repository
+        )
+        _ = try await generator(thoughts: thoughts, interval: interval, now: Date(timeIntervalSince1970: 300))
+        let regenerated = GenerateReviewSummary(
+            client: MockReviewSummaryClient(text: "主な話題: 2回目"),
+            repository: repository
+        )
+        _ = try await regenerated(thoughts: thoughts, interval: interval, now: Date(timeIntervalSince1970: 400))
+
+        let reopened = try fixture.repository()
+        let summaries = try reopened.fetchSummaries(from: interval.start, to: interval.end)
+        #expect(summaries.map(\.content) == ["主な話題: 2回目", "主な話題: 1回目"])
+        #expect(summaries.allSatisfy { $0.thoughtCount == 1 && $0.promptVersion == ReviewSummaryPrompt.version })
+        #expect(try reopened.fetchByID(thoughts[0].id)?.body == "原文は変えない")
     }
 }
 

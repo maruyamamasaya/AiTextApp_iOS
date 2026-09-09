@@ -256,6 +256,7 @@ private struct HistoryReviewView: View {
     @ObservedObject var store: ThoughtStore
     @State private var filter: Filter = .today
     @State private var selectedDate = Date()
+    @State private var showingAISummaryConfirmation = false
 
     private var interval: DateInterval {
         switch filter {
@@ -298,6 +299,19 @@ private struct HistoryReviewView: View {
                     .datePickerStyle(.compact)
                     .accessibilityIdentifier("historyReviewDatePicker")
                 }
+
+                Button {
+                    showingAISummaryConfirmation = true
+                } label: {
+                    HStack(spacing: 8) {
+                        if store.isGeneratingReviewSummary { ProgressView() }
+                        Text(store.reviewSummary == nil ? "AIで要約" : "もう一度AIで要約")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.reviewThoughts.isEmpty || store.isGeneratingReviewSummary)
+                .accessibilityIdentifier("reviewAISummaryButton")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -320,6 +334,46 @@ private struct HistoryReviewView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        if let summary = store.reviewSummary {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Label("AI要約", systemImage: "sparkles")
+                                        .font(.headline)
+                                    Spacer()
+                                    Text(summary.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(summary.content)
+                                    .font(.body)
+                                    .textSelection(.enabled)
+                                if summary.provider == "mock" {
+                                    Text("Mockによる表示です。Firebase接続後に実AIへ切り替わります。")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(16)
+                            .background(Color(uiColor: .secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .padding(16)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("reviewAISummaryResult")
+                        }
+
+                        if let message = store.reviewSummaryError {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(message)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.red)
+                                Button("再試行") { showingAISummaryConfirmation = true }
+                                    .disabled(store.isGeneratingReviewSummary)
+                                    .accessibilityIdentifier("reviewAISummaryRetryButton")
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                        }
+
                         ForEach(groupedThoughts, id: \.date) { group in
                             Section {
                                 ForEach(group.thoughts) { thought in
@@ -352,6 +406,14 @@ private struct HistoryReviewView: View {
         .onChange(of: filter) { _ in reload() }
         .onChange(of: selectedDate) { _ in if filter == .date { reload() } }
         .onChange(of: store.thoughts.map(\.id)) { _ in reload() }
+        .alert("AI要約を作成しますか？", isPresented: $showingAISummaryConfirmation) {
+            Button("キャンセル", role: .cancel) {}
+            Button("送信して要約") {
+                Task { await store.generateReviewSummary(in: interval) }
+            }
+        } message: {
+            Text("選択期間内のThought本文を、要約のためFirebase AI Logic経由でGeminiへ送信します。UUID、データベース情報、アプリ内部情報は送信しません。")
+        }
     }
 
     private func reload() {

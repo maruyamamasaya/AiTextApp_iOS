@@ -24,6 +24,8 @@
 		A10000000000000000000015 /* ExternalBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* ExternalBackup.swift */; };
 		A10000000000000000000016 /* ExternalBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* ExternalBackupManager.swift */; };
 		A10000000000000000000017 /* FolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* FolderPicker.swift */; };
+		A10000000000000000000018 /* ReviewSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* ReviewSummary.swift */; };
+		A10000000000000000000019 /* GeminiReviewSummaryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* GeminiReviewSummaryClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +58,8 @@
 		A20000000000000000000017 /* ExternalBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalBackup.swift; sourceTree = "<group>"; };
 		A20000000000000000000018 /* ExternalBackupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalBackupManager.swift; sourceTree = "<group>"; };
 		A20000000000000000000019 /* FolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderPicker.swift; sourceTree = "<group>"; };
+		A20000000000000000000020 /* ReviewSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSummary.swift; sourceTree = "<group>"; };
+		A20000000000000000000021 /* GeminiReviewSummaryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiReviewSummaryClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -106,6 +110,7 @@
 				A20000000000000000000012 /* ShareSheet.swift */,
 				A20000000000000000000018 /* ExternalBackupManager.swift */,
 				A20000000000000000000019 /* FolderPicker.swift */,
+				A20000000000000000000021 /* GeminiReviewSummaryClient.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -121,6 +126,7 @@
 				A20000000000000000000007 /* ThoughtTimeline.swift */,
 				A20000000000000000000016 /* ThoughtRelation.swift */,
 				A20000000000000000000017 /* ExternalBackup.swift */,
+				A20000000000000000000020 /* ReviewSummary.swift */,
 			);
 			path = ThoughtCore;
 			sourceTree = "<group>";
@@ -263,6 +269,8 @@
 				A10000000000000000000015 /* ExternalBackup.swift in Sources */,
 				A10000000000000000000016 /* ExternalBackupManager.swift in Sources */,
 				A10000000000000000000017 /* FolderPicker.swift in Sources */,
+				A10000000000000000000018 /* ReviewSummary.swift in Sources */,
+				A10000000000000000000019 /* GeminiReviewSummaryClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

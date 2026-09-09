@@ -25,8 +25,8 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 2
+public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ReviewSummaryRepository, @unchecked Sendable {
+    public static let schemaVersion: Int32 = 3
 
     private let databaseURL: URL
     private let legacyJSONURL: URL
@@ -141,6 +141,71 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
             let changed = sqlite3_changes(database) > 0
             if changed { createRollingBackupIfPossible() }
             return changed
+        }
+    }
+
+    public func save(_ summary: ReviewSummary) throws {
+        try lock.withLock {
+            do {
+                let statement = try prepare("""
+                    INSERT INTO review_summaries(
+                        id, period_start, period_end, content, created_at,
+                        provider, model, prompt_version, thought_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """)
+                defer { sqlite3_finalize(statement) }
+                try bind(summary.id.uuidString, to: 1, in: statement)
+                try bind(summary.periodStart.timeIntervalSince1970, to: 2, in: statement)
+                try bind(summary.periodEnd.timeIntervalSince1970, to: 3, in: statement)
+                try bind(summary.content, to: 4, in: statement)
+                try bind(summary.createdAt.timeIntervalSince1970, to: 5, in: statement)
+                try bind(summary.provider, to: 6, in: statement)
+                try bind(summary.model, to: 7, in: statement)
+                try bind(Int32(summary.promptVersion), to: 8, in: statement)
+                try bind(Int32(summary.thoughtCount), to: 9, in: statement)
+                try stepDone(statement)
+            }
+            createRollingBackupIfPossible()
+        }
+    }
+
+    public func fetchSummaries(from startDate: Date, to endDate: Date) throws -> [ReviewSummary] {
+        try lock.withLock {
+            let statement = try prepare("""
+                SELECT id, period_start, period_end, content, created_at,
+                       provider, model, prompt_version, thought_count
+                FROM review_summaries
+                WHERE period_start = ? AND period_end = ?
+                ORDER BY created_at DESC, id DESC
+                """)
+            defer { sqlite3_finalize(statement) }
+            try bind(startDate.timeIntervalSince1970, to: 1, in: statement)
+            try bind(endDate.timeIntervalSince1970, to: 2, in: statement)
+            var output: [ReviewSummary] = []
+            var result = sqlite3_step(statement)
+            while result == SQLITE_ROW {
+                guard let idText = sqlite3_column_text(statement, 0),
+                      let contentText = sqlite3_column_text(statement, 3),
+                      let providerText = sqlite3_column_text(statement, 5),
+                      let modelText = sqlite3_column_text(statement, 6),
+                      let id = UUID(uuidString: String(cString: idText)) else {
+                    throw SQLiteThoughtRepositoryError.invalidRecord
+                }
+                output.append(ReviewSummary(
+                    id: id,
+                    periodStart: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)),
+                    periodEnd: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
+                    content: String(cString: contentText),
+                    createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+                    provider: String(cString: providerText),
+                    model: String(cString: modelText),
+                    promptVersion: Int(sqlite3_column_int(statement, 7)),
+                    thoughtCount: Int(sqlite3_column_int(statement, 8))
+                ))
+                result = sqlite3_step(statement)
+            }
+            guard result == SQLITE_DONE else { throw lastError() }
+            return output
         }
     }
 
@@ -332,6 +397,26 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
                 try execute("CREATE INDEX thought_relations_source_idx ON thought_relations(source_thought_id)")
                 try execute("CREATE INDEX thought_relations_target_idx ON thought_relations(target_thought_id)")
                 try execute("PRAGMA user_version = 2")
+            }
+        }
+        if version < 3 {
+            try transaction {
+                try execute("""
+                    CREATE TABLE review_summaries (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        period_start REAL NOT NULL,
+                        period_end REAL NOT NULL,
+                        content TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        provider TEXT NOT NULL,
+                        model TEXT NOT NULL,
+                        prompt_version INTEGER NOT NULL,
+                        thought_count INTEGER NOT NULL CHECK (thought_count > 0),
+                        CHECK (period_start < period_end)
+                    )
+                    """)
+                try execute("CREATE INDEX review_summaries_period_idx ON review_summaries(period_start, period_end, created_at DESC, id DESC)")
+                try execute("PRAGMA user_version = 3")
             }
         }
     }
@@ -543,6 +628,10 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
 
     private func bind(_ value: Double, to index: Int32, in statement: OpaquePointer) throws {
         guard sqlite3_bind_double(statement, index, value) == SQLITE_OK else { throw lastError() }
+    }
+
+    private func bind(_ value: Int32, to index: Int32, in statement: OpaquePointer) throws {
+        guard sqlite3_bind_int(statement, index, value) == SQLITE_OK else { throw lastError() }
     }
 
     private func stepDone(_ statement: OpaquePointer) throws {
