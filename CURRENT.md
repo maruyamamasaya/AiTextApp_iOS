@@ -1,6 +1,6 @@
 # Current Project Status
 
-最終照合日: 2026-09-09
+最終照合日: 2026-09-10
 
 ## Project
 
@@ -12,12 +12,16 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ## 実装済み
 
+- 端末Calendar／timezoneの1日境界で明示生成するAI Daily Summary v1。月カレンダーで要約済み／Thoughtあり未要約／Thoughtなしと今日を区別し、過去日の日別詳細、送信前Thought／payloadプレビュー、構造化結果の表示と再読込を提供する。
+- SQLite schema v5の`daily_summaries`。Thought原文と分離した1日1件の正式Summaryとして構造化結果と生成メタデータを保存し、AI候補からタグ／Thought／Continuationを自動変更しない。
+- タグチップ、タグ追加、タグ編集ボタンの操作領域を44pt以上へ拡大。
+
 - 140文字制限、空白除去、空投稿防止を備えた投稿Composer。
 - 新しい順のTimeline、投稿日時、削除確認と即時反映。
 - UUIDと作成・更新・削除日時を持つThought原文モデル。
 - Application Support配下のSQLiteを正本にしたローカル保存、query順序、ソフトデリート。
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
-- `PRAGMA user_version`によるschema version管理（現在v4）。
+- `PRAGMA user_version`によるschema version管理（現在v5）。
 - 画面下部に固定し、入力中だけ枠内右端に投稿ボタンを表示するコンパクトなComposer。
 - Lazy Timeline、自然な相対日時、メニュー内削除、Empty State。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。
@@ -70,6 +74,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - `AiTextAppWidget` Extension targetとappへの埋め込み設定。WidgetはSQLite、Repository、Firebase、Thought本文へ依存せず、App Group／entitlement／schema変更を行わない。
 - Timelineから開くローカル分析画面。今日／過去7日／過去30日、活動日数、1活動日平均、30日の日別・曜日別・時間帯別分布、上位5タグ、Continuationを持つThought数を表示。
 - typed分析model、端末Calendarから30日の日／時間帯境界を構築する`LoadThoughtAnalytics`、CRUDから分離したread-only `ThoughtAnalyticsRepository`。
+- AI Daily Summary v1: Calendar日境界、構造化Gemini応答、独立SQLite保存、月間カレンダー、日別詳細、Timeline統合、User／AIアイコン。
 - SQLiteの境界CTE＋`COUNT`／`GROUP BY`、タグJOIN集計、activeな期間内親子のRelation集計。原文全件をViewへ取得せず、deleted／期間外ThoughtをSQLで除外する。
 
 ## 未実装

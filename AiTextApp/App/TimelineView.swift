@@ -16,7 +16,6 @@ struct TimelineView: View {
                             ThoughtRow(thought: thought, tags: store.tagsByThoughtID[thought.id] ?? []) {
                                 store.requestDeletion(of: thought)
                             }
-
                             if thought.id != store.thoughts.last?.id {
                                 Divider().padding(.leading, 16)
                             }
@@ -84,6 +83,16 @@ struct TimelineView: View {
                     .accessibilityLabel("ローカル分析を開く")
                     .accessibilityHint("端末内の過去30日のThought傾向を確認します")
                     .accessibilityIdentifier("thoughtAnalyticsButton")
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    NavigationLink {
+                        DailySummaryCalendarView(store: store)
+                    } label: {
+                        Image(systemName: "calendar.badge.checkmark")
+                    }
+                    .accessibilityLabel("Daily Summaryを開く")
+                    .accessibilityHint("日ごとのThoughtと要約状況を確認します")
+                    .accessibilityIdentifier("dailySummaryButton")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
@@ -574,6 +583,8 @@ private struct TagStrip: View {
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
                             .background(Color.accentColor.opacity(0.12), in: Capsule())
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("タグ \(tag.name)")
@@ -1035,6 +1046,8 @@ private struct ThoughtTagEditorView: View {
                         ForEach(availableTags) { tag in
                             Button { store.addTag(named: tag.name, to: thought.id) } label: {
                                 Label(tag.name, systemImage: "plus.circle")
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
                             }
                             .accessibilityIdentifier("attachExistingTag_\(tag.id.uuidString)")
                         }
@@ -1047,6 +1060,8 @@ private struct ThoughtTagEditorView: View {
                         .accessibilityIdentifier("newThoughtTagField")
                         .onSubmit(addNewTag)
                     Button("タグを追加", action: addNewTag)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                         .disabled(ThoughtTag.displayName(from: newTagName) == nil)
                         .accessibilityIdentifier("addThoughtTagButton")
                 }
@@ -1109,6 +1124,7 @@ private struct ThoughtDetailView: View {
                         Button("タグを編集") { showsTagEditor = true }
                             .buttonStyle(.bordered)
                             .buttonBorderShape(.capsule)
+                            .frame(minHeight: 44)
                             .accessibilityIdentifier("editThoughtTagsButton")
                         Button("続きを書く") {
                             showsComposer.toggle()
@@ -1250,7 +1266,7 @@ private struct ThoughtRow: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
+        HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 8) {
                 NavigationLink(value: thought.id) {
                     VStack(alignment: .leading, spacing: 8) {

@@ -10,6 +10,14 @@ final class ThoughtStore: ObservableObject {
 
     @Published var draft = ""
     @Published private(set) var thoughts: [Thought] = []
+    @Published private(set) var dailySummaries: [DailySummary] = []
+    @Published private(set) var dailySummary: DailySummary?
+    @Published private(set) var dailySummaryPreview: DailySummaryPreview?
+    @Published private(set) var isGeneratingDailySummary = false
+    @Published var dailySummaryError: String?
+    @Published private(set) var dailySummaryDayThoughts: [Thought] = []
+    @Published private(set) var dailySummaryDayTags: [String] = []
+    @Published private(set) var dailySummaryDayContinuationCount = 0
     @Published private(set) var searchResults: [Thought] = []
     @Published private(set) var hasSearchQuery = false
     @Published private(set) var tagsByThoughtID: [UUID: [ThoughtTag]] = [:]
@@ -44,6 +52,7 @@ final class ThoughtStore: ObservableObject {
     private var tagRepository: (any ThoughtTagRepository)?
     private var analyticsRepository: (any ThoughtAnalyticsRepository)?
     private var summaryRepository: (any ReviewSummaryRepository)?
+    private var dailySummaryRepository: (any DailySummaryRepository)?
     private var summaryExporter: ReviewSummaryExporter?
     private let summaryClient: any ReviewSummaryClient
     private var reviewInterval: DateInterval?
@@ -70,8 +79,10 @@ final class ThoughtStore: ObservableObject {
                 summaryRepository = reviewSummaryRepository
                 summaryExporter = ReviewSummaryExporter(repository: reviewSummaryRepository)
             }
+            dailySummaryRepository = repository as? any DailySummaryRepository
             exporter = ThoughtExporter(repository: repository)
             thoughts = timeline.thoughts
+            dailySummaries = try dailySummaryRepository?.fetchDailySummaries(from: .distantPast, to: .distantFuture) ?? []
             if let sqliteRepository = repository as? SQLiteThoughtRepository {
                 backupManager = ExternalBackupManager(repository: sqliteRepository)
             }
@@ -82,6 +93,54 @@ final class ThoughtStore: ObservableObject {
         refreshTags(for: thoughts.map(\.id))
         loadAllTags()
         if let startupError { errorMessage = startupError }
+    }
+
+    func loadDailySummary(for day: Date, calendar: Calendar = .current) {
+        let start = calendar.startOfDay(for: day)
+        do {
+            dailySummary = try dailySummaryRepository?.fetchDailySummary(dayStart: start)
+            if let thoughtRepository, let tagRepository, let relationRepository,
+               let preview = try? PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository)(day: day, calendar: calendar) {
+                dailySummaryDayThoughts = preview.thoughts
+                dailySummaryDayTags = preview.existingTags
+                dailySummaryDayContinuationCount = preview.continuationCount
+            } else {
+                dailySummaryDayThoughts = []
+                dailySummaryDayTags = []
+                dailySummaryDayContinuationCount = 0
+            }
+            dailySummaryError = nil
+        }
+        catch { dailySummary = nil; dailySummaryError = "Daily Summaryを読み込めませんでした。" }
+    }
+
+    func prepareDailySummary(for day: Date, calendar: Calendar = .current) {
+        guard let thoughtRepository, let tagRepository, let relationRepository else { dailySummaryError = "要約対象を読み込めませんでした。"; return }
+        do {
+            dailySummaryPreview = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository)(day: day, calendar: calendar)
+            dailySummaryError = nil
+        } catch ReviewSummaryError.noThoughts { dailySummaryPreview = nil; dailySummaryError = "Thoughtが0件の日は要約できません。" }
+        catch { dailySummaryPreview = nil; dailySummaryError = "要約対象を準備できませんでした。" }
+    }
+
+    func cancelDailySummaryPreview() { dailySummaryPreview = nil }
+
+    func generateDailySummary(from preview: DailySummaryPreview) async {
+        guard let thoughtRepository, let dailySummaryRepository else { dailySummaryError = "保存先を利用できません。"; return }
+        isGeneratingDailySummary = true; dailySummaryError = nil
+        defer { isGeneratingDailySummary = false }
+        do {
+            guard let tagRepository, let relationRepository else { throw ReviewSummaryError.stalePreview }
+            let current = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository)(day: preview.interval.start)
+            guard current.thoughts == preview.thoughts && current.existingTags == preview.existingTags && current.continuationCount == preview.continuationCount else { throw ReviewSummaryError.stalePreview }
+            let value = try await GenerateDailySummary(client: summaryClient, repository: dailySummaryRepository)(preview: preview)
+            dailySummary = value
+            dailySummaries.removeAll { $0.dayStart == value.dayStart }
+            dailySummaries.append(value)
+            dailySummaryPreview = nil
+        } catch ReviewSummaryError.stalePreview { dailySummaryError = "確認後にThoughtが変更されたため送信しませんでした。" }
+        catch let error as ReviewSummaryServiceError { dailySummaryError = error.localizedDescription }
+        catch { dailySummaryError = "Daily Summaryを作成できませんでした。応答形式または通信状態を確認してください。" }
     }
 
     func loadAnalytics(containing date: Date = Date(), calendar: Calendar = .current) {

@@ -15,18 +15,20 @@ public protocol ThoughtRepository: Sendable {
 }
 
 /// A small repository useful for previews and domain tests. SQLite is the app's durable store.
-public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, @unchecked Sendable {
+public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, @unchecked Sendable {
     private var records: [Thought]
     private var relations: [ThoughtRelation]
     private var summaries: [ReviewSummary]
+    private var dailySummaries: [DailySummary]
     private var tags: [ThoughtTag]
     private var thoughtTagIDs: [UUID: Set<UUID>]
     private let lock = NSLock()
 
-    public init(records: [Thought] = [], relations: [ThoughtRelation] = [], summaries: [ReviewSummary] = [], tags: [ThoughtTag] = [], thoughtTagIDs: [UUID: Set<UUID>] = [:]) {
+    public init(records: [Thought] = [], relations: [ThoughtRelation] = [], summaries: [ReviewSummary] = [], dailySummaries: [DailySummary] = [], tags: [ThoughtTag] = [], thoughtTagIDs: [UUID: Set<UUID>] = [:]) {
         self.records = records
         self.relations = relations
         self.summaries = summaries
+        self.dailySummaries = dailySummaries
         self.tags = tags
         self.thoughtTagIDs = thoughtTagIDs
     }
@@ -238,6 +240,21 @@ public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRe
             summaries.remove(at: index)
             return true
         }
+    }
+
+    public func saveDailySummary(_ summary: DailySummary) throws {
+        lock.withLock {
+            dailySummaries.removeAll { $0.dayStart == summary.dayStart }
+            dailySummaries.append(summary)
+        }
+    }
+
+    public func fetchDailySummary(dayStart: Date) throws -> DailySummary? {
+        lock.withLock { dailySummaries.first { $0.dayStart == dayStart } }
+    }
+
+    public func fetchDailySummaries(from start: Date, to end: Date) throws -> [DailySummary] {
+        lock.withLock { dailySummaries.filter { $0.dayStart >= start && $0.dayStart < end }.sorted { $0.createdAt > $1.createdAt } }
     }
 
     public func create(_ relation: ThoughtRelation) throws {

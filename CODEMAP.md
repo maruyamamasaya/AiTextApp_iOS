@@ -11,6 +11,7 @@
 - `AiTextAppWidget/Info.plist` — WidgetKit Extension宣言。
 - `AiTextApp/App/QuickCaptureView.swift` — 集中入力、local draft、自動focus、投稿・破棄確認UI。
 - `AiTextApp/App/ThoughtAnalyticsView.swift` — ローカル分析のサマリーと日別／曜日／時間帯／タグ／Continuation表示。
+- `AiTextApp/App/DailySummaryView.swift` — 月カレンダー、日別詳細、構造化Summary、送信前プレビュー。
 - `AiTextApp/App/TimelineView.swift` — Composer、Lazy Timeline、Thought検索、タグUI、期間・タグ・概要・日別区切りを持つHistory Review、Thought Detail、History、Continuation Composer、削除UI。
 - `AiTextApp/App/ThoughtStore.swift` — Timeline／Quick Capture共通投稿境界、本文検索／タグ／Review／History／Continuation UI stateとCoreの接続。
 - `AiTextApp/App/ShareSheet.swift` — Exportファイルを標準Share Sheetへ渡すbridge。
@@ -38,6 +39,7 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 - `ThoughtCore/ThoughtRepository.swift` — CRUD・本文検索・日付範囲repository境界、今日／昨日／直近日数／今週／今月／指定日のReview期間計算、テスト用メモリ実装。
 - `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v4、本文検索／タグ／期間＋単一タグ／日付範囲／分析集計／Relation件数／期間要約query、Continuation transaction、旧JSON migration／2世代backup。
 - `ThoughtCore/ReviewSummary.swift` — AI要約model、immutable送信preview、通信／transport／保存protocol、中央provider／model設定、typed service error、対象準備／鮮度検証／生成・保存use case、Mock client。
+- `ThoughtCore/DailySummary.swift` — 構造化model、prompt、preview、準備／生成use case、1日1件のrepository境界。
 - `ThoughtCore/ReviewSummaryExporter.swift` — AI要約専用Markdown／JSON schema v1、ID再確認、判別可能なファイル名とatomic write。
 - `ThoughtCore/ThoughtExporter.swift` — Repository経由のMarkdown／JSON生成。
 - `ThoughtCore/ExternalBackup.swift` — manifest、外部2世代backup、検証、pending Restore／rollback。

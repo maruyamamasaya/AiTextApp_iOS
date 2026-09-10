@@ -17,6 +17,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
     -> ThoughtRelationRepository (History relation queries)
     -> LoadThoughtAnalytics -> ThoughtAnalyticsRepository (read-only SQLite aggregates)
     -> GenerateReviewSummary -> ReviewSummaryClient / ReviewSummaryRepository
+    -> PrepareDailySummary / GenerateDailySummary -> ReviewSummaryClient / DailySummaryRepository
     -> ReviewSummaryExporter -> ReviewSummaryRepository -> ShareSheet
     -> ThoughtExporter -> ThoughtRepository
     -> ShareSheet (UIActivityViewController)
@@ -36,6 +37,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `QuickCaptureWidget` / `QuickCaptureRoute`: systemSmallの固定表示Widgetと、app／Extension間で共有する外部URL契約。Widgetは`widgetURL`だけを発行し、appの`onOpenURL`が既存`AppRoute.quickCapture`へ変換する。
 - `HistoryReviewView`: 今日／昨日／過去7日／今週／過去30日／今月／日付指定、単一タグ絞り込み、期間・表示件数・活動日数の概要、日単位group、古い順のThought、Continuation件数、最新AI要約と要約履歴への入口を表示。
 - `ThoughtAnalyticsView`: 直近30日の基本サマリー、日別／曜日別／時間帯別分布、上位タグ、Continuation件数を標準SwiftUIの縦Sectionと簡易バーで表示する完全ローカル画面。
+- `DailySummaryCalendarView`: 月単位で要約済み／Thoughtあり未要約／Thoughtなしを表示し、日別詳細と明示生成の送信前プレビューへ遷移する。
 - `ReviewSummaryHistoryView`: 選択期間に保存された要約を新しい順に並べ、最新表示、生成日時、対象件数、provider／model、確認付き個別削除を提供。
 - `ReviewSummaryExporter`: 要約IDをRepositoryで再確認し、単一の保存済み要約をMarkdownまたはJSON schema v1へ変換して一時ファイルへatomic write。
 - `GenerateReviewSummary`: 選択期間のThought本文だけからpromptを作り、抽象化されたclientを呼び、原文と別の要約repositoryへ保存。

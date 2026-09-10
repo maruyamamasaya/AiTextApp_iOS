@@ -25,8 +25,8 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 4
+public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, @unchecked Sendable {
+    public static let schemaVersion: Int32 = 5
 
     private let databaseURL: URL
     private let legacyJSONURL: URL
@@ -378,6 +378,58 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
             }
             if changed { createRollingBackupIfPossible() }
             return changed
+        }
+    }
+
+    public func saveDailySummary(_ summary: DailySummary) throws {
+        try lock.withLock {
+            let data = try JSONEncoder().encode(summary.content)
+            guard let json = String(data: data, encoding: .utf8) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+            let statement = try prepare("""
+                INSERT INTO daily_summaries(id, day_start, day_end, content_json, created_at, provider, model, prompt_version, thought_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(day_start) DO UPDATE SET
+                  id=excluded.id, day_end=excluded.day_end, content_json=excluded.content_json,
+                  created_at=excluded.created_at, provider=excluded.provider, model=excluded.model,
+                  prompt_version=excluded.prompt_version, thought_count=excluded.thought_count
+                """)
+            defer { sqlite3_finalize(statement) }
+            try bind(summary.id.uuidString, to: 1, in: statement)
+            try bind(summary.dayStart.timeIntervalSince1970, to: 2, in: statement)
+            try bind(summary.dayEnd.timeIntervalSince1970, to: 3, in: statement)
+            try bind(json, to: 4, in: statement)
+            try bind(summary.createdAt.timeIntervalSince1970, to: 5, in: statement)
+            try bind(summary.provider, to: 6, in: statement)
+            try bind(summary.model, to: 7, in: statement)
+            try bind(Int32(summary.promptVersion), to: 8, in: statement)
+            try bind(Int32(summary.thoughtCount), to: 9, in: statement)
+            try stepDone(statement)
+            createRollingBackupIfPossible()
+        }
+    }
+
+    public func fetchDailySummary(dayStart: Date) throws -> DailySummary? {
+        try lock.withLock {
+            let statement = try prepare("SELECT id, day_start, day_end, content_json, created_at, provider, model, prompt_version, thought_count FROM daily_summaries WHERE day_start = ? LIMIT 1")
+            defer { sqlite3_finalize(statement) }
+            try bind(dayStart.timeIntervalSince1970, to: 1, in: statement)
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE { return nil }
+            guard result == SQLITE_ROW else { throw lastError() }
+            return try decodeDailySummary(statement)
+        }
+    }
+
+    public func fetchDailySummaries(from start: Date, to end: Date) throws -> [DailySummary] {
+        try lock.withLock {
+            let statement = try prepare("SELECT id, day_start, day_end, content_json, created_at, provider, model, prompt_version, thought_count FROM daily_summaries WHERE day_start >= ? AND day_start < ? ORDER BY created_at DESC, id DESC")
+            defer { sqlite3_finalize(statement) }
+            try bind(start.timeIntervalSince1970, to: 1, in: statement); try bind(end.timeIntervalSince1970, to: 2, in: statement)
+            var output: [DailySummary] = []
+            var result = sqlite3_step(statement)
+            while result == SQLITE_ROW { output.append(try decodeDailySummary(statement)); result = sqlite3_step(statement) }
+            guard result == SQLITE_DONE else { throw lastError() }
+            return output
         }
     }
 
@@ -739,6 +791,26 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
                 try execute("PRAGMA user_version = 4")
             }
         }
+        if version < 5 {
+            try transaction {
+                try execute("""
+                    CREATE TABLE daily_summaries (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        day_start REAL NOT NULL UNIQUE,
+                        day_end REAL NOT NULL,
+                        content_json TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        provider TEXT NOT NULL,
+                        model TEXT NOT NULL,
+                        prompt_version INTEGER NOT NULL,
+                        thought_count INTEGER NOT NULL CHECK (thought_count > 0),
+                        CHECK (day_start < day_end)
+                    )
+                    """)
+                try execute("CREATE INDEX daily_summaries_created_idx ON daily_summaries(created_at DESC, id DESC)")
+                try execute("PRAGMA user_version = 5")
+            }
+        }
     }
 
     private func migrateLegacyJSONIfNeeded() throws {
@@ -1001,6 +1073,15 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
             promptVersion: Int(sqlite3_column_int(statement, 7)),
             thoughtCount: Int(sqlite3_column_int(statement, 8))
         )
+    }
+
+    private func decodeDailySummary(_ statement: OpaquePointer) throws -> DailySummary {
+        guard let idText = sqlite3_column_text(statement, 0), let jsonText = sqlite3_column_text(statement, 3),
+              let providerText = sqlite3_column_text(statement, 5), let modelText = sqlite3_column_text(statement, 6),
+              let id = UUID(uuidString: String(cString: idText)),
+              let data = String(cString: jsonText).data(using: .utf8) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+        let content = try JSONDecoder().decode(DailySummaryContent.self, from: data)
+        return DailySummary(id: id, dayStart: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)), dayEnd: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)), content: content, createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)), provider: String(cString: providerText), model: String(cString: modelText), promptVersion: Int(sqlite3_column_int(statement, 7)), thoughtCount: Int(sqlite3_column_int(statement, 8)))
     }
 
     private func bind(_ value: Int32, to index: Int32, in statement: OpaquePointer) throws {

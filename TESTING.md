@@ -38,6 +38,8 @@ WidgetはXcodeで`AiTextAppWidget` targetのcompile／署名、systemSmall previ
 
 ## Firebase Integration / Device
 
+Daily SummaryはThoughtがある日／ない日、要約済み状態、過去月移動、送信前payload、構造化各Section、再起動後の復元を確認します。実通信ではJSON応答が保存され、タグ／Thought／Continuationが変更されないことを確認します。
+
 XcodeでFirebase package resolveとapp targetのcompileを行った後、Debug Providerを登録したSimulator、App Attestを登録した実機の順で明示送信を確認します。成功時のSQLite provider／model、未設定plist、未登録Debug token、App Check拒否、offline、429／quota、その他API、空応答を確認します。Console設定や実APIを必要とする検証は通常のUnit Testへ組み込みません。
 
 ## General Checks
