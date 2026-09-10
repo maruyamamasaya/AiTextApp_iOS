@@ -15,13 +15,16 @@ public protocol ThoughtRepository: Sendable {
 }
 
 /// A small repository useful for previews and domain tests. SQLite is the app's durable store.
-public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, @unchecked Sendable {
+public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
     private var records: [Thought]
     private var relations: [ThoughtRelation]
     private var summaries: [ReviewSummary]
     private var dailySummaries: [DailySummary]
     private var tags: [ThoughtTag]
     private var thoughtTagIDs: [UUID: Set<UUID>]
+    private var defaultPersona = Persona(id: Persona.defaultHumanID, displayName: "自分", kind: .human)
+    private var personas: [UUID: Persona] = [:]
+    private var authorIDs: [UUID: UUID] = [:]
     private let lock = NSLock()
 
     public init(records: [Thought] = [], relations: [ThoughtRelation] = [], summaries: [ReviewSummary] = [], dailySummaries: [DailySummary] = [], tags: [ThoughtTag] = [], thoughtTagIDs: [UUID: Set<UUID>] = [:]) {
@@ -31,11 +34,32 @@ public final class MemoryThoughtRepository: ThoughtRepository, ThoughtRelationRe
         self.dailySummaries = dailySummaries
         self.tags = tags
         self.thoughtTagIDs = thoughtTagIDs
+        personas[Persona.defaultHumanID] = defaultPersona
+        authorIDs = Dictionary(uniqueKeysWithValues: records.map { ($0.id, Persona.defaultHumanID) })
     }
 
     public func create(_ thought: Thought) throws {
-        lock.withLock { records.append(thought) }
+        try create(thought, authorPersonaID: Persona.defaultHumanID)
     }
+
+    public func create(_ thought: Thought, authorPersonaID: UUID) throws {
+        try lock.withLock {
+            guard personas[authorPersonaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) }
+            records.append(thought); authorIDs[thought.id] = authorPersonaID
+        }
+    }
+
+    public func fetchDefaultHumanPersona() throws -> Persona { lock.withLock { defaultPersona } }
+    public func fetchPersonas(includeInactive: Bool) throws -> [Persona] { lock.withLock { personas.values.filter { includeInactive || $0.deletedAt == nil }.sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt } } }
+    public func fetchPersona(for thoughtID: UUID) throws -> Persona? {
+        lock.withLock { authorIDs[thoughtID].flatMap { personas[$0] } }
+    }
+    public func fetchPersonas(for thoughtIDs: [UUID]) throws -> [UUID: Persona] { lock.withLock { Dictionary(uniqueKeysWithValues: thoughtIDs.compactMap { id in authorIDs[id].flatMap { personas[$0] }.map { (id, $0) } }) } }
+    public func createPersona(_ persona: Persona) throws { try lock.withLock { guard personas[persona.id] == nil else { throw CocoaError(.fileWriteFileExists) }; personas[persona.id] = persona } }
+    public func updatePersona(_ persona: Persona) throws {
+        lock.withLock { personas[persona.id] = persona; if persona.id == Persona.defaultHumanID { defaultPersona = persona } }
+    }
+    public func deactivatePersona(id: UUID, at date: Date) throws -> Bool { lock.withLock { guard id != Persona.defaultHumanID, var persona = personas[id], persona.deletedAt == nil else { return false }; persona.deletedAt = date; persona.updatedAt = date; personas[id] = persona; return true } }
 
     public func fetchTimeline() throws -> [Thought] {
         lock.withLock {

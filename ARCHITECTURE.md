@@ -11,7 +11,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
   TimelineView -> ThoughtAnalyticsView
   -> ThoughtStore (presentation state)
     -> ThoughtTimeline (validation/order/delete use cases)
-      -> ThoughtRepository / ThoughtTagRepository protocols
+      -> ThoughtRepository / ThoughtTagRepository / PersonaRepository protocols
         -> SQLiteThoughtRepository (Application Support SQLite)
       -> ThoughtContinuationRepository (Thought + Relation transaction)
     -> ThoughtRelationRepository (History relation queries)
@@ -48,6 +48,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `ThoughtStore`: Timeline／本文検索／タグ／Continuation draftとHistory画面状態を各use caseへ接続。
 - `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
 - `Thought` / `ThoughtDraft`: 原文モデルと140文字ルール。
+- `Persona` / `PersonaRepository` / `AuthoredThoughtRepository`: 人間／AIに共通する投稿者モデル、複数Personaの管理、任意Persona IDとThoughtを同一transactionで保存する境界。固定IDの人間Personaは無効化できない。
 - `ThoughtRepository`: create、Timeline query、literal部分一致検索、日付範囲query、ID取得、全件取得、soft deleteの保存境界。
 - `ThoughtTag` / `ThoughtTagRepository`: Thought原文から独立したタグ、正規化、付与・解除transaction、Thought別／全タグ／タグ別Thought queryの境界。
 - `ThoughtAnalytics` / `ThoughtAnalyticsRepository`: typed集計結果、Calendar由来の日／時間帯境界、SQLite集計専用read境界。CRUD RepositoryやAI通信から分離する。
@@ -92,9 +93,11 @@ AI要約Exportは履歴内の明示操作で形式を選び、IDで再取得で�
 
 ## Persistence
 
+schema v6の`personas`と`thought_authors`は既存Thoughtを固定のデフォルト人間Personaへ移行し、新規Thought／Continuationの作成と投稿者関連を同一transactionで保存します。プロフィール画像は最大512pxへ正方形化したJPEGのBLOBとして保存され、SQLite snapshotとRestoreに含まれます。
+
 Widget Extensionは永続化層をリンクせず、固定表示とQuick Capture URLだけを持ちます。App Group、共有container、SQLite path変更はなく、既存appだけがApplication Support内の正本DBを読み書きします。
 
-`Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。schema v4は`tags`と`thought_tags`を追加し、正規化名のUNIQUE制約、Thought／Tag外部キー、複合主キーを持ちます。soft deleteでは中間行を保持し、通常のタグqueryがdeleted Thoughtを除外します。既存の`thought_relations`と`review_summaries`は維持します。初回に旧`thoughts.json`があればtransaction内で`INSERT OR IGNORE`し、各IDの主要データを照合してmigration markerを記録します。JSONは削除しません。
+`Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。schema v6はPersona投稿者関連に加え、既存の`tags`と`thought_tags`、正規化名のUNIQUE制約、Thought／Tag外部キー、複合主キーを維持します。soft deleteでは中間行を保持し、通常のタグqueryがdeleted Thoughtを除外します。既存の`thought_relations`と`review_summaries`は維持します。初回に旧`thoughts.json`があればtransaction内で`INSERT OR IGNORE`し、各IDの主要データを照合してmigration markerを記録します。JSONは削除しません。
 
 初期化成功後とcreate／soft delete成功後にSQLite Online Backup APIでスナップショットを作り、`.backup.1`と`.backup.2`だけを保持します。バックアップ失敗は成功済み投稿を失敗扱いにせずログへ記録し、破損時の自動巻き戻しは行いません。
 

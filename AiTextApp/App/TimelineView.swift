@@ -1,9 +1,12 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 struct TimelineView: View {
     @ObservedObject var store: ThoughtStore
     @Binding var presentedRoute: AppRoute?
     @FocusState private var composerIsFocused: Bool
+    @State private var showsProfile = false
 
     var body: some View {
         NavigationStack {
@@ -13,7 +16,7 @@ struct TimelineView: View {
                         emptyState
                     } else {
                         ForEach(store.thoughts) { thought in
-                            ThoughtRow(thought: thought, tags: store.tagsByThoughtID[thought.id] ?? []) {
+                            ThoughtRow(thought: thought, persona: store.personasByThoughtID[thought.id] ?? store.defaultHumanPersona, tags: store.tagsByThoughtID[thought.id] ?? []) {
                                 store.requestDeletion(of: thought)
                             }
                             if thought.id != store.thoughts.last?.id {
@@ -37,6 +40,11 @@ struct TimelineView: View {
                 TaggedThoughtListView(store: store, tag: route.tag)
             }
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { showsProfile = true } label: { PersonaIcon(persona: store.defaultHumanPersona, size: 30) }
+                        .accessibilityLabel("Personaを管理")
+                        .accessibilityIdentifier("profileButton")
+                }
                 ToolbarItem(placement: .navigationBarLeading) {
                     NavigationLink {
                         HistoryReviewView(store: store)
@@ -122,6 +130,7 @@ struct TimelineView: View {
             .sheet(item: $store.exportArtifact) { artifact in
                 ShareSheet(url: artifact.url, onFailure: store.sharingFailed)
             }
+            .sheet(isPresented: $showsProfile) { PersonaManagementView(store: store) }
             .confirmationDialog(
                 "このThoughtを削除しますか？",
                 isPresented: deletionDialogIsPresented,
@@ -1262,14 +1271,22 @@ private struct ThoughtDetailView: View {
 
 private struct ThoughtRow: View {
     let thought: Thought
+    let persona: Persona
     let tags: [ThoughtTag]
     let onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
+            PersonaIcon(persona: persona, size: 36)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 8) {
                 NavigationLink(value: thought.id) {
                     VStack(alignment: .leading, spacing: 8) {
+                    Text(persona.displayName)
+                        .font(.subheadline.weight(.semibold))
+                    if persona.kind == .ai {
+                        Text("AI").font(.caption2.weight(.bold)).foregroundStyle(.tint)
+                    }
                     Text(thought.body)
                         .font(.body)
                         .lineSpacing(4)
@@ -1307,6 +1324,170 @@ private struct ThoughtRow: View {
         .padding(.vertical, 14)
         .accessibilityElement(children: .contain)
         .contentShape(Rectangle())
+    }
+}
+
+private struct PersonaIcon: View {
+    let persona: Persona
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let data = persona.iconData, let image = UIImage(data: data) {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Image(systemName: "person.crop.circle.fill").resizable().foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+}
+
+private struct PersonaManagementView: View {
+    @ObservedObject var store: ThoughtStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var showsHumanEditor = false
+    @State private var showsNewAIEditor = false
+    @State private var editingAI: Persona?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("あなた") {
+                    Button { showsHumanEditor = true } label: { personaRow(store.defaultHumanPersona) }.buttonStyle(.plain)
+                }
+                Section("AI Personas") {
+                    ForEach(store.personas.filter { $0.kind == .ai }) { persona in
+                        Button { editingAI = persona } label: { personaRow(persona) }.buttonStyle(.plain)
+                    }
+                    Button { showsNewAIEditor = true } label: { Label("AI Personaを追加", systemImage: "plus.circle") }
+                        .accessibilityIdentifier("addAIPersonaButton")
+                }
+                Section { Text("AI Personaは投稿者の土台です。この段階ではAI通信や自動投稿は行いません。").font(.footnote).foregroundStyle(.secondary) }
+            }
+            .navigationTitle("Personas")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完了") { dismiss() } } }
+            .sheet(isPresented: $showsHumanEditor) { ProfileEditorView(store: store) }
+            .sheet(isPresented: $showsNewAIEditor) { AIPersonaEditorView(store: store, persona: nil) }
+            .sheet(item: $editingAI) { AIPersonaEditorView(store: store, persona: $0) }
+        }
+    }
+
+    private func personaRow(_ persona: Persona) -> some View {
+        HStack(spacing: 12) {
+            PersonaIcon(persona: persona, size: 44)
+            VStack(alignment: .leading) { Text(persona.displayName).foregroundStyle(.primary); Text(persona.kind == .human ? "人間" : "AI").font(.caption).foregroundStyle(.secondary) }
+            Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+        }.contentShape(Rectangle())
+    }
+}
+
+private struct AIPersonaEditorView: View {
+    @ObservedObject var store: ThoughtStore
+    let persona: Persona?
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayName: String
+    @State private var iconData: Data?
+    @State private var selectedItem: PhotosPickerItem?
+
+    init(store: ThoughtStore, persona: Persona?) {
+        self.store = store; self.persona = persona
+        _displayName = State(initialValue: persona?.displayName ?? "")
+        _iconData = State(initialValue: persona?.iconData)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("アイコン") {
+                    HStack { Spacer(); PersonaIcon(persona: previewPersona, size: 96); Spacer() }
+                    PhotosPicker(selection: $selectedItem, matching: .images) { Label("写真を選ぶ", systemImage: "photo") }
+                    if iconData != nil { Button("アイコンを削除", role: .destructive) { iconData = nil } }
+                }
+                Section("表示名") { TextField("AI Persona名", text: $displayName) }
+                if let persona { Section { Button("AI Personaを無効化", role: .destructive) { store.deactivateAIPersona(persona); dismiss() } } }
+            }
+            .navigationTitle(persona == nil ? "AI Personaを追加" : "AI Personaを編集")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        let saved = persona.map { store.updateAIPersona($0, displayName: displayName, iconData: iconData) }
+                            ?? store.createAIPersona(displayName: displayName, iconData: iconData)
+                        if saved { dismiss() }
+                    }.disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || displayName.count > 40)
+                }
+            }
+            .onChange(of: selectedItem) { item in
+                Task { guard let data = try? await item?.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }; iconData = image.squareJPEG(maxPixels: 512, quality: 0.82) }
+            }
+        }
+    }
+
+    private var previewPersona: Persona { Persona(id: persona?.id ?? UUID(), displayName: displayName, kind: .ai, iconData: iconData, iconMIMEType: iconData == nil ? nil : "image/jpeg") }
+}
+
+private struct ProfileEditorView: View {
+    @ObservedObject var store: ThoughtStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayName: String
+    @State private var iconData: Data?
+    @State private var selectedItem: PhotosPickerItem?
+
+    init(store: ThoughtStore) {
+        self.store = store
+        _displayName = State(initialValue: store.defaultHumanPersona.displayName)
+        _iconData = State(initialValue: store.defaultHumanPersona.iconData)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("アイコン") {
+                    HStack { Spacer(); PersonaIcon(persona: previewPersona, size: 96); Spacer() }
+                    PhotosPicker(selection: $selectedItem, matching: .images) { Label("写真を選ぶ", systemImage: "photo") }
+                    if iconData != nil { Button("アイコンを削除", role: .destructive) { iconData = nil } }
+                }
+                Section("表示名") { TextField("自分", text: $displayName).textInputAutocapitalization(.never) }
+                Section { Text("プロフィールは端末内だけに保存され、既存のThoughtにも同じ名前とアイコンが表示されます。").font(.footnote).foregroundStyle(.secondary) }
+            }
+            .navigationTitle("プロフィール")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") { if store.updateDefaultHumanPersona(displayName: displayName, iconData: iconData) { dismiss() } }
+                        .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || displayName.count > 40)
+                }
+            }
+            .onChange(of: selectedItem) { item in
+                Task {
+                    guard let data = try? await item?.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
+                    iconData = image.squareJPEG(maxPixels: 512, quality: 0.82)
+                }
+            }
+        }
+    }
+
+    private var previewPersona: Persona {
+        Persona(id: store.defaultHumanPersona.id, displayName: displayName, kind: .human, iconData: iconData, iconMIMEType: iconData == nil ? nil : "image/jpeg")
+    }
+}
+
+private extension UIImage {
+    func squareJPEG(maxPixels: CGFloat, quality: CGFloat) -> Data? {
+        let side = min(size.width, size.height)
+        guard side > 0 else { return nil }
+        let targetSide = min(maxPixels, side)
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: targetSide, height: targetSide))
+        let output = renderer.image { _ in
+            let scale = targetSide / side
+            let drawnSize = CGSize(width: size.width * scale, height: size.height * scale)
+            draw(in: CGRect(x: (targetSide - drawnSize.width) / 2, y: (targetSide - drawnSize.height) / 2, width: drawnSize.width, height: drawnSize.height))
+        }
+        return output.jpegData(compressionQuality: quality)
     }
 }
 

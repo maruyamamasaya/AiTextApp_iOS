@@ -12,6 +12,10 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ## 実装済み
 
+- ローカルの単一人間Persona基盤。SQLite schema v6の`personas`／`thought_authors`で既存・新規Thoughtを固定のデフォルト人間へ紐づけ、表示名と512px以下へ正方形化したJPEGアイコンをSQLite内へ保存する。
+- Timelineの投稿者名・丸型アイコン表示と、写真選択／削除／表示名編集を行うプロフィール画面。未設定時は標準人物アイコンを表示し、プロフィール変更を既存Thoughtへ一括反映する。
+- 複数AI Personaの作成・編集・無効化UIと、投稿ごとの実Persona表示。AI Personaは現在まだ通信／自動投稿を行わず、任意Persona IDでThoughtを原子的に保存できるCore境界までを提供する。
+
 - 端末Calendar／timezoneの1日境界で明示生成するAI Daily Summary v1。月カレンダーで要約済み／Thoughtあり未要約／Thoughtなしと今日を区別し、過去日の日別詳細、送信前Thought／payloadプレビュー、構造化結果の表示と再読込を提供する。
 - SQLite schema v5の`daily_summaries`。Thought原文と分離した1日1件の正式Summaryとして構造化結果と生成メタデータを保存し、AI候補からタグ／Thought／Continuationを自動変更しない。
 - タグチップ、タグ追加、タグ編集ボタンの操作領域を44pt以上へ拡大。
@@ -74,7 +78,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - `AiTextAppWidget` Extension targetとappへの埋め込み設定。WidgetはSQLite、Repository、Firebase、Thought本文へ依存せず、App Group／entitlement／schema変更を行わない。
 - Timelineから開くローカル分析画面。今日／過去7日／過去30日、活動日数、1活動日平均、30日の日別・曜日別・時間帯別分布、上位5タグ、Continuationを持つThought数を表示。
 - typed分析model、端末Calendarから30日の日／時間帯境界を構築する`LoadThoughtAnalytics`、CRUDから分離したread-only `ThoughtAnalyticsRepository`。
-- AI Daily Summary v1: Calendar日境界、構造化Gemini応答、独立SQLite保存、月間カレンダー、日別詳細、Timeline統合、User／AIアイコン。
+- AI Daily Summary v1: Calendar日境界、構造化Gemini応答、独立SQLite保存、月間カレンダー、日別詳細、Timeline統合。
 - SQLiteの境界CTE＋`COUNT`／`GROUP BY`、タグJOIN集計、activeな期間内親子のRelation集計。原文全件をViewへ取得せず、deleted／期間外ThoughtをSQLで除外する。
 
 ## 未実装

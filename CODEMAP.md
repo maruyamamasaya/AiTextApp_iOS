@@ -13,6 +13,8 @@
 - `AiTextApp/App/ThoughtAnalyticsView.swift` — ローカル分析のサマリーと日別／曜日／時間帯／タグ／Continuation表示。
 - `AiTextApp/App/DailySummaryView.swift` — 月カレンダー、日別詳細、構造化Summary、送信前プレビュー。
 - `AiTextApp/App/TimelineView.swift` — Composer、Lazy Timeline、Thought検索、タグUI、期間・タグ・概要・日別区切りを持つHistory Review、Thought Detail、History、Continuation Composer、削除UI。
+- `AiTextApp/App/TimelineView.swift`内`ProfileEditorView`／`PersonaIcon` — デフォルト人間の表示名、写真選択・縮小、丸型アイコン表示。
+- `AiTextApp/App/TimelineView.swift`内`PersonaManagementView`／`AIPersonaEditorView` — 複数AI Personaの一覧、追加、編集、無効化。
 - `AiTextApp/App/ThoughtStore.swift` — Timeline／Quick Capture共通投稿境界、本文検索／タグ／Review／History／Continuation UI stateとCoreの接続。
 - `AiTextApp/App/ShareSheet.swift` — Exportファイルを標準Share Sheetへ渡すbridge。
 - `AiTextApp/App/ExternalBackupManager.swift` — security-scoped bookmark、外部backup／RestoreのUI state。
@@ -25,7 +27,7 @@ Search: `@main|TimelineView|ThoughtStore|confirmationDialog`
 
 ## Thought Domain
 
-- `ThoughtCore/Thought.swift` — AI派生情報を含めない原文モデル。
+- `ThoughtCore/Thought.swift` — AI派生情報を含めない原文モデルと、人間／AI共通の`Persona`／repository境界。
 - `ThoughtCore/ThoughtDraft.swift` — 140文字、trim、validation。
 - `ThoughtCore/ThoughtTimeline.swift` — 投稿、降順表示、soft delete use case。
 - `ThoughtCore/ThoughtRelation.swift` — Relationモデル、repository／原子的Continuation境界、History取得use case。
@@ -37,7 +39,7 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 ## Persistence
 
 - `ThoughtCore/ThoughtRepository.swift` — CRUD・本文検索・日付範囲repository境界、今日／昨日／直近日数／今週／今月／指定日のReview期間計算、テスト用メモリ実装。
-- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v4、本文検索／タグ／期間＋単一タグ／日付範囲／分析集計／Relation件数／期間要約query、Continuation transaction、旧JSON migration／2世代backup。
+- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v6、Persona／投稿者関連、本文検索／タグ／期間＋単一タグ／日付範囲／分析集計／Relation件数／期間要約query、Continuation transaction、旧JSON migration／2世代backup。
 - `ThoughtCore/ReviewSummary.swift` — AI要約model、immutable送信preview、通信／transport／保存protocol、中央provider／model設定、typed service error、対象準備／鮮度検証／生成・保存use case、Mock client。
 - `ThoughtCore/DailySummary.swift` — 構造化model、prompt、preview、準備／生成use case、1日1件のrepository境界。
 - `ThoughtCore/ReviewSummaryExporter.swift` — AI要約専用Markdown／JSON schema v1、ID再確認、判別可能なファイル名とatomic write。

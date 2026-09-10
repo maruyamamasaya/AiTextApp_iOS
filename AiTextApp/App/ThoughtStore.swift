@@ -10,6 +10,9 @@ final class ThoughtStore: ObservableObject {
 
     @Published var draft = ""
     @Published private(set) var thoughts: [Thought] = []
+    @Published private(set) var defaultHumanPersona = Persona(id: Persona.defaultHumanID, displayName: "自分", kind: .human)
+    @Published private(set) var personas: [Persona] = []
+    @Published private(set) var personasByThoughtID: [UUID: Persona] = [:]
     @Published private(set) var dailySummaries: [DailySummary] = []
     @Published private(set) var dailySummary: DailySummary?
     @Published private(set) var dailySummaryPreview: DailySummaryPreview?
@@ -53,6 +56,7 @@ final class ThoughtStore: ObservableObject {
     private var analyticsRepository: (any ThoughtAnalyticsRepository)?
     private var summaryRepository: (any ReviewSummaryRepository)?
     private var dailySummaryRepository: (any DailySummaryRepository)?
+    private var personaRepository: (any PersonaRepository)?
     private var summaryExporter: ReviewSummaryExporter?
     private let summaryClient: any ReviewSummaryClient
     private var reviewInterval: DateInterval?
@@ -80,8 +84,11 @@ final class ThoughtStore: ObservableObject {
                 summaryExporter = ReviewSummaryExporter(repository: reviewSummaryRepository)
             }
             dailySummaryRepository = repository as? any DailySummaryRepository
+            personaRepository = repository as? any PersonaRepository
             exporter = ThoughtExporter(repository: repository)
             thoughts = timeline.thoughts
+            if let personaRepository { defaultHumanPersona = try personaRepository.fetchDefaultHumanPersona() }
+            if let personaRepository { personas = try personaRepository.fetchPersonas(includeInactive: false) }
             dailySummaries = try dailySummaryRepository?.fetchDailySummaries(from: .distantPast, to: .distantFuture) ?? []
             if let sqliteRepository = repository as? SQLiteThoughtRepository {
                 backupManager = ExternalBackupManager(repository: sqliteRepository)
@@ -91,8 +98,64 @@ final class ThoughtStore: ObservableObject {
         }
         externalBackupManager = backupManager
         refreshTags(for: thoughts.map(\.id))
+        refreshAuthors(for: thoughts.map(\.id))
         loadAllTags()
         if let startupError { errorMessage = startupError }
+    }
+
+    func updateDefaultHumanPersona(displayName: String, iconData: Data?) -> Bool {
+        guard let personaRepository else { errorMessage = "プロフィールを保存できませんでした。"; return false }
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 40 else { errorMessage = "表示名は1〜40文字で入力してください。"; return false }
+        var persona = defaultHumanPersona
+        persona.displayName = name
+        persona.iconData = iconData
+        persona.iconMIMEType = iconData == nil ? nil : "image/jpeg"
+        persona.updatedAt = Date()
+        do {
+            try personaRepository.updatePersona(persona)
+            defaultHumanPersona = persona
+            loadPersonas()
+            refreshAuthors(for: thoughts.map(\.id))
+            return true
+        } catch {
+            errorMessage = "プロフィールを保存できませんでした。"
+            return false
+        }
+    }
+
+    func createAIPersona(displayName: String, iconData: Data?) -> Bool {
+        guard let personaRepository else { errorMessage = "AI Personaを保存できませんでした。"; return false }
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 40 else { errorMessage = "表示名は1〜40文字で入力してください。"; return false }
+        let persona = Persona(displayName: name, kind: .ai, iconData: iconData, iconMIMEType: iconData == nil ? nil : "image/jpeg")
+        do { try personaRepository.createPersona(persona); loadPersonas(); return true }
+        catch { errorMessage = "AI Personaを保存できませんでした。"; return false }
+    }
+
+    func updateAIPersona(_ original: Persona, displayName: String, iconData: Data?) -> Bool {
+        guard original.kind == .ai, let personaRepository else { return false }
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 40 else { errorMessage = "表示名は1〜40文字で入力してください。"; return false }
+        var persona = original; persona.displayName = name; persona.iconData = iconData; persona.iconMIMEType = iconData == nil ? nil : "image/jpeg"; persona.updatedAt = Date()
+        do { try personaRepository.updatePersona(persona); loadPersonas(); refreshAuthors(for: thoughts.map(\.id)); return true }
+        catch { errorMessage = "AI Personaを保存できませんでした。"; return false }
+    }
+
+    func deactivateAIPersona(_ persona: Persona) {
+        guard persona.kind == .ai, let personaRepository else { return }
+        do { _ = try personaRepository.deactivatePersona(id: persona.id, at: Date()); loadPersonas() }
+        catch { errorMessage = "AI Personaを無効化できませんでした。" }
+    }
+
+    private func loadPersonas() {
+        do { personas = try personaRepository?.fetchPersonas(includeInactive: false) ?? [] }
+        catch { errorMessage = "Personaを読み込めませんでした。" }
+    }
+
+    private func refreshAuthors(for ids: [UUID]) {
+        guard let personaRepository else { return }
+        if let values = try? personaRepository.fetchPersonas(for: ids) { personasByThoughtID.merge(values) { _, new in new } }
     }
 
     func loadDailySummary(for day: Date, calendar: Calendar = .current) {
@@ -447,6 +510,7 @@ final class ThoughtStore: ObservableObject {
             timeline = try ThoughtTimeline(repository: thoughtRepository)
             thoughts = timeline?.thoughts ?? []
             refreshTags(for: thoughts.map(\.id))
+            refreshAuthors(for: thoughts.map(\.id))
             continuationDraft = ""
             loadHistory(for: thought.id)
             return thought
@@ -479,6 +543,7 @@ final class ThoughtStore: ObservableObject {
             self.timeline = timeline
             thoughts = timeline.thoughts
             refreshTags(for: thoughts.map(\.id))
+            refreshAuthors(for: thoughts.map(\.id))
             return true
         } catch {
             errorMessage = "Thoughtを保存できませんでした。"

@@ -287,7 +287,7 @@ struct ThoughtTagTests {
         try fixture.writeV3Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 5)
+        #expect(SQLiteThoughtRepository.schemaVersion == 6)
         #expect(try repository.fetchByID(original.id) == original)
         guard case .added(let tag) = try repository.addTag(named: "移行後", to: original.id) else { return }
         #expect(try repository.fetchTags(for: original.id) == [tag])
@@ -427,7 +427,7 @@ struct ThoughtHistoryTests {
         try fixture.writeV1Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 5)
+        #expect(SQLiteThoughtRepository.schemaVersion == 6)
         #expect(try repository.fetchAll() == [original])
         #expect(try repository.fetchBySourceThoughtID(original.id).isEmpty)
     }
@@ -1076,7 +1076,7 @@ struct ExternalBackupTests {
         #expect(analytics.dailyCounts.first?.count == 1)
         #expect(analytics.dailyCounts.last?.count == 2)
         #expect(try repository.fetchAll() == before)
-        #expect(SQLiteThoughtRepository.schemaVersion == 5)
+        #expect(SQLiteThoughtRepository.schemaVersion == 6)
     }
 
     @Test func emptyLocalAnalyticsReturnsZeroFilledDistributions() throws {
@@ -1198,6 +1198,56 @@ struct ExternalBackupTests {
         var statement: OpaquePointer?; sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nil); defer { sqlite3_finalize(statement) }
         guard sqlite3_step(statement) == SQLITE_ROW else { throw ExternalBackupError.invalidSQLite("test pragma") }
         return sqlite3_column_int(statement, 0)
+    }
+}
+
+@Suite("Personas", .serialized)
+struct PersonaTests {
+    @Test func existingAndNewThoughtsUseDefaultHumanAndProfilePersists() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let existing = Thought(body: "移行前")
+        try fixture.writeV1Database(thought: existing)
+
+        let repository = try fixture.repository()
+        let initial = try repository.fetchDefaultHumanPersona()
+        #expect(initial.id == Persona.defaultHumanID)
+        #expect(initial.displayName == "自分")
+        #expect(try repository.fetchPersona(for: existing.id)?.id == initial.id)
+
+        let icon = Data([0x01, 0x02, 0x03])
+        var updated = initial
+        updated.displayName = "ススム"
+        updated.iconData = icon
+        updated.iconMIMEType = "image/jpeg"
+        updated.updatedAt = Date(timeIntervalSince1970: 500)
+        try repository.updatePersona(updated)
+
+        let newThought = Thought(body: "移行後")
+        try repository.create(newThought)
+        let ai = Persona(displayName: "整理役", kind: .ai, createdAt: Date(timeIntervalSince1970: 600))
+        try repository.createPersona(ai)
+        let aiThought = Thought(body: "AIからの投稿")
+        try repository.create(aiThought, authorPersonaID: ai.id)
+        let reopened = try fixture.repository()
+        #expect(try reopened.fetchDefaultHumanPersona().displayName == "ススム")
+        #expect(try reopened.fetchDefaultHumanPersona().iconData == icon)
+        #expect(try reopened.fetchPersona(for: newThought.id)?.id == Persona.defaultHumanID)
+        #expect(try reopened.fetchPersona(for: aiThought.id) == ai)
+        #expect(try reopened.fetchPersonas(includeInactive: false).map(\.id).contains(ai.id))
+        #expect(try reopened.deactivatePersona(id: ai.id, at: Date(timeIntervalSince1970: 700)))
+        #expect(!(try reopened.fetchPersonas(includeInactive: false)).map(\.id).contains(ai.id))
+        #expect(try reopened.fetchPersona(for: aiThought.id)?.displayName == "整理役")
+        #expect(try reopened.deactivatePersona(id: Persona.defaultHumanID, at: Date()) == false)
+    }
+
+
+    @Test func authoredThoughtRollsBackWhenPersonaIsMissing() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let thought = Thought(body: "保存されない")
+        #expect(throws: SQLiteThoughtRepositoryError.self) { try repository.create(thought, authorPersonaID: UUID()) }
+        #expect(try repository.fetchByID(thought.id) == nil)
     }
 }
 

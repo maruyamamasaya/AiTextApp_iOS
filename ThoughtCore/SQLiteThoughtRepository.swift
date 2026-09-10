@@ -25,8 +25,8 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 5
+public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
+    public static let schemaVersion: Int32 = 6
 
     private let databaseURL: URL
     private let legacyJSONURL: URL
@@ -79,9 +79,92 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
     }
 
     public func create(_ thought: Thought) throws {
+        try create(thought, authorPersonaID: Persona.defaultHumanID)
+    }
+
+    public func create(_ thought: Thought, authorPersonaID: UUID) throws {
         try lock.withLock {
-            try executeThoughtInsert(thought, conflictClause: "")
+            try transaction {
+                try executeThoughtInsert(thought, conflictClause: "")
+                try executeThoughtAuthorInsert(thoughtID: thought.id, personaID: authorPersonaID)
+            }
             createRollingBackupIfPossible()
+        }
+    }
+
+    public func fetchDefaultHumanPersona() throws -> Persona {
+        try lock.withLock { try queryPersona(id: Persona.defaultHumanID) }
+    }
+
+    public func fetchPersonas(includeInactive: Bool) throws -> [Persona] {
+        try lock.withLock { try queryPersonas(includeInactive ? "" : "WHERE deleted_at IS NULL") }
+    }
+
+    public func createPersona(_ persona: Persona) throws {
+        try lock.withLock { try executePersonaInsert(persona); createRollingBackupIfPossible() }
+    }
+
+    public func fetchPersona(for thoughtID: UUID) throws -> Persona? {
+        try lock.withLock {
+            let statement = try prepare("""
+                SELECT p.id, p.display_name, p.kind, p.icon_data, p.icon_mime_type, p.created_at, p.updated_at, p.deleted_at
+                FROM personas p JOIN thought_authors a ON a.persona_id = p.id
+                WHERE a.thought_id = ? LIMIT 1
+                """)
+            defer { sqlite3_finalize(statement) }
+            try bind(thoughtID.uuidString, to: 1, in: statement)
+            return sqlite3_step(statement) == SQLITE_ROW ? try decodePersona(statement) : nil
+        }
+    }
+
+    public func fetchPersonas(for thoughtIDs: [UUID]) throws -> [UUID: Persona] {
+        guard !thoughtIDs.isEmpty else { return [:] }
+        return try lock.withLock {
+            let placeholders = Array(repeating: "?", count: thoughtIDs.count).joined(separator: ",")
+            let statement = try prepare("""
+                SELECT a.thought_id, p.id, p.display_name, p.kind, p.icon_data, p.icon_mime_type, p.created_at, p.updated_at, p.deleted_at
+                FROM thought_authors a JOIN personas p ON p.id = a.persona_id
+                WHERE a.thought_id IN (\(placeholders))
+                """)
+            defer { sqlite3_finalize(statement) }
+            for (offset, id) in thoughtIDs.enumerated() { try bind(id.uuidString, to: Int32(offset + 1), in: statement) }
+            var output: [UUID: Persona] = [:]
+            var result = sqlite3_step(statement)
+            while result == SQLITE_ROW {
+                guard let thoughtText = sqlite3_column_text(statement, 0), let thoughtID = UUID(uuidString: String(cString: thoughtText)) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                output[thoughtID] = try decodePersona(statement, columnOffset: 1)
+                result = sqlite3_step(statement)
+            }
+            guard result == SQLITE_DONE else { throw lastError() }
+            return output
+        }
+    }
+
+    public func updatePersona(_ persona: Persona) throws {
+        try lock.withLock {
+            let statement = try prepare("UPDATE personas SET display_name = ?, icon_data = ?, icon_mime_type = ?, updated_at = ?, deleted_at = ? WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try bind(persona.displayName, to: 1, in: statement)
+            try bindOptional(persona.iconData, to: 2, in: statement)
+            try bindOptional(persona.iconMIMEType, to: 3, in: statement)
+            try bind(persona.updatedAt.timeIntervalSince1970, to: 4, in: statement)
+            try bindOptional(persona.deletedAt?.timeIntervalSince1970, to: 5, in: statement)
+            try bind(persona.id.uuidString, to: 6, in: statement)
+            guard sqlite3_step(statement) == SQLITE_DONE, sqlite3_changes(database) == 1 else { throw lastError() }
+            createRollingBackupIfPossible()
+        }
+    }
+
+    public func deactivatePersona(id: UUID, at date: Date) throws -> Bool {
+        guard id != Persona.defaultHumanID else { return false }
+        return try lock.withLock {
+            let statement = try prepare("UPDATE personas SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
+            defer { sqlite3_finalize(statement) }
+            try bind(date.timeIntervalSince1970, to: 1, in: statement); try bind(date.timeIntervalSince1970, to: 2, in: statement); try bind(id.uuidString, to: 3, in: statement)
+            guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
+            let changed = sqlite3_changes(database) == 1
+            if changed { createRollingBackupIfPossible() }
+            return changed
         }
     }
 
@@ -514,6 +597,7 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
             )
             try transaction {
                 try executeThoughtInsert(thought, conflictClause: "")
+                try executeThoughtAuthorInsert(thoughtID: thought.id, personaID: Persona.defaultHumanID)
                 try validate(relation)
                 try executeRelationInsert(relation)
             }
@@ -811,6 +895,37 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
                 try execute("PRAGMA user_version = 5")
             }
         }
+        if version < 6 {
+            try transaction {
+                try execute("""
+                    CREATE TABLE personas (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        display_name TEXT NOT NULL,
+                        kind TEXT NOT NULL CHECK (kind IN ('human', 'ai')),
+                        icon_data BLOB NULL,
+                        icon_mime_type TEXT NULL,
+                        created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL,
+                        deleted_at REAL NULL
+                    )
+                    """)
+                try execute("""
+                    CREATE TABLE thought_authors (
+                        thought_id TEXT PRIMARY KEY NOT NULL REFERENCES thoughts(id),
+                        persona_id TEXT NOT NULL REFERENCES personas(id)
+                    )
+                    """)
+                try execute("CREATE INDEX thought_authors_persona_idx ON thought_authors(persona_id, thought_id)")
+                let now = Date().timeIntervalSince1970
+                let persona = try prepare("INSERT INTO personas (id, display_name, kind, created_at, updated_at) VALUES (?, '自分', 'human', ?, ?)")
+                defer { sqlite3_finalize(persona) }
+                try bind(Persona.defaultHumanID.uuidString, to: 1, in: persona)
+                try bind(now, to: 2, in: persona); try bind(now, to: 3, in: persona)
+                guard sqlite3_step(persona) == SQLITE_DONE else { throw lastError() }
+                try execute("INSERT INTO thought_authors (thought_id, persona_id) SELECT id, '\(Persona.defaultHumanID.uuidString)' FROM thoughts")
+                try execute("PRAGMA user_version = 6")
+            }
+        }
     }
 
     private func migrateLegacyJSONIfNeeded() throws {
@@ -830,7 +945,10 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
 
         do {
             try transaction {
-                for thought in thoughts { try executeThoughtInsert(thought, conflictClause: "OR IGNORE") }
+                for thought in thoughts {
+                    try executeThoughtInsert(thought, conflictClause: "OR IGNORE")
+                    try executeThoughtAuthorInsert(thoughtID: thought.id, personaID: Persona.defaultHumanID, conflictClause: "OR IGNORE")
+                }
                 for thought in thoughts {
                     guard try queryByID(thought.id) == thought else {
                         throw SQLiteThoughtRepositoryError.migration("import verification failed for \(thought.id)")
@@ -953,6 +1071,56 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
         }).first
     }
 
+    private func executeThoughtAuthorInsert(thoughtID: UUID, personaID: UUID, conflictClause: String = "") throws {
+        let statement = try prepare("INSERT \(conflictClause) INTO thought_authors (thought_id, persona_id) VALUES (?, ?)")
+        defer { sqlite3_finalize(statement) }
+        try bind(thoughtID.uuidString, to: 1, in: statement)
+        try bind(personaID.uuidString, to: 2, in: statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
+    }
+
+    private func queryPersona(id: UUID) throws -> Persona {
+        let statement = try prepare("SELECT id, display_name, kind, icon_data, icon_mime_type, created_at, updated_at, deleted_at FROM personas WHERE id = ? LIMIT 1")
+        defer { sqlite3_finalize(statement) }
+        try bind(id.uuidString, to: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw SQLiteThoughtRepositoryError.invalidRecord }
+        return try decodePersona(statement)
+    }
+
+    private func queryPersonas(_ clause: String) throws -> [Persona] {
+        let statement = try prepare("SELECT id, display_name, kind, icon_data, icon_mime_type, created_at, updated_at, deleted_at FROM personas \(clause) ORDER BY created_at ASC, id ASC")
+        defer { sqlite3_finalize(statement) }
+        var output: [Persona] = []
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW { output.append(try decodePersona(statement)); result = sqlite3_step(statement) }
+        guard result == SQLITE_DONE else { throw lastError() }
+        return output
+    }
+
+    private func executePersonaInsert(_ persona: Persona) throws {
+        let statement = try prepare("INSERT INTO personas (id, display_name, kind, icon_data, icon_mime_type, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        defer { sqlite3_finalize(statement) }
+        try bind(persona.id.uuidString, to: 1, in: statement); try bind(persona.displayName, to: 2, in: statement); try bind(persona.kind.rawValue, to: 3, in: statement)
+        try bindOptional(persona.iconData, to: 4, in: statement); try bindOptional(persona.iconMIMEType, to: 5, in: statement)
+        try bind(persona.createdAt.timeIntervalSince1970, to: 6, in: statement); try bind(persona.updatedAt.timeIntervalSince1970, to: 7, in: statement); try bindOptional(persona.deletedAt?.timeIntervalSince1970, to: 8, in: statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
+    }
+
+    private func decodePersona(_ statement: OpaquePointer, columnOffset: Int32 = 0) throws -> Persona {
+        guard let idText = sqlite3_column_text(statement, columnOffset), let nameText = sqlite3_column_text(statement, columnOffset + 1),
+              let kindText = sqlite3_column_text(statement, columnOffset + 2), let id = UUID(uuidString: String(cString: idText)),
+              let kind = PersonaKind(rawValue: String(cString: kindText)) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+        let iconData: Data?
+        if sqlite3_column_type(statement, columnOffset + 3) == SQLITE_NULL { iconData = nil }
+        else if let bytes = sqlite3_column_blob(statement, columnOffset + 3) { iconData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, columnOffset + 3))) }
+        else { iconData = Data() }
+        let mime = sqlite3_column_type(statement, columnOffset + 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(statement, columnOffset + 4))
+        return Persona(id: id, displayName: String(cString: nameText), kind: kind, iconData: iconData, iconMIMEType: mime,
+                       createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, columnOffset + 5)),
+                       updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, columnOffset + 6)),
+                       deletedAt: sqlite3_column_type(statement, columnOffset + 7) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, columnOffset + 7)))
+    }
+
     private func query(_ sql: String, bind binder: (OpaquePointer) throws -> Void = { _ in }) throws -> [Thought] {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
@@ -1020,6 +1188,23 @@ public final class SQLiteThoughtRepository: ThoughtRepository, ThoughtRelationRe
 
     private func bind(_ value: Double, to index: Int32, in statement: OpaquePointer) throws {
         guard sqlite3_bind_double(statement, index, value) == SQLITE_OK else { throw lastError() }
+    }
+
+    private func bindOptional(_ value: String?, to index: Int32, in statement: OpaquePointer) throws {
+        if let value { try bind(value, to: index, in: statement) }
+        else if sqlite3_bind_null(statement, index) != SQLITE_OK { throw lastError() }
+    }
+
+    private func bindOptional(_ value: Double?, to index: Int32, in statement: OpaquePointer) throws {
+        if let value { try bind(value, to: index, in: statement) }
+        else if sqlite3_bind_null(statement, index) != SQLITE_OK { throw lastError() }
+    }
+
+    private func bindOptional(_ value: Data?, to index: Int32, in statement: OpaquePointer) throws {
+        guard let value else { if sqlite3_bind_null(statement, index) != SQLITE_OK { throw lastError() }; return }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        let result = value.withUnsafeBytes { sqlite3_bind_blob(statement, index, $0.baseAddress, Int32(value.count), transient) }
+        guard result == SQLITE_OK else { throw lastError() }
     }
 
     private func queryTag(normalizedName: String) throws -> ThoughtTag? {
