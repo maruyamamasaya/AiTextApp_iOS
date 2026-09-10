@@ -13,6 +13,12 @@ final class ThoughtStore: ObservableObject {
     @Published private(set) var defaultHumanPersona = Persona(id: Persona.defaultHumanID, displayName: "自分", kind: .human)
     @Published private(set) var personas: [Persona] = []
     @Published private(set) var personasByThoughtID: [UUID: Persona] = [:]
+    @Published private(set) var mentionedPersonasByThoughtID: [UUID: Persona] = [:]
+    @Published var selectedMentionPersona: Persona?
+    @Published private(set) var aiConfigurations: [UUID: AIPersonaConfiguration] = [:]
+    @Published var aiPostPreview: AIPostPreview?
+    @Published private(set) var isGeneratingAIPost = false
+    @Published var aiPostError: String?
     @Published private(set) var dailySummaries: [DailySummary] = []
     @Published private(set) var dailySummary: DailySummary?
     @Published private(set) var dailySummaryPreview: DailySummaryPreview?
@@ -33,16 +39,6 @@ final class ThoughtStore: ObservableObject {
     @Published private(set) var history: [ThoughtHistoryEntry] = []
     @Published private(set) var historyCurrentID: UUID?
     @Published var continuationDraft = ""
-    @Published private(set) var reviewThoughts: [Thought] = []
-    @Published private(set) var reviewPeriodThoughtCount = 0
-    @Published private(set) var reviewContinuationCounts: [UUID: Int] = [:]
-    @Published private(set) var reviewSummary: ReviewSummary?
-    @Published private(set) var reviewSummaries: [ReviewSummary] = []
-    @Published private(set) var isGeneratingReviewSummary = false
-    @Published var reviewSummaryError: String?
-    @Published var reviewSummaryDeletionError: String?
-    @Published var reviewSummaryExportError: String?
-    @Published private(set) var reviewSummaryPreview: ReviewSummaryPreview?
     @Published private(set) var analytics: ThoughtAnalyticsSnapshot?
     @Published private(set) var isLoadingAnalytics = false
     let externalBackupManager: ExternalBackupManager?
@@ -54,13 +50,11 @@ final class ThoughtStore: ObservableObject {
     private var continuationRepository: (any ThoughtContinuationRepository)?
     private var tagRepository: (any ThoughtTagRepository)?
     private var analyticsRepository: (any ThoughtAnalyticsRepository)?
-    private var summaryRepository: (any ReviewSummaryRepository)?
     private var dailySummaryRepository: (any DailySummaryRepository)?
     private var personaRepository: (any PersonaRepository)?
-    private var summaryExporter: ReviewSummaryExporter?
+    private var aiPersonaRepository: (any AIPersonaRepository)?
+    private var mentionRepository: (any ThoughtMentionRepository)?
     private let summaryClient: any ReviewSummaryClient
-    private var reviewInterval: DateInterval?
-    private var reviewTag: ThoughtTag?
     private var isPosting = false
 
     init(
@@ -79,16 +73,15 @@ final class ThoughtStore: ObservableObject {
             continuationRepository = repository as? any ThoughtContinuationRepository
             tagRepository = repository as? any ThoughtTagRepository
             analyticsRepository = repository as? any ThoughtAnalyticsRepository
-            if let reviewSummaryRepository = repository as? any ReviewSummaryRepository {
-                summaryRepository = reviewSummaryRepository
-                summaryExporter = ReviewSummaryExporter(repository: reviewSummaryRepository)
-            }
             dailySummaryRepository = repository as? any DailySummaryRepository
             personaRepository = repository as? any PersonaRepository
+            aiPersonaRepository = repository as? any AIPersonaRepository
+            mentionRepository = repository as? any ThoughtMentionRepository
             exporter = ThoughtExporter(repository: repository)
             thoughts = timeline.thoughts
             if let personaRepository { defaultHumanPersona = try personaRepository.fetchDefaultHumanPersona() }
             if let personaRepository { personas = try personaRepository.fetchPersonas(includeInactive: false) }
+            if let aiPersonaRepository { aiConfigurations = try aiPersonaRepository.fetchAIConfigurations() }
             dailySummaries = try dailySummaryRepository?.fetchDailySummaries(from: .distantPast, to: .distantFuture) ?? []
             if let sqliteRepository = repository as? SQLiteThoughtRepository {
                 backupManager = ExternalBackupManager(repository: sqliteRepository)
@@ -99,6 +92,7 @@ final class ThoughtStore: ObservableObject {
         externalBackupManager = backupManager
         refreshTags(for: thoughts.map(\.id))
         refreshAuthors(for: thoughts.map(\.id))
+        refreshMentions(for: thoughts.map(\.id))
         loadAllTags()
         if let startupError { errorMessage = startupError }
     }
@@ -124,21 +118,23 @@ final class ThoughtStore: ObservableObject {
         }
     }
 
-    func createAIPersona(displayName: String, iconData: Data?) -> Bool {
-        guard let personaRepository else { errorMessage = "AI Personaを保存できませんでした。"; return false }
+    func createAIPersona(displayName: String, iconData: Data?, role: String, instructions: String) -> Bool {
+        guard let aiPersonaRepository else { errorMessage = "AI Personaを保存できませんでした。"; return false }
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.count <= 40 else { errorMessage = "表示名は1〜40文字で入力してください。"; return false }
+        let role = role.trimmingCharacters(in: .whitespacesAndNewlines), instructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 40, !role.isEmpty, !instructions.isEmpty else { errorMessage = "表示名・役割・指示を入力してください。"; return false }
         let persona = Persona(displayName: name, kind: .ai, iconData: iconData, iconMIMEType: iconData == nil ? nil : "image/jpeg")
-        do { try personaRepository.createPersona(persona); loadPersonas(); return true }
+        do { try aiPersonaRepository.createAIPersona(persona, configuration: AIPersonaConfiguration(personaID: persona.id, role: role, instructions: instructions)); loadPersonas(); loadAIConfigurations(); return true }
         catch { errorMessage = "AI Personaを保存できませんでした。"; return false }
     }
 
-    func updateAIPersona(_ original: Persona, displayName: String, iconData: Data?) -> Bool {
-        guard original.kind == .ai, let personaRepository else { return false }
+    func updateAIPersona(_ original: Persona, displayName: String, iconData: Data?, role: String, instructions: String) -> Bool {
+        guard original.kind == .ai, let personaRepository, let aiPersonaRepository else { return false }
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.count <= 40 else { errorMessage = "表示名は1〜40文字で入力してください。"; return false }
+        let role = role.trimmingCharacters(in: .whitespacesAndNewlines), instructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 40, !role.isEmpty, !instructions.isEmpty else { errorMessage = "表示名・役割・指示を入力してください。"; return false }
         var persona = original; persona.displayName = name; persona.iconData = iconData; persona.iconMIMEType = iconData == nil ? nil : "image/jpeg"; persona.updatedAt = Date()
-        do { try personaRepository.updatePersona(persona); loadPersonas(); refreshAuthors(for: thoughts.map(\.id)); return true }
+        do { try personaRepository.updatePersona(persona); try aiPersonaRepository.saveAIConfiguration(AIPersonaConfiguration(personaID: persona.id, role: role, instructions: instructions)); loadPersonas(); loadAIConfigurations(); refreshAuthors(for: thoughts.map(\.id)); return true }
         catch { errorMessage = "AI Personaを保存できませんでした。"; return false }
     }
 
@@ -152,10 +148,33 @@ final class ThoughtStore: ObservableObject {
         do { personas = try personaRepository?.fetchPersonas(includeInactive: false) ?? [] }
         catch { errorMessage = "Personaを読み込めませんでした。" }
     }
+    private func loadAIConfigurations() { aiConfigurations = (try? aiPersonaRepository?.fetchAIConfigurations()) ?? [:] }
+
+    func prepareAIPost(persona: Persona, userRequest: String) {
+        guard let configuration = aiConfigurations[persona.id] else { aiPostError = AIPostError.missingConfiguration.localizedDescription; return }
+        do { aiPostPreview = try AIPostPrompt.prepare(persona: persona, configuration: configuration, userRequest: userRequest); aiPostError = nil }
+        catch { aiPostError = error.localizedDescription }
+    }
+
+    func cancelAIPostPreview() { aiPostPreview = nil }
+
+    func generateAIPost(from preview: AIPostPreview) async {
+        guard let aiPersonaRepository, let thoughtRepository else { aiPostError = "AI投稿の保存先を利用できません。"; return }
+        isGeneratingAIPost = true; aiPostError = nil; defer { isGeneratingAIPost = false }
+        do {
+            _ = try await GenerateAIPost(client: summaryClient, repository: aiPersonaRepository)(preview: preview)
+            timeline = try ThoughtTimeline(repository: thoughtRepository); thoughts = timeline?.thoughts ?? []
+            refreshTags(for: thoughts.map(\.id)); refreshAuthors(for: thoughts.map(\.id)); aiPostPreview = nil
+        } catch { aiPostError = error.localizedDescription }
+    }
 
     private func refreshAuthors(for ids: [UUID]) {
         guard let personaRepository else { return }
         if let values = try? personaRepository.fetchPersonas(for: ids) { personasByThoughtID.merge(values) { _, new in new } }
+    }
+    private func refreshMentions(for ids: [UUID]) {
+        guard let mentionRepository else { return }
+        if let values = try? mentionRepository.fetchMentionedPersonas(for: ids) { mentionedPersonasByThoughtID.merge(values) { _, new in new } }
     }
 
     func loadDailySummary(for day: Date, calendar: Calendar = .current) {
@@ -278,50 +297,6 @@ final class ThoughtStore: ObservableObject {
         }
     }
 
-    func loadReview(in interval: DateInterval, tag: ThoughtTag? = nil) {
-        guard let thoughtRepository, let relationRepository else {
-            errorMessage = "History Reviewを読み込めませんでした。"
-            return
-        }
-        do {
-            let periodThoughts = try thoughtRepository.fetchThoughts(from: interval.start, to: interval.end)
-            let displayedThoughts: [Thought]
-            if let tag {
-                guard let tagRepository else { throw NSError(domain: "ThoughtTagRepository", code: 1) }
-                displayedThoughts = try tagRepository.fetchThoughts(
-                    from: interval.start,
-                    to: interval.end,
-                    taggedWith: tag.id
-                )
-            } else {
-                displayedThoughts = periodThoughts
-            }
-            reviewThoughts = displayedThoughts
-            reviewPeriodThoughtCount = periodThoughts.count
-            reviewContinuationCounts = try relationRepository.fetchContinuationCounts(for: displayedThoughts.map(\.id))
-            reviewInterval = interval
-            reviewTag = tag
-            reviewSummaries = try summaryRepository?.fetchSummaries(from: interval.start, to: interval.end) ?? []
-            reviewSummary = reviewSummaries.first
-            reviewSummaryError = nil
-            reviewSummaryDeletionError = nil
-            reviewSummaryExportError = nil
-            reviewSummaryPreview = nil
-        } catch {
-            reviewInterval = interval
-            reviewThoughts = []
-            reviewPeriodThoughtCount = 0
-            reviewContinuationCounts = [:]
-            reviewSummary = nil
-            reviewSummaries = []
-            reviewSummaryDeletionError = nil
-            reviewSummaryExportError = nil
-            reviewSummaryPreview = nil
-            reviewTag = tag
-            errorMessage = "History Reviewを読み込めませんでした。"
-        }
-    }
-
     func search(_ query: String) {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
         hasSearchQuery = !normalized.isEmpty
@@ -398,104 +373,6 @@ final class ThoughtStore: ObservableObject {
         } catch { tagMessage = "タグを削除できませんでした。" }
     }
 
-    func prepareReviewSummary(in interval: DateInterval) {
-        guard reviewInterval == interval, let thoughtRepository else {
-            reviewSummaryError = "選択期間を読み込み直してから再試行してください。"
-            return
-        }
-        do {
-            reviewSummaryPreview = try PrepareReviewSummary(repository: thoughtRepository)(interval: interval)
-            reviewSummaryError = nil
-        } catch ReviewSummaryError.noThoughts {
-            reviewSummaryPreview = nil
-            reviewSummaryError = ReviewSummaryError.noThoughts.localizedDescription
-        } catch {
-            reviewSummaryPreview = nil
-            reviewSummaryError = "要約対象を準備できませんでした。もう一度お試しください。"
-        }
-    }
-
-    func cancelReviewSummaryPreview() {
-        reviewSummaryPreview = nil
-    }
-
-    func generateReviewSummary(from preview: ReviewSummaryPreview) async {
-        guard let summaryRepository else {
-            reviewSummaryError = "AI要約の保存先を利用できません。"
-            return
-        }
-        guard let thoughtRepository, reviewInterval == preview.interval else {
-            reviewSummaryError = "選択期間が変わりました。現在の期間でもう一度確認してください。"
-            return
-        }
-        isGeneratingReviewSummary = true
-        reviewSummaryError = nil
-        defer { isGeneratingReviewSummary = false }
-        do {
-            do {
-                try ValidateReviewSummaryPreview(repository: thoughtRepository)(preview)
-            } catch ReviewSummaryError.stalePreview {
-                loadReview(in: preview.interval, tag: reviewTag)
-                reviewSummaryError = "確認後にThoughtが変更されました。送信せず、対象を読み込み直しました。"
-                return
-            }
-            let summary = try await GenerateReviewSummary(
-                client: summaryClient,
-                repository: summaryRepository
-            )(preview: preview)
-            if reviewInterval == preview.interval {
-                reviewSummaries.insert(summary, at: 0)
-                reviewSummary = summary
-            }
-        } catch let error as ReviewSummaryServiceError {
-            if reviewInterval == preview.interval {
-                reviewSummaryError = error.localizedDescription
-            }
-        } catch ReviewSummaryError.emptyResponse {
-            if reviewInterval == preview.interval {
-                reviewSummaryError = ReviewSummaryError.emptyResponse.localizedDescription
-            }
-        } catch {
-            if reviewInterval == preview.interval {
-                reviewSummaryError = "AI要約を作成できませんでした。通信状態を確認して再試行してください。"
-            }
-        }
-    }
-
-    func deleteReviewSummary(id: UUID) {
-        guard let summaryRepository else {
-            reviewSummaryDeletionError = "AI要約の保存先を利用できません。"
-            return
-        }
-        do {
-            guard try summaryRepository.deleteSummary(id: id) else {
-                reviewSummaryDeletionError = "選択したAI要約はすでに削除されています。"
-                return
-            }
-            reviewSummaries.removeAll { $0.id == id }
-            reviewSummary = reviewSummaries.first
-            reviewSummaryDeletionError = nil
-            reviewSummaryExportError = nil
-        } catch {
-            reviewSummaryDeletionError = "AI要約を削除できませんでした。もう一度お試しください。"
-        }
-    }
-
-    func exportReviewSummary(id: UUID, format: ReviewSummaryExportFormat) {
-        guard let summaryExporter else {
-            reviewSummaryExportError = "AI要約をExportできませんでした。"
-            return
-        }
-        do {
-            exportArtifact = ExportArtifact(url: try summaryExporter.write(summaryID: id, format: format))
-            reviewSummaryExportError = nil
-        } catch ReviewSummaryExportError.summaryNotFound {
-            reviewSummaryExportError = "選択したAI要約は削除されているためExportできません。"
-        } catch {
-            reviewSummaryExportError = "AI要約をExportできませんでした。保存済みデータは変更されていません。"
-        }
-    }
-
     @discardableResult
     func postContinuation(parentThoughtID: UUID) -> Thought? {
         guard let continuationRepository, let thoughtRepository else {
@@ -522,28 +399,35 @@ final class ThoughtStore: ObservableObject {
 
     @discardableResult
     func post() -> Bool {
-        guard post(draft) else { return false }
+        guard post(draft, mentioning: selectedMentionPersona) else { return false }
         draft = ""
+        selectedMentionPersona = nil
         return true
     }
 
     /// Shared posting boundary for Timeline Composer and Quick Capture.
     /// The caller owns and clears its draft only after this returns success.
     @discardableResult
-    func post(_ body: String) -> Bool {
+    func post(_ body: String, mentioning persona: Persona? = nil) -> Bool {
         guard !isPosting else { return false }
-        guard var timeline else {
+        guard var timeline, let thoughtRepository else {
             errorMessage = "保存先を利用できないため投稿できません。入力内容は残しています。"
             return false
         }
         isPosting = true
         defer { isPosting = false }
         do {
-            guard try timeline.post(body) != nil else { return false }
-            self.timeline = timeline
-            thoughts = timeline.thoughts
+            if let persona {
+                guard let mentionRepository, let validBody = ThoughtDraft.validBody(from: body) else { return false }
+                try mentionRepository.create(Thought(body: validBody), authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: persona.id)
+                timeline = try ThoughtTimeline(repository: thoughtRepository)
+            } else {
+                guard try timeline.post(body) != nil else { return false }
+            }
+            self.timeline = timeline; thoughts = timeline.thoughts
             refreshTags(for: thoughts.map(\.id))
             refreshAuthors(for: thoughts.map(\.id))
+            refreshMentions(for: thoughts.map(\.id))
             return true
         } catch {
             errorMessage = "Thoughtを保存できませんでした。"

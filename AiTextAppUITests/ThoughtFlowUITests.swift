@@ -69,42 +69,6 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts[child].waitForExistence(timeout: 2), "Continuationが通常Timelineにも表示される")
     }
 
-    func testHistoryReviewShowsTodayOldestFirstAndOpensDetail() {
-        let composer = app.textViews["thoughtComposer"]
-        let post = app.buttons["postButton"]
-        let oldest = "Review first"
-        let newest = "Review second"
-        XCTAssertTrue(composer.waitForExistence(timeout: 5))
-        for body in [oldest, newest] {
-            composer.tap()
-            composer.typeText(body)
-            post.tap()
-        }
-
-        let review = app.buttons["historyReviewButton"]
-        XCTAssertTrue(review.waitForExistence(timeout: 2))
-        review.tap()
-        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
-        XCTAssertEqual(app.staticTexts["historyReviewCount"].label, "2 Thoughts")
-
-        let oldestText = app.staticTexts[oldest]
-        let newestText = app.staticTexts[newest]
-        XCTAssertTrue(oldestText.waitForExistence(timeout: 2))
-        XCTAssertTrue(newestText.waitForExistence(timeout: 2))
-        XCTAssertLessThan(oldestText.frame.minY, newestText.frame.minY, "Reviewは古いThoughtから表示する")
-        XCTAssertEqual(app.staticTexts["historyReviewActiveDays"].label, "1日")
-        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "historyReviewDayCount_")).firstMatch.label, "2 Thoughts")
-
-        let reviewThoughts = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "historyReviewThought_")
-        )
-        XCTAssertEqual(reviewThoughts.count, 2)
-        reviewThoughts.element(boundBy: 1).tap()
-        XCTAssertTrue(app.buttons["writeContinuationButton"].waitForExistence(timeout: 2))
-        app.navigationBars["Thought"].buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
-    }
-
     func testTimelineOpensLocalAnalyticsAndShowsSummary() {
         let composer = app.textViews["thoughtComposer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
@@ -123,6 +87,8 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertEqual(elements["analyticsThirtyDayCount"].label, "過去30日、1件")
         XCTAssertEqual(elements["analyticsActiveDayCount"].label, "過去30日の活動日、1日")
         XCTAssertEqual(elements["analyticsAveragePerActiveDay"].label, "1活動日あたり平均、1.0件")
+        XCTAssertTrue(elements["analyticsDailyCellToday"].exists)
+        XCTAssertTrue(elements["analyticsDailyCellToday"].label.hasSuffix("、1件"))
     }
 
     func testQuickCapturePostsTrimmedThoughtOnceAndReturnsToTimeline() {
@@ -258,46 +224,6 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertEqual(editor.value as? String, "失敗しても保持")
     }
 
-    func testHistoryReviewFiltersCurrentMonthByTagAndOpensDetail() {
-        let taggedBody = "今月の仕事Thought"
-        let otherBody = "今月の個人Thought"
-        let tagName = "仕事"
-        let composer = app.textViews["thoughtComposer"]
-        XCTAssertTrue(composer.waitForExistence(timeout: 5))
-        composer.tap()
-        composer.typeText(taggedBody)
-        app.buttons["postButton"].tap()
-        app.staticTexts[taggedBody].tap()
-        app.buttons["editThoughtTagsButton"].tap()
-        let tagField = app.textFields["newThoughtTagField"]
-        XCTAssertTrue(tagField.waitForExistence(timeout: 2))
-        tagField.tap()
-        tagField.typeText(tagName)
-        app.buttons["addThoughtTagButton"].tap()
-        app.buttons["closeThoughtTagEditor"].tap()
-        app.navigationBars["Thought"].buttons.element(boundBy: 0).tap()
-
-        composer.tap()
-        composer.typeText(otherBody)
-        app.buttons["postButton"].tap()
-        app.buttons["historyReviewButton"].tap()
-        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
-
-        app.buttons["historyReviewFilter"].tap()
-        app.buttons["今月"].tap()
-        app.buttons["historyReviewTagFilter"].tap()
-        app.buttons[tagName].tap()
-
-        XCTAssertEqual(app.staticTexts["historyReviewCount"].label, "1 Thoughts")
-        XCTAssertEqual(app.staticTexts["historyReviewTagStatus"].label, tagName)
-        XCTAssertTrue(app.staticTexts[taggedBody].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.staticTexts[otherBody].exists)
-        XCTAssertTrue(app.staticTexts["historyReviewAIScopeNotice"].exists)
-        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "historyReviewThought_")).firstMatch.tap()
-        XCTAssertTrue(app.navigationBars["Thought"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts[taggedBody].exists)
-    }
-
     func testSearchOpensResultAndNavigatesToThoughtDetail() {
         let composer = app.textViews["thoughtComposer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
@@ -361,91 +287,6 @@ final class ThoughtFlowUITests: XCTestCase {
         taggedThought.tap()
         XCTAssertTrue(app.navigationBars["Thought"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts[body].exists)
-    }
-
-    func testReviewSummaryHistoryKeepsRegeneratedResultsNewestFirst() {
-        let composer = app.textViews["thoughtComposer"]
-        XCTAssertTrue(composer.waitForExistence(timeout: 5))
-        composer.tap()
-        composer.typeText("AI summary history")
-        app.buttons["postButton"].tap()
-        app.buttons["historyReviewButton"].tap()
-        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
-
-        createReviewSummary()
-        XCTAssertTrue(app.buttons["reviewAISummaryHistoryButton"].waitForExistence(timeout: 2))
-        createReviewSummary()
-
-        let historyButton = app.buttons["reviewAISummaryHistoryButton"]
-        XCTAssertTrue(historyButton.waitForExistence(timeout: 2))
-        XCTAssertEqual(historyButton.label, "履歴 2件")
-        historyButton.tap()
-
-        XCTAssertTrue(app.navigationBars["AI要約履歴"].waitForExistence(timeout: 2))
-        let items = app.otherElements.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "reviewAISummaryHistoryItem_")
-        )
-        XCTAssertEqual(items.count, 2)
-        XCTAssertEqual(app.staticTexts.matching(identifier: "reviewAISummaryLatest").count, 1)
-
-        let exportMenus = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "exportReviewSummary_")
-        )
-        XCTAssertEqual(exportMenus.count, 2)
-        exportMenus.element(boundBy: 0).tap()
-        XCTAssertTrue(app.buttons["Markdownを共有"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["JSONを共有"].exists)
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.1)).tap()
-
-        let deleteButtons = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "deleteReviewSummary_")
-        )
-        deleteButtons.element(boundBy: 0).tap()
-        let deletionAlert = app.alerts["AI要約を削除しますか？"]
-        XCTAssertTrue(deletionAlert.waitForExistence(timeout: 2))
-        deletionAlert.buttons["キャンセル"].tap()
-        XCTAssertEqual(deleteButtons.count, 2, "キャンセル時は何も削除しない")
-
-        deleteButtons.element(boundBy: 0).tap()
-        XCTAssertTrue(deletionAlert.waitForExistence(timeout: 2))
-        deletionAlert.buttons["削除"].tap()
-        XCTAssertEqual(deleteButtons.count, 1)
-        XCTAssertEqual(app.staticTexts.matching(identifier: "reviewAISummaryLatest").count, 1, "残った最新要約へ表示を切り替える")
-
-        deleteButtons.element(boundBy: 0).tap()
-        XCTAssertTrue(deletionAlert.waitForExistence(timeout: 2))
-        deletionAlert.buttons["削除"].tap()
-        XCTAssertTrue(app.staticTexts["AI要約履歴はありません"].waitForExistence(timeout: 2))
-    }
-
-    func testReviewSummaryPreviewShowsCurrentThoughtAndCanCancelWithoutGenerating() {
-        let composer = app.textViews["thoughtComposer"]
-        XCTAssertTrue(composer.waitForExistence(timeout: 5))
-        composer.tap()
-        composer.typeText("Preview only Thought")
-        app.buttons["postButton"].tap()
-        app.buttons["historyReviewButton"].tap()
-        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
-
-        app.buttons["reviewAISummaryButton"].tap()
-        XCTAssertTrue(app.navigationBars["AI要約プレビュー"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Preview only Thought"].exists)
-        XCTAssertTrue(app.otherElements["reviewSummaryPreviewMetadata"].exists)
-        XCTAssertTrue(app.buttons["confirmReviewSummarySubmission"].exists)
-        app.buttons["cancelReviewSummarySubmission"].tap()
-
-        XCTAssertTrue(app.navigationBars["History Review"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.buttons["reviewAISummaryHistoryButton"].waitForExistence(timeout: 1))
-    }
-
-    private func createReviewSummary() {
-        let summaryButton = app.buttons["reviewAISummaryButton"]
-        XCTAssertTrue(summaryButton.waitForExistence(timeout: 2))
-        summaryButton.tap()
-        XCTAssertTrue(app.navigationBars["AI要約プレビュー"].waitForExistence(timeout: 2))
-        let confirm = app.buttons["confirmReviewSummarySubmission"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 2))
-        confirm.tap()
     }
 
     private func openAppRoute(_ url: URL) throws {

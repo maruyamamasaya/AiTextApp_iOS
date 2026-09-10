@@ -7,6 +7,7 @@ struct QuickCaptureView: View {
     @State private var isSubmitting = false
     @State private var confirmsDiscard = false
     @State private var postErrorMessage: String?
+    @State private var mentionedPersona: Persona?
     @FocusState private var editorIsFocused: Bool
 
     private var canPost: Bool { ThoughtDraft.validBody(from: draft) != nil && !isSubmitting }
@@ -29,6 +30,13 @@ struct QuickCaptureView: View {
                 .accessibilityIdentifier("quickCaptureEditor")
 
                 HStack {
+                    Menu {
+                        ForEach(store.personas.filter { $0.kind == .ai }) { persona in Button("@\(persona.displayName)") { mentionedPersona = persona } }
+                        if mentionedPersona != nil { Button("メンションを外す", role: .destructive) { mentionedPersona = nil } }
+                    } label: { Text(mentionedPersona.map { "@\($0.displayName)" } ?? "@").lineLimit(1) }
+                    .disabled(store.personas.allSatisfy { $0.kind != .ai })
+                    .accessibilityLabel(mentionedPersona.map { "\($0.displayName)をメンション中" } ?? "AI Personaをメンション")
+                    .accessibilityIdentifier("quickCaptureMentionMenu")
                     Text("\(draft.count) / \(ThoughtDraft.characterLimit)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(draft.count > ThoughtDraft.characterLimit ? Color.red : (draft.count >= 130 ? Color.orange : Color.secondary))
@@ -73,8 +81,9 @@ struct QuickCaptureView: View {
     private func submit() {
         guard canPost else { return }
         isSubmitting = true
-        if store.post(draft) {
+        if store.post(draft, mentioning: mentionedPersona) {
             draft = ""
+            mentionedPersona = nil
             dismiss()
         } else {
             isSubmitting = false

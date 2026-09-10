@@ -23,7 +23,7 @@ Firebase Apple SDKはSwift Package Managerで12.17.0以降を指定し、app tar
 3. Xcodeでpackageをresolveし、`FirebaseCore`、`FirebaseAILogic`、`FirebaseAppCheck`がapp targetへリンクされていることを確認する。
 4. Debug buildを起動する。Debug configurationはApp Attest entitlementを持たず、Personal Teamでも署名可能にする。`AppCheckDebugProviderFactory`が出力するDebug tokenをFirebase ConsoleのApp Check > Manage debug tokensへ登録する。tokenはScheme、ソース、文書へ記録・コミットしない。
 5. Release buildは`AppAttestProviderFactory`と`AiTextApp.entitlements`のproduction App Attest環境を使う。ConsoleでApp Attestを登録し、実機で成功を確認してからenforcementを段階的に有効化する。
-6. Reviewでプレビュー内容を確認して明示送信し、保存された履歴のproviderが`firebase-ai-logic`、modelが`gemini-3.7-flash`であることを確認する。
+6. Daily Summaryでプレビュー内容を確認して明示送信し、保存された要約のproviderが`firebase-ai-logic`、modelが`gemini-3.7-flash`であることを確認する。
 
 `GoogleService-Info.plist`がない場合は起動を継続し、AI送信時に未設定エラーを表示します。App Check、429／quota、network、その他API、空応答はユーザー向けの別エラーへ変換します。Firebase ConsoleのenforcementはDebug tokenと実機App Attestの確認後に有効化してください。
 
@@ -37,7 +37,7 @@ CI/CD、配布用bundle identifier、code signing、provisioning、TestFlight/Ap
 
 通常の持ち出しは画面右上のExportからMarkdown（人間向け）またはJSON（原文バックアップ／将来Import向け）を選び、標準Share SheetでFilesやAirDropへ保存します。Export失敗はSQLiteとComposerを変更しません。
 
-AI要約の持ち出しはHistory ReviewのAI要約履歴で対象レコードの共有Menuを開き、MarkdownまたはJSONを選びます。選択したAI要約と期間／生成メタデータだけを一時ファイルへ書き、標準Share Sheetへ渡します。Thought原文やGemini送信promptは含めず、SQLiteも変更しません。
+Daily Summaryはアプリ内の日別振り返りとしてSQLiteと外部完全バックアップに含まれます。旧History Reviewの期間要約Export導線は現在提供しません。
 
 ### External Full Backup
 

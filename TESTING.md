@@ -10,13 +10,13 @@ UI非依存のドメイン／永続化／ExportはSwift PackageとしてLinux/ma
 swift test
 ```
 
-入力境界（空、trim、140／141文字）と共通`ThoughtTimeline.post`、Unicode、SQLite順序、soft delete、再読込、本文検索、タグ、Personaのv6 migration・作成・更新・無効化・任意投稿者関連・不正投稿者時rollback、Review全期間・期間＋タグ、ローカル分析の件数／日別／曜日／時間帯境界／タグ／Continuation／read-only性、AI要約対象回帰、内部2世代backup、JSON migration、Export、Continuation、分岐History、AI要約、外部backup／Restoreを検証します。Firebase SDKと実通信はUnit Testに含めません。
+入力境界（空、trim、140／141文字）と共通`ThoughtTimeline.post`、Unicode、SQLite順序、soft delete、再読込、本文検索、タグ、Personaのv8 migration・作成・更新・無効化・設定・任意投稿者関連・不正投稿者時rollback・AI投稿preview・140文字超過時非保存・メンションatomic保存、Review全期間・期間＋タグ、ローカル分析の件数／日別／曜日／時間帯境界／タグ／Continuation／read-only性、AI要約対象回帰、内部2世代backup、JSON migration、Export、Continuation、分岐History、AI要約、外部backup／Restoreを検証します。Firebase SDKと実通信はUnit Testに含めません。
 
 ## UI Test
 
-`AiTextAppUITests`は既存Timeline Composerに加え、Quick Captureの起動、空draft、自動focus、trim投稿、Timeline即時反映、単一投稿、空／141文字拒否、空キャンセル、入力中破棄確認・継続時保持、投稿失敗時の画面・draft保持を検証します。custom URLのcold launch／foreground受信、通常起動ではTimelineのままであること、route dismiss後の消費も検証対象です。本文検索、タグ、History Review、Continuation、AI要約の既存flowも維持します。
+`AiTextAppUITests`は既存Timeline Composerに加え、Quick Captureの起動、空draft、自動focus、trim投稿、Timeline即時反映、単一投稿、空／141文字拒否、空キャンセル、入力中破棄確認・継続時保持、投稿失敗時の画面・draft保持を検証します。custom URLのcold launch／foreground受信、通常起動ではTimelineのままであること、route dismiss後の消費も検証対象です。本文検索、Thoughtに紐づくタグ、Continuation、Daily Summaryのflowも維持します。
 
-ローカル分析UIは「Timelineで1件投稿 → 分析を開く → 今日／7日／30日／活動日／活動日平均」をXCUITestで確認します。日別バー、locale曜日、時間帯、タグEmpty State、Continuation説明はSimulatorで目視とVoiceOver確認も行います。
+ローカル分析UIは「Timelineで1件投稿 → 分析を開く → 今日／7日／30日／活動日／活動日平均 → 日別カレンダーの今日が1件」をXCUITestで確認します。日別カレンダーの配置・濃淡・今日の枠線、locale曜日、時間帯、タグEmpty State、Continuation説明はSimulatorで目視とVoiceOver確認も行います。
 
 ```bash
 xcodebuild -project AiTextApp.xcodeproj -scheme AiTextApp \

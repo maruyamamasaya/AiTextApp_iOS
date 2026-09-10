@@ -25,8 +25,8 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 6
+public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
+    public static let schemaVersion: Int32 = 8
 
     private let databaseURL: URL
     private let legacyJSONURL: URL
@@ -89,6 +89,34 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 try executeThoughtAuthorInsert(thoughtID: thought.id, personaID: authorPersonaID)
             }
             createRollingBackupIfPossible()
+        }
+    }
+
+    public func create(_ thought: Thought, authorPersonaID: UUID, mentionedPersonaID: UUID?) throws {
+        try lock.withLock {
+            try transaction {
+                try executeThoughtInsert(thought, conflictClause: ""); try executeThoughtAuthorInsert(thoughtID: thought.id, personaID: authorPersonaID)
+                if let mentionedPersonaID {
+                    let statement = try prepare("INSERT INTO thought_mentions (thought_id, persona_id, created_at) SELECT ?, id, ? FROM personas WHERE id = ? AND kind = 'ai' AND deleted_at IS NULL")
+                    defer { sqlite3_finalize(statement) }
+                    try bind(thought.id.uuidString, to: 1, in: statement); try bind(thought.createdAt.timeIntervalSince1970, to: 2, in: statement); try bind(mentionedPersonaID.uuidString, to: 3, in: statement)
+                    guard sqlite3_step(statement) == SQLITE_DONE, sqlite3_changes(database) == 1 else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                }
+            }
+            createRollingBackupIfPossible()
+        }
+    }
+
+    public func fetchMentionedPersonas(for thoughtIDs: [UUID]) throws -> [UUID: Persona] {
+        guard !thoughtIDs.isEmpty else { return [:] }
+        return try lock.withLock {
+            let placeholders = Array(repeating: "?", count: thoughtIDs.count).joined(separator: ",")
+            let statement = try prepare("SELECT m.thought_id, p.id, p.display_name, p.kind, p.icon_data, p.icon_mime_type, p.created_at, p.updated_at, p.deleted_at FROM thought_mentions m JOIN personas p ON p.id = m.persona_id WHERE m.thought_id IN (\(placeholders))")
+            defer { sqlite3_finalize(statement) }
+            for (offset, id) in thoughtIDs.enumerated() { try bind(id.uuidString, to: Int32(offset + 1), in: statement) }
+            var output: [UUID: Persona] = [:]; var result = sqlite3_step(statement)
+            while result == SQLITE_ROW { guard let text = sqlite3_column_text(statement, 0), let id = UUID(uuidString: String(cString: text)) else { throw SQLiteThoughtRepositoryError.invalidRecord }; output[id] = try decodePersona(statement, columnOffset: 1); result = sqlite3_step(statement) }
+            guard result == SQLITE_DONE else { throw lastError() }; return output
         }
     }
 
@@ -165,6 +193,42 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
             let changed = sqlite3_changes(database) == 1
             if changed { createRollingBackupIfPossible() }
             return changed
+        }
+    }
+
+    public func fetchAIConfigurations() throws -> [UUID: AIPersonaConfiguration] {
+        try lock.withLock {
+            let statement = try prepare("SELECT persona_id, role, instructions, updated_at FROM ai_persona_configurations")
+            defer { sqlite3_finalize(statement) }
+            var output: [UUID: AIPersonaConfiguration] = [:]; var result = sqlite3_step(statement)
+            while result == SQLITE_ROW {
+                guard let idText = sqlite3_column_text(statement, 0), let roleText = sqlite3_column_text(statement, 1), let instructionsText = sqlite3_column_text(statement, 2), let id = UUID(uuidString: String(cString: idText)) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                output[id] = AIPersonaConfiguration(personaID: id, role: String(cString: roleText), instructions: String(cString: instructionsText), updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))); result = sqlite3_step(statement)
+            }
+            guard result == SQLITE_DONE else { throw lastError() }; return output
+        }
+    }
+
+    public func saveAIConfiguration(_ configuration: AIPersonaConfiguration) throws {
+        try lock.withLock { try executeAIConfigurationUpsert(configuration); createRollingBackupIfPossible() }
+    }
+
+    public func createAIPersona(_ persona: Persona, configuration: AIPersonaConfiguration) throws {
+        try lock.withLock { try transaction { try executePersonaInsert(persona); try executeAIConfigurationUpsert(configuration) }; createRollingBackupIfPossible() }
+    }
+
+    public func saveGeneratedThought(_ thought: Thought, authorPersonaID: UUID, generation: AIPostGeneration) throws {
+        try lock.withLock {
+            try transaction {
+                let author = try queryPersona(id: authorPersonaID)
+                guard author.kind == .ai, author.deletedAt == nil else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                try executeThoughtInsert(thought, conflictClause: ""); try executeThoughtAuthorInsert(thoughtID: thought.id, personaID: authorPersonaID)
+                let statement = try prepare("INSERT INTO ai_post_generations (thought_id, persona_id, user_request, provider, model, prompt_version, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                defer { sqlite3_finalize(statement) }
+                try bind(generation.thoughtID.uuidString, to: 1, in: statement); try bind(generation.personaID.uuidString, to: 2, in: statement); try bind(generation.userRequest, to: 3, in: statement); try bind(generation.provider, to: 4, in: statement); try bind(generation.model, to: 5, in: statement); try bind(Int32(generation.promptVersion), to: 6, in: statement); try bind(generation.generatedAt.timeIntervalSince1970, to: 7, in: statement)
+                guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
+            }
+            createRollingBackupIfPossible()
         }
     }
 
@@ -926,6 +990,21 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 try execute("PRAGMA user_version = 6")
             }
         }
+        if version < 7 {
+            try transaction {
+                try execute("CREATE TABLE ai_persona_configurations (persona_id TEXT PRIMARY KEY NOT NULL REFERENCES personas(id), role TEXT NOT NULL, instructions TEXT NOT NULL, updated_at REAL NOT NULL, CHECK (length(role) > 0), CHECK (length(instructions) > 0))")
+                try execute("CREATE TABLE ai_post_generations (thought_id TEXT PRIMARY KEY NOT NULL REFERENCES thoughts(id), persona_id TEXT NOT NULL REFERENCES personas(id), user_request TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, prompt_version INTEGER NOT NULL, generated_at REAL NOT NULL)")
+                try execute("CREATE INDEX ai_post_generations_persona_idx ON ai_post_generations(persona_id, generated_at DESC)")
+                try execute("PRAGMA user_version = 7")
+            }
+        }
+        if version < 8 {
+            try transaction {
+                try execute("CREATE TABLE thought_mentions (thought_id TEXT PRIMARY KEY NOT NULL REFERENCES thoughts(id), persona_id TEXT NOT NULL REFERENCES personas(id), created_at REAL NOT NULL)")
+                try execute("CREATE INDEX thought_mentions_persona_idx ON thought_mentions(persona_id, created_at DESC)")
+                try execute("PRAGMA user_version = 8")
+            }
+        }
     }
 
     private func migrateLegacyJSONIfNeeded() throws {
@@ -1103,6 +1182,13 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         try bind(persona.id.uuidString, to: 1, in: statement); try bind(persona.displayName, to: 2, in: statement); try bind(persona.kind.rawValue, to: 3, in: statement)
         try bindOptional(persona.iconData, to: 4, in: statement); try bindOptional(persona.iconMIMEType, to: 5, in: statement)
         try bind(persona.createdAt.timeIntervalSince1970, to: 6, in: statement); try bind(persona.updatedAt.timeIntervalSince1970, to: 7, in: statement); try bindOptional(persona.deletedAt?.timeIntervalSince1970, to: 8, in: statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
+    }
+
+    private func executeAIConfigurationUpsert(_ configuration: AIPersonaConfiguration) throws {
+        let statement = try prepare("INSERT INTO ai_persona_configurations (persona_id, role, instructions, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(persona_id) DO UPDATE SET role = excluded.role, instructions = excluded.instructions, updated_at = excluded.updated_at")
+        defer { sqlite3_finalize(statement) }
+        try bind(configuration.personaID.uuidString, to: 1, in: statement); try bind(configuration.role, to: 2, in: statement); try bind(configuration.instructions, to: 3, in: statement); try bind(configuration.updatedAt.timeIntervalSince1970, to: 4, in: statement)
         guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
     }
 

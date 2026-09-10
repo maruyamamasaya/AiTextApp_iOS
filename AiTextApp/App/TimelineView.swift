@@ -6,7 +6,7 @@ struct TimelineView: View {
     @ObservedObject var store: ThoughtStore
     @Binding var presentedRoute: AppRoute?
     @FocusState private var composerIsFocused: Bool
-    @State private var showsProfile = false
+    @State private var showsSettings = false
 
     var body: some View {
         NavigationStack {
@@ -16,7 +16,7 @@ struct TimelineView: View {
                         emptyState
                     } else {
                         ForEach(store.thoughts) { thought in
-                            ThoughtRow(thought: thought, persona: store.personasByThoughtID[thought.id] ?? store.defaultHumanPersona, tags: store.tagsByThoughtID[thought.id] ?? []) {
+                            ThoughtRow(thought: thought, persona: store.personasByThoughtID[thought.id] ?? store.defaultHumanPersona, mentionedPersona: store.mentionedPersonasByThoughtID[thought.id], tags: store.tagsByThoughtID[thought.id] ?? []) {
                                 store.requestDeletion(of: thought)
                             }
                             if thought.id != store.thoughts.last?.id {
@@ -40,21 +40,6 @@ struct TimelineView: View {
                 TaggedThoughtListView(store: store, tag: route.tag)
             }
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button { showsProfile = true } label: { PersonaIcon(persona: store.defaultHumanPersona, size: 30) }
-                        .accessibilityLabel("Personaを管理")
-                        .accessibilityIdentifier("profileButton")
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    NavigationLink {
-                        HistoryReviewView(store: store)
-                    } label: {
-                        Image(systemName: "clock.arrow.circlepath")
-                    }
-                    .accessibilityLabel("History Reviewを開く")
-                    .accessibilityHint("日付や期間から過去のThoughtを振り返ります")
-                    .accessibilityIdentifier("historyReviewButton")
-                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { presentedRoute = .quickCapture } label: {
                         Image(systemName: "square.and.pencil")
@@ -62,15 +47,6 @@ struct TimelineView: View {
                     .accessibilityLabel("Quick Captureを開く")
                     .accessibilityHint("入力に集中してThoughtを投稿します")
                     .accessibilityIdentifier("quickCaptureButton")
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    NavigationLink {
-                        ThoughtTagListView(store: store)
-                    } label: {
-                        Image(systemName: "tag")
-                    }
-                    .accessibilityLabel("タグ一覧を開く")
-                    .accessibilityIdentifier("thoughtTagListButton")
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
                     NavigationLink {
@@ -103,34 +79,17 @@ struct TimelineView: View {
                     .accessibilityIdentifier("dailySummaryButton")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button("Markdownを共有") { store.export(.markdown) }
-                            .accessibilityIdentifier("exportMarkdownButton")
-                        Button("JSONを共有") { store.export(.json) }
-                            .accessibilityIdentifier("exportJSONButton")
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
+                    Button { showsSettings = true } label: {
+                        Image(systemName: "gearshape")
                     }
-                    .accessibilityLabel("ThoughtをExport")
-                    .accessibilityHint("MarkdownまたはJSONとして共有します")
-                    .accessibilityIdentifier("exportMenu")
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    if let manager = store.externalBackupManager {
-                        NavigationLink {
-                            BackupManagementView(manager: manager)
-                        } label: {
-                            Image(systemName: "externaldrive.badge.timemachine")
-                        }
-                        .accessibilityLabel("バックアップ管理を開く")
-                        .accessibilityIdentifier("backupManagementButton")
-                    }
+                    .accessibilityLabel("設定を開く")
+                    .accessibilityIdentifier("settingsButton")
                 }
             }
             .sheet(item: $store.exportArtifact) { artifact in
                 ShareSheet(url: artifact.url, onFailure: store.sharingFailed)
             }
-            .sheet(isPresented: $showsProfile) { PersonaManagementView(store: store) }
+            .sheet(isPresented: $showsSettings) { SettingsView(store: store) }
             .confirmationDialog(
                 "このThoughtを削除しますか？",
                 isPresented: deletionDialogIsPresented,
@@ -153,6 +112,19 @@ struct TimelineView: View {
 
     private var composer: some View {
         HStack(alignment: .center, spacing: 8) {
+            Menu {
+                ForEach(store.personas.filter { $0.kind == .ai }) { persona in
+                    Button("@\(persona.displayName)") { store.selectedMentionPersona = persona }
+                }
+                if store.selectedMentionPersona != nil { Button("メンションを外す", role: .destructive) { store.selectedMentionPersona = nil } }
+            } label: {
+                Text(store.selectedMentionPersona.map { "@\($0.displayName)" } ?? "@")
+                    .font(.subheadline.weight(.semibold)).lineLimit(1)
+            }
+            .disabled(store.personas.allSatisfy { $0.kind != .ai })
+            .accessibilityLabel(store.selectedMentionPersona.map { "\($0.displayName)をメンション中" } ?? "AI Personaをメンション")
+            .accessibilityIdentifier("mentionPersonaMenu")
+
             ZStack(alignment: .leading) {
                 if store.draft.isEmpty {
                     Text("今なに考えてる？")
@@ -240,6 +212,65 @@ struct TimelineView: View {
     }
 }
 
+private struct SettingsView: View {
+    @ObservedObject var store: ThoughtStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var showsPersonas = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("アカウント") {
+                    Button { showsPersonas = true } label: {
+                        HStack(spacing: 12) {
+                            PersonaIcon(persona: store.defaultHumanPersona, size: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("プロフィールとPersona")
+                                Text(store.defaultHumanPersona.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("profileButton")
+                }
+
+                Section("データ") {
+                    Button { store.export(.markdown) } label: {
+                        Label("Markdownを共有", systemImage: "square.and.arrow.up")
+                    }
+                    .accessibilityIdentifier("exportMarkdownButton")
+
+                    Button { store.export(.json) } label: {
+                        Label("JSONを共有", systemImage: "curlybraces")
+                    }
+                    .accessibilityIdentifier("exportJSONButton")
+
+                    if let manager = store.externalBackupManager {
+                        NavigationLink {
+                            BackupManagementView(manager: manager)
+                        } label: {
+                            Label("バックアップ", systemImage: "externaldrive.badge.timemachine")
+                        }
+                        .accessibilityIdentifier("backupManagementButton")
+                    }
+                }
+            }
+            .navigationTitle("設定")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完了") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showsPersonas) { PersonaManagementView(store: store) }
+            .sheet(item: $store.exportArtifact) { artifact in
+                ShareSheet(url: artifact.url, onFailure: store.sharingFailed)
+            }
+        }
+    }
+}
+
 private struct BackupManagementView: View {
     enum PickerPurpose: Identifiable { case destination, restore; var id: Int { self == .destination ? 0 : 1 } }
     @ObservedObject var manager: ExternalBackupManager
@@ -303,277 +334,6 @@ private struct BackupManagementView: View {
     }
 }
 
-private struct HistoryReviewView: View {
-    enum Filter: String, CaseIterable, Identifiable {
-        case today = "今日"
-        case yesterday = "昨日"
-        case sevenDays = "過去7日"
-        case week = "今週"
-        case thirtyDays = "過去30日"
-        case month = "今月"
-        case date = "日付指定"
-        var id: Self { self }
-    }
-
-    @ObservedObject var store: ThoughtStore
-    @State private var filter: Filter = .today
-    @State private var selectedDate = Date()
-    @State private var selectedTag: ThoughtTag?
-
-    private var interval: DateInterval {
-        switch filter {
-        case .today: ThoughtReviewPeriod.today(containing: Date())
-        case .yesterday: ThoughtReviewPeriod.yesterday(containing: Date())
-        case .sevenDays: ThoughtReviewPeriod.pastSevenDays(containing: Date())
-        case .week: ThoughtReviewPeriod.currentWeek(containing: Date())
-        case .thirtyDays: ThoughtReviewPeriod.pastThirtyDays(containing: Date())
-        case .month: ThoughtReviewPeriod.currentMonth(containing: Date())
-        case .date: ThoughtReviewPeriod.day(containing: selectedDate)
-        }
-    }
-
-    private var groupedThoughts: [(date: Date, thoughts: [Thought])] {
-        Dictionary(grouping: store.reviewThoughts) { Calendar.current.startOfDay(for: $0.createdAt) }
-            .map { (date: $0.key, thoughts: $0.value) }
-            .sorted { $0.date < $1.date }
-    }
-
-    private var activeDayCount: Int { groupedThoughts.count }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Picker("期間", selection: $filter) {
-                        ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("historyReviewFilter")
-                    Spacer()
-                    Picker("タグ", selection: $selectedTag) {
-                        Text("すべてのタグ").tag(Optional<ThoughtTag>.none)
-                        ForEach(store.allTags) { tag in
-                            Text(tag.name).tag(Optional(tag))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("historyReviewTagFilter")
-                }
-
-                if filter == .date {
-                    DatePicker(
-                        "振り返る日",
-                        selection: $selectedDate,
-                        in: ...Date(),
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.compact)
-                    .accessibilityIdentifier("historyReviewDatePicker")
-                }
-                VStack(alignment: .leading, spacing: 5) {
-                    LabeledContent("期間", value: periodText)
-                    LabeledContent("表示") {
-                        Text("\(store.reviewThoughts.count) Thoughts")
-                            .accessibilityIdentifier("historyReviewCount")
-                    }
-                    LabeledContent("Thoughtがある日") {
-                        Text("\(activeDayCount)日").accessibilityIdentifier("historyReviewActiveDays")
-                    }
-                    LabeledContent("タグ") {
-                        Text(selectedTag?.name ?? "すべて").accessibilityIdentifier("historyReviewTagStatus")
-                    }
-                }
-                .font(.subheadline)
-                .accessibilityIdentifier("historyReviewOverview")
-
-                if selectedTag != nil {
-                    Text("AI要約はタグ絞り込みを含めず、期間全体の\(store.reviewPeriodThoughtCount) Thoughtsを対象にします。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("historyReviewAIScopeNotice")
-                }
-                Button {
-                    store.prepareReviewSummary(in: interval)
-                } label: {
-                    HStack(spacing: 8) {
-                        if store.isGeneratingReviewSummary { ProgressView() }
-                        Text(store.reviewSummary == nil ? "AIで要約" : "もう一度AIで要約")
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(store.reviewPeriodThoughtCount == 0 || store.isGeneratingReviewSummary)
-                .accessibilityIdentifier("reviewAISummaryButton")
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(Color(uiColor: .systemBackground))
-            .overlay(alignment: .bottom) { Divider() }
-
-            if store.reviewThoughts.isEmpty && store.reviewSummary == nil && store.reviewSummaryError == nil {
-                VStack(spacing: 6) {
-                    Text(selectedTag == nil && filter == .today ? "今日はまだThoughtがありません" : "条件に一致するThoughtはありません")
-                        .font(.headline)
-                    Text("別の日付や期間も振り返れます。")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(24)
-                .multilineTextAlignment(.center)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("historyReviewEmptyState")
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        if let summary = store.reviewSummary {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Label("AI要約", systemImage: "sparkles")
-                                        .font(.headline)
-                                    Spacer()
-                                    NavigationLink {
-                                        ReviewSummaryHistoryView(
-                                            store: store,
-                                            interval: interval
-                                        )
-                                    } label: {
-                                        Text("履歴 \(store.reviewSummaries.count)件")
-                                            .font(.caption)
-                                    }
-                                    .accessibilityIdentifier("reviewAISummaryHistoryButton")
-                                }
-                                Text(summary.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text(summary.content)
-                                    .font(.body)
-                                    .textSelection(.enabled)
-                                if summary.provider == "mock" {
-                                    Text("Mockによる表示です。Firebase接続後に実AIへ切り替わります。")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(16)
-                            .background(Color(uiColor: .secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .padding(16)
-                            .accessibilityIdentifier("reviewAISummaryResult")
-                        }
-
-                        if let message = store.reviewSummaryError {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(message)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.red)
-                                Button("再試行") { store.prepareReviewSummary(in: interval) }
-                                    .disabled(store.isGeneratingReviewSummary)
-                                    .accessibilityIdentifier("reviewAISummaryRetryButton")
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 12)
-                        }
-
-                        ForEach(groupedThoughts, id: \.date) { group in
-                            Section {
-                                ForEach(group.thoughts) { thought in
-                                    reviewRow(thought)
-                                    if thought.id != group.thoughts.last?.id {
-                                        Divider().padding(.leading, 58)
-                                    }
-                                }
-                            } header: {
-                                HStack {
-                                    Text(group.date.formatted(.dateTime.year().month().day()))
-                                        .font(.headline)
-                                    Spacer()
-                                    Text("\(group.thoughts.count) Thoughts")
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                        .accessibilityIdentifier("historyReviewDayCount_\(Int(group.date.timeIntervalSince1970))")
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 9)
-                                .background(.regularMaterial)
-                                .accessibilityIdentifier("historyReviewDay_\(Int(group.date.timeIntervalSince1970))")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .navigationTitle("History Review")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: reload)
-        .onChange(of: filter) { _ in reload() }
-        .onChange(of: selectedTag) { _ in reload() }
-        .onChange(of: selectedDate) { _ in if filter == .date { reload() } }
-        .onChange(of: store.thoughts.map(\.id)) { _ in reload() }
-        .sheet(item: Binding(
-            get: { store.reviewSummaryPreview },
-            set: { if $0 == nil { store.cancelReviewSummaryPreview() } }
-        )) { preview in
-            ReviewSummaryPreviewView(
-                preview: preview,
-                onCancel: { store.cancelReviewSummaryPreview() },
-                onSubmit: {
-                    store.cancelReviewSummaryPreview()
-                    Task { await store.generateReviewSummary(from: preview) }
-                }
-            )
-        }
-    }
-
-    private func reload() {
-        store.loadAllTags()
-        store.loadReview(in: interval, tag: selectedTag)
-    }
-
-    private var periodText: String {
-        let start = interval.start.formatted(.dateTime.year().month().day())
-        let end = interval.end.addingTimeInterval(-1).formatted(.dateTime.year().month().day())
-        return start == end ? start : "\(start)〜\(end)"
-    }
-
-    private func reviewRow(_ thought: Thought) -> some View {
-        NavigationLink {
-            ThoughtDetailView(store: store, initialThoughtID: thought.id)
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Text(thought.createdAt.formatted(date: .omitted, time: .shortened))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 40, alignment: .leading)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(thought.body)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if let count = store.reviewContinuationCounts[thought.id], count > 0 {
-                        Text("↳ 続き \(count)件")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(thought.createdAt.formatted(date: .omitted, time: .shortened))、\(thought.body)" + continuationAccessibilityText(for: thought))
-        .accessibilityHint("ダブルタップしてThought Detailを開きます")
-        .accessibilityIdentifier("historyReviewThought_\(thought.id.uuidString)")
-    }
-
-    private func continuationAccessibilityText(for thought: Thought) -> String {
-        guard let count = store.reviewContinuationCounts[thought.id], count > 0 else { return "" }
-        return "、続き\(count)件"
-    }
-}
-
 private struct TagRoute: Hashable {
     let tag: ThoughtTag
 }
@@ -586,7 +346,8 @@ private struct TagStrip: View {
             HStack(spacing: 6) {
                 ForEach(Array(tags.prefix(2))) { tag in
                     NavigationLink(value: TagRoute(tag: tag)) {
-                        Text(tag.name)
+                        Label(tag.name, systemImage: "tag.fill")
+                            .labelStyle(.titleAndIcon)
                             .font(.caption)
                             .lineLimit(1)
                             .padding(.horizontal, 7)
@@ -703,247 +464,6 @@ private struct ThoughtSearchView: View {
         .multilineTextAlignment(.center)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("thoughtSearchEmptyState")
-    }
-}
-
-private struct ReviewSummaryPreviewView: View {
-    let preview: ReviewSummaryPreview
-    let onCancel: () -> Void
-    let onSubmit: () -> Void
-
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label("送信内容の確認", systemImage: "sparkles")
-                                .font(.headline)
-                            Text("以下のThought本文がAIサービスへ送信されます。自動送信は行わず、この画面で送信を選んだ時だけ実行します。")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            previewMetadata("対象期間", value: periodText)
-                            previewMetadata("対象Thought", value: "\(preview.thoughtCount)件")
-                            previewMetadata("送信予定", value: "\(preview.payloadCharacterCount)文字")
-                            Text("送信予定文字数には、以下の本文と要約形式の指示文を含みます。本文は合計\(preview.thoughtCharacterCount)文字です。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(14)
-                        .background(Color(uiColor: .secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .accessibilityIdentifier("reviewSummaryPreviewMetadata")
-
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("送信するThought")
-                                .font(.headline)
-                                .padding(.bottom, 8)
-                            ForEach(preview.thoughts) { thought in
-                                HStack(alignment: .top, spacing: 12) {
-                                    Text(thought.createdAt.formatted(date: .omitted, time: .shortened))
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 40, alignment: .leading)
-                                    Text(thought.body)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .padding(.vertical, 10)
-                                .accessibilityElement(children: .combine)
-                                .accessibilityIdentifier("reviewSummaryPreviewThought_\(thought.id.uuidString)")
-                                if thought.id != preview.thoughts.last?.id { Divider() }
-                            }
-                        }
-                    }
-                    .padding(16)
-                }
-
-                Divider()
-                Button("AIへ送信して要約", action: onSubmit)
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
-                    .padding(16)
-                    .accessibilityIdentifier("confirmReviewSummarySubmission")
-            }
-            .navigationTitle("AI要約プレビュー")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル", action: onCancel)
-                        .accessibilityIdentifier("cancelReviewSummarySubmission")
-                }
-            }
-        }
-        .navigationViewStyle(.stack)
-    }
-
-    private func previewMetadata(_ label: String, value: String) -> some View {
-        HStack {
-            Text(label).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).fontWeight(.medium)
-        }
-        .font(.subheadline)
-    }
-
-    private var periodText: String {
-        let start = preview.interval.start.formatted(date: .abbreviated, time: .omitted)
-        let inclusiveEnd = preview.interval.end.addingTimeInterval(-1)
-            .formatted(date: .abbreviated, time: .omitted)
-        return start == inclusiveEnd ? start : "\(start)〜\(inclusiveEnd)"
-    }
-}
-
-private struct ReviewSummaryHistoryView: View {
-    @ObservedObject var store: ThoughtStore
-    let interval: DateInterval
-    @State private var deletionCandidate: ReviewSummary?
-    @State private var showingDeletionConfirmation = false
-
-    private var summaries: [ReviewSummary] { store.reviewSummaries }
-
-    var body: some View {
-        Group {
-            if summaries.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                    Text("AI要約履歴はありません")
-                        .font(.headline)
-                    Text("この期間でAI要約を作成すると、ここに履歴が残ります。")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(24)
-                .multilineTextAlignment(.center)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        Text(periodText)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 16)
-
-                        if let message = store.reviewSummaryDeletionError {
-                            Text(message)
-                                .font(.subheadline)
-                                .foregroundStyle(.red)
-                                .padding(.horizontal, 16)
-                                .accessibilityIdentifier("reviewAISummaryDeletionError")
-                        }
-
-                        if let message = store.reviewSummaryExportError {
-                            Text(message)
-                                .font(.subheadline)
-                                .foregroundStyle(.red)
-                                .padding(.horizontal, 16)
-                                .accessibilityIdentifier("reviewAISummaryExportError")
-                        }
-
-                        ForEach(summaries) { summary in
-                            VStack(alignment: .leading, spacing: 10) {
-                                HStack(alignment: .firstTextBaseline) {
-                                    Text(summary.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                        .font(.headline)
-                                    if summary.id == summaries.first?.id {
-                                        Text("最新")
-                                            .font(.caption.weight(.semibold))
-                                            .padding(.horizontal, 7)
-                                            .padding(.vertical, 3)
-                                            .background(Color.accentColor.opacity(0.12))
-                                            .clipShape(Capsule())
-                                            .accessibilityIdentifier("reviewAISummaryLatest")
-                                    }
-                                    Spacer()
-                                    Menu {
-                                        Button("Markdownを共有") {
-                                            store.exportReviewSummary(id: summary.id, format: .markdown)
-                                        }
-                                        .accessibilityIdentifier("exportReviewSummaryMarkdown_\(summary.id.uuidString)")
-                                        Button("JSONを共有") {
-                                            store.exportReviewSummary(id: summary.id, format: .json)
-                                        }
-                                        .accessibilityIdentifier("exportReviewSummaryJSON_\(summary.id.uuidString)")
-                                    } label: {
-                                        Image(systemName: "square.and.arrow.up")
-                                            .frame(width: 32, height: 32)
-                                    }
-                                    .accessibilityLabel("このAI要約をExport")
-                                    .accessibilityHint("MarkdownまたはJSONとして共有します")
-                                    .accessibilityIdentifier("exportReviewSummary_\(summary.id.uuidString)")
-                                    Button(role: .destructive) {
-                                        deletionCandidate = summary
-                                        showingDeletionConfirmation = true
-                                    } label: {
-                                        Image(systemName: "trash")
-                                            .frame(width: 32, height: 32)
-                                    }
-                                    .accessibilityLabel("このAI要約を削除")
-                                    .accessibilityHint("確認後、このAI要約だけを削除します")
-                                    .accessibilityIdentifier("deleteReviewSummary_\(summary.id.uuidString)")
-                                }
-
-                                Text(summary.content)
-                                    .font(.body)
-                                    .textSelection(.enabled)
-
-                                Text("対象 \(summary.thoughtCount) Thoughts ・ \(providerText(summary))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(16)
-                            .background(Color(uiColor: .secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .padding(.horizontal, 16)
-                            .accessibilityElement(children: .contain)
-                            .accessibilityIdentifier("reviewAISummaryHistoryItem_\(summary.id.uuidString)")
-                        }
-                    }
-                    .padding(.vertical, 16)
-                }
-            }
-        }
-        .navigationTitle("AI要約履歴")
-        .navigationBarTitleDisplayMode(.inline)
-        .alert("AI要約を削除しますか？", isPresented: $showingDeletionConfirmation, presenting: deletionCandidate) { summary in
-            Button("キャンセル", role: .cancel) {
-                deletionCandidate = nil
-            }
-            Button("削除", role: .destructive) {
-                store.deleteReviewSummary(id: summary.id)
-                deletionCandidate = nil
-            }
-        } message: { _ in
-            Text("選択したAI要約だけを削除します。Thought原文と他のAI要約は削除されません。")
-        }
-    }
-
-    private var periodText: String {
-        let start = interval.start.formatted(date: .abbreviated, time: .omitted)
-        let inclusiveEnd = interval.end.addingTimeInterval(-1)
-            .formatted(date: .abbreviated, time: .omitted)
-        return start == inclusiveEnd ? start : "\(start)〜\(inclusiveEnd)"
-    }
-
-    private func providerText(_ summary: ReviewSummary) -> String {
-        if summary.provider == "mock" { return "Mock" }
-        return "\(summary.provider) / \(summary.model)"
-    }
-}
-
-private enum ReviewDateText {
-    static func heading(for date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
-        if calendar.isDate(date, inSameDayAs: now) { return "今日" }
-        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
-           calendar.isDate(date, inSameDayAs: yesterday) { return "昨日" }
-        if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
-            return date.formatted(.dateTime.month().day())
-        }
-        return date.formatted(.dateTime.year().month().day())
     }
 }
 
@@ -1272,6 +792,7 @@ private struct ThoughtDetailView: View {
 private struct ThoughtRow: View {
     let thought: Thought
     let persona: Persona
+    let mentionedPersona: Persona?
     let tags: [ThoughtTag]
     let onDelete: () -> Void
 
@@ -1304,6 +825,11 @@ private struct ThoughtRow: View {
                 .accessibilityHint("ダブルタップして詳細とHistoryを開きます")
                 .accessibilityIdentifier("timelineThought_\(thought.id.uuidString)")
                 TagStrip(tags: tags)
+                if let mentionedPersona {
+                    Text("@\(mentionedPersona.displayName)")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.tint)
+                        .accessibilityLabel("\(mentionedPersona.displayName)をメンション")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1350,6 +876,7 @@ private struct PersonaManagementView: View {
     @State private var showsHumanEditor = false
     @State private var showsNewAIEditor = false
     @State private var editingAI: Persona?
+    @State private var postingAI: Persona?
 
     var body: some View {
         NavigationStack {
@@ -1359,7 +886,10 @@ private struct PersonaManagementView: View {
                 }
                 Section("AI Personas") {
                     ForEach(store.personas.filter { $0.kind == .ai }) { persona in
-                        Button { editingAI = persona } label: { personaRow(persona) }.buttonStyle(.plain)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button { editingAI = persona } label: { personaRow(persona) }.buttonStyle(.plain)
+                            Button("このAIに投稿を依頼") { postingAI = persona }.buttonStyle(.bordered)
+                        }.padding(.vertical, 4)
                     }
                     Button { showsNewAIEditor = true } label: { Label("AI Personaを追加", systemImage: "plus.circle") }
                         .accessibilityIdentifier("addAIPersonaButton")
@@ -1371,6 +901,7 @@ private struct PersonaManagementView: View {
             .sheet(isPresented: $showsHumanEditor) { ProfileEditorView(store: store) }
             .sheet(isPresented: $showsNewAIEditor) { AIPersonaEditorView(store: store, persona: nil) }
             .sheet(item: $editingAI) { AIPersonaEditorView(store: store, persona: $0) }
+            .sheet(item: $postingAI) { AIPostRequestView(store: store, persona: $0) }
         }
     }
 
@@ -1390,11 +921,16 @@ private struct AIPersonaEditorView: View {
     @State private var displayName: String
     @State private var iconData: Data?
     @State private var selectedItem: PhotosPickerItem?
+    @State private var role: String
+    @State private var instructions: String
 
     init(store: ThoughtStore, persona: Persona?) {
         self.store = store; self.persona = persona
         _displayName = State(initialValue: persona?.displayName ?? "")
         _iconData = State(initialValue: persona?.iconData)
+        let configuration = persona.flatMap { store.aiConfigurations[$0.id] }
+        _role = State(initialValue: configuration?.role ?? "")
+        _instructions = State(initialValue: configuration?.instructions ?? "")
     }
 
     var body: some View {
@@ -1406,6 +942,8 @@ private struct AIPersonaEditorView: View {
                     if iconData != nil { Button("アイコンを削除", role: .destructive) { iconData = nil } }
                 }
                 Section("表示名") { TextField("AI Persona名", text: $displayName) }
+                Section("役割") { TextField("例：アイデアを広げる相棒", text: $role, axis: .vertical) }
+                Section("指示") { TextField("口調、視点、避けることなど", text: $instructions, axis: .vertical).lineLimit(3...8) }
                 if let persona { Section { Button("AI Personaを無効化", role: .destructive) { store.deactivateAIPersona(persona); dismiss() } } }
             }
             .navigationTitle(persona == nil ? "AI Personaを追加" : "AI Personaを編集")
@@ -1414,10 +952,10 @@ private struct AIPersonaEditorView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        let saved = persona.map { store.updateAIPersona($0, displayName: displayName, iconData: iconData) }
-                            ?? store.createAIPersona(displayName: displayName, iconData: iconData)
+                        let saved = persona.map { store.updateAIPersona($0, displayName: displayName, iconData: iconData, role: role, instructions: instructions) }
+                            ?? store.createAIPersona(displayName: displayName, iconData: iconData, role: role, instructions: instructions)
                         if saved { dismiss() }
-                    }.disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || displayName.count > 40)
+                    }.disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || displayName.count > 40 || role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .onChange(of: selectedItem) { item in
@@ -1427,6 +965,52 @@ private struct AIPersonaEditorView: View {
     }
 
     private var previewPersona: Persona { Persona(id: persona?.id ?? UUID(), displayName: displayName, kind: .ai, iconData: iconData, iconMIMEType: iconData == nil ? nil : "image/jpeg") }
+}
+
+private struct AIPostRequestView: View {
+    @ObservedObject var store: ThoughtStore
+    let persona: Persona
+    @Environment(\.dismiss) private var dismiss
+    @State private var userRequest = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section { HStack { PersonaIcon(persona: persona, size: 44); VStack(alignment: .leading) { Text(persona.displayName).font(.headline); Text(store.aiConfigurations[persona.id]?.role ?? "").font(.caption).foregroundStyle(.secondary) } } }
+                Section("依頼") { TextField("このAIに考えて投稿してほしいこと", text: $userRequest, axis: .vertical).lineLimit(3...8) }
+                Section { Text("確認画面で最終payloadを確認し、送信を押すまでAI通信も投稿も行いません。").font(.footnote).foregroundStyle(.secondary) }
+                if let error = store.aiPostError { Section { Text(error).foregroundStyle(.red) } }
+            }
+            .navigationTitle("AIに投稿を依頼")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("確認") { store.prepareAIPost(persona: persona, userRequest: userRequest) }.disabled(userRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+            }
+            .sheet(item: $store.aiPostPreview) { AIPostPreviewView(store: store, preview: $0) }
+        }
+    }
+}
+
+private struct AIPostPreviewView: View {
+    @ObservedObject var store: ThoughtStore
+    let preview: AIPostPreview
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("投稿者") { Text(preview.persona.displayName); LabeledContent("役割", value: preview.configuration.role) }
+                Section("依頼") { Text(preview.userRequest) }
+                Section("最終payload") { Text(preview.request.prompt).font(.caption).textSelection(.enabled) }
+                if let error = store.aiPostError { Section { Text(error).foregroundStyle(.red) } }
+            }
+            .navigationTitle("送信前プレビュー")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { store.cancelAIPostPreview(); dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button(store.isGeneratingAIPost ? "生成中…" : "送信") { Task { await store.generateAIPost(from: preview); if store.aiPostError == nil { dismiss() } } }.disabled(store.isGeneratingAIPost) }
+            }
+        }
+    }
 }
 
 private struct ProfileEditorView: View {

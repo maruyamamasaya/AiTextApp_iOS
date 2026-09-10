@@ -12,9 +12,15 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ## 実装済み
 
+- Timelineトップ右上の歯車から開く設定画面。プロフィール／AI Persona、Markdown／JSON Export、外部バックアップを設定内へ集約し、トップの主要導線と分離する。
 - ローカルの単一人間Persona基盤。SQLite schema v6の`personas`／`thought_authors`で既存・新規Thoughtを固定のデフォルト人間へ紐づけ、表示名と512px以下へ正方形化したJPEGアイコンをSQLite内へ保存する。
 - Timelineの投稿者名・丸型アイコン表示と、写真選択／削除／表示名編集を行うプロフィール画面。未設定時は標準人物アイコンを表示し、プロフィール変更を既存Thoughtへ一括反映する。
 - 複数AI Personaの作成・編集・無効化UIと、投稿ごとの実Persona表示。AI Personaは現在まだ通信／自動投稿を行わず、任意Persona IDでThoughtを原子的に保存できるCore境界までを提供する。
+- AI Personaごとの役割・指示設定と、明示的な「投稿を依頼」導線。ユーザー依頼と最終payloadをプレビューし、確定後だけFirebase AI Logicを呼び、140文字以内の成功応答だけをAI Persona名義でTimelineへ保存する。
+- SQLite schema v7の`ai_persona_configurations`／`ai_post_generations`。AI設定と生成来歴をThought本文から分離し、Thought・投稿者・provider／model／prompt version／ユーザー依頼を同一transactionで保存する。自動投稿は行わない。
+- AI Personaへの単一メンションv1。Timeline Composer／Quick CaptureでactiveなAIを選択し、schema v8の`thought_mentions`へ本文と同じtransactionでPersona IDを保存する。Timelineは現在のPersona名を`@名前`で表示し、メンションだけではAI通信を開始しない。
+- 振り返り導線をDaily Summaryへ統一。TimelineのHistory Review入口と画面、旧期間AI要約UIを外し、既存の`review_summaries`はデータ互換のためSQLite内に保持する。
+- Timelineトップバーの独立タグ一覧ボタンを外し、Thoughtに付いたタグは`tag.fill`と名前を組み合わせて文脈内で識別しやすく表示する。
 
 - 端末Calendar／timezoneの1日境界で明示生成するAI Daily Summary v1。月カレンダーで要約済み／Thoughtあり未要約／Thoughtなしと今日を区別し、過去日の日別詳細、送信前Thought／payloadプレビュー、構造化結果の表示と再読込を提供する。
 - SQLite schema v5の`daily_summaries`。Thought原文と分離した1日1件の正式Summaryとして構造化結果と生成メタデータを保存し、AI候補からタグ／Thought／Continuationを自動変更しない。
@@ -42,14 +48,12 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - 既存140文字ルールとatomic transactionを使う「続きを書く」Composer。
 - 分岐Continuationの安定順表示と、削除済みThoughtのHistory placeholder。
 - Timeline／History／Continuation操作のVoiceOver labelとaccessibility identifier。
-- 今日／昨日／過去7日／日付指定で開けるHistory Reviewと、日ごとの件数表示。
 - `createdAt`昇順の安定したReview表示、Thought Detailへの遷移、Continuation件数の軽量表示。
 - SQLiteの日付範囲query（開始inclusive／終了exclusive）とRelation件数の一括query。
 - Files／iCloud Driveのユーザー選択フォルダへSQLite Online Backup APIの完全snapshotを保存する外部災害復旧バックアップ。
-- History Reviewの選択期間を明示操作時だけ要約するAI要約UI、送信前確認、Mockクライアント、再要約、失敗時再試行。
 - Thought原文と分離したSQLite schema v3の`review_summaries`と、通信／保存を抽象化した要約use case。
 - Firebase Apple SDK 12.17.0以降の`FirebaseAILogic`／`FirebaseAppCheck`／`FirebaseCore`依存と、通常起動でFirebase AI Logicを選ぶcomposition root。
-- `PrepareReviewSummary`の確定promptを変更せず送るFirebase transport、中央管理した`firebase-ai-logic`／`gemini-3.7-flash`、成功時だけ既存SQLite保存へ進む実クライアント。
+- Daily Summaryの確定promptを変更せず送るFirebase transport、中央管理した`firebase-ai-logic`／`gemini-3.7-flash`、成功時だけ既存SQLite保存へ進む実クライアント。
 - Firebase未設定、App Check、rate limit、network、その他API、空応答を区別するエラー境界。DebugはApp Check Debug Provider、ReleaseはApp AttestをFirebase初期化前に設定する。
 - SDK非依存transportによるFirebaseクライアント変換テスト。MockクライアントはCore／UIテスト用として維持。
 - 選択期間ごとのAI要約履歴画面。再要約結果を新しい順に表示し、最新、生成日時、対象件数、生成元を確認可能。
@@ -65,10 +69,6 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - Thought原文と分離した`ThoughtTag`／`ThoughtTagRepository`、SQLite schema v4の`tags`／`thought_tags`。正規化名と複合主キーでタグ名・付与の重複を防止。
 - Thought Detailのタグ確認・編集、既存タグ付与、新規タグ作成、個別解除。Timeline／本文検索結果の最大2件＋省略表示、タグ一覧、タグ別Thought一覧、既存Detailへの遷移。
 - タグ追加／解除transaction、deleted Thoughtを除外するタグ一覧・タグ別query、v1〜v3から既存Thoughtを保持するmigration経路。
-- History Reviewへ「今週」「過去30日」「今月」を追加。端末Calendarの週開始・timezoneを尊重し、すべて開始inclusive／終了exclusiveで計算。
-- History Reviewの単一タグ絞り込み。期間＋タグをSQLite JOIN queryで絞り、期間、表示件数、Thoughtが存在した日数、タグ状態を概要表示。
-- Reviewの日別絶対日付・日別件数と、既存どおり古い日／古いThoughtから読む安定順。タグ切替時の即時再読込とDetail／Continuation件数を維持。
-- タグ絞り込みはReview表示だけへ適用し、AI要約・履歴・削除・preview・Exportは従来どおり期間全体を正本とする。タグ選択中は対象差をUIに明示。
 - Timelineから1操作で開き、本文入力へ自動focusするQuick Capture。本文、140文字、文字数、投稿、キャンセルだけに絞り、既存Timeline Composerを維持。
 - Timeline ComposerとQuick Captureが`ThoughtStore.post(_:)`から既存`ThoughtTimeline.post`を共用する投稿境界。Quick専用Repository API、タグ入力、自動draft保存は追加しない。
 - Quick Capture表示中だけ保持する独立draft、入力中キャンセルの破棄確認、interactive dismiss抑止、投稿中の再入防止、失敗時の画面・draft保持、成功時dismissとTimeline即時反映。
@@ -76,7 +76,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - iOS 16対応の小型Quick Capture Widget。固定文言だけを表示し、全体タップの`widgetURL`から`aitextapp://quick-capture`を開く。
 - app／Widgetで共有する厳密な外部route契約と、SwiftUI `onOpenURL`から既存`AppRoute.quickCapture`へ変換するcold launch／foreground共通導線。
 - `AiTextAppWidget` Extension targetとappへの埋め込み設定。WidgetはSQLite、Repository、Firebase、Thought本文へ依存せず、App Group／entitlement／schema変更を行わない。
-- Timelineから開くローカル分析画面。今日／過去7日／過去30日、活動日数、1活動日平均、30日の日別・曜日別・時間帯別分布、上位5タグ、Continuationを持つThought数を表示。
+- Timelineから開くローカル分析画面。今日／過去7日／過去30日、活動日数、1活動日平均、30日の日別カレンダー（件数・濃淡・今日の枠線）、曜日別・時間帯別分布、上位5タグ、Continuationを持つThought数を表示。
 - typed分析model、端末Calendarから30日の日／時間帯境界を構築する`LoadThoughtAnalytics`、CRUDから分離したread-only `ThoughtAnalyticsRepository`。
 - AI Daily Summary v1: Calendar日境界、構造化Gemini応答、独立SQLite保存、月間カレンダー、日別詳細、Timeline統合。
 - SQLiteの境界CTE＋`COUNT`／`GROUP BY`、タグJOIN集計、activeな期間内親子のRelation集計。原文全件をViewへ取得せず、deleted／期間外ThoughtをSQLで除外する。
@@ -106,7 +106,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 - iPhone SE (3rd generation, iOS 17.4)のbuildとXCUITestは確認済みですが、Light／Dark Modeの手動目視確認は未実施です。
 - 破損した移行元JSONは自動復旧せず、SQLiteへの移行を中止してエラー表示し、原本を保持します。
-- XCUITestは投稿・削除、Continuation、History Review主要フローをiPhone SE Simulatorで確認済みです。
+- XCUITestは投稿・削除、Continuationの主要フローをiPhone SE Simulatorで確認済みです。Daily Summary統一後のUI回帰確認が必要です。
 - App iconの実画像は未設定です。
 - Phase 3-AのSwift Testing、Xcode build、XCUITest、Light／Dark Mode、Dynamic Type、VoiceOverの実機／Simulator確認はWindows環境のため未実行です。
 - Phase 3-Bのschema v4 migration、タグunit test、XCUITest、Light／Dark Mode、Dynamic Type、VoiceOverの実機／Simulator確認はWindows環境のため未実行です。
@@ -141,7 +141,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 1. Phase 3-A: Thought検索 v1 — コード実装済み／Mac確認待ち。
 2. Phase 3-B: Thoughtタグ v1 — コード実装済み／Mac確認待ち。
-3. Phase 3-C: History Review強化 v1 — コード実装済み／Mac確認待ち。
+3. Phase 3-C: History Review強化 v1 — 撤回。振り返り導線はDaily Summaryへ統一済み。
 4. Phase 3-E-1: Quick Capture v1 — コード実装済み／Mac確認待ち。
 5. Phase 3-E-2: Widget／外部起動導線 v1 — コード実装済み／Mac確認待ち。WidgetはQuick Captureを開くだけで、データ共有・直接投稿を行わない。
 6. Phase 3-E-3候補: 「Thoughtを書く」App Shortcut／App Intent — 既存外部routeを再利用できるが、WidgetのMac検証後に必要性を判断する。

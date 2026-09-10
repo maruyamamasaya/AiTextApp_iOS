@@ -7,8 +7,8 @@
 ```text
 Quick Capture Widget -> custom URL -> SwiftUI onOpenURL -> AppRoute.quickCapture
 SwiftUI AppRoute -> TimelineView / QuickCaptureView
-  TimelineView -> HistoryReviewView / ThoughtDetailView / Continuation Composer
-  TimelineView -> ThoughtAnalyticsView
+  TimelineView -> DailySummaryCalendarView / ThoughtDetailView / Continuation Composer
+  TimelineView -> ThoughtAnalyticsView / ThoughtSearchView
   -> ThoughtStore (presentation state)
     -> ThoughtTimeline (validation/order/delete use cases)
       -> ThoughtRepository / ThoughtTagRepository / PersonaRepository protocols
@@ -16,9 +16,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
       -> ThoughtContinuationRepository (Thought + Relation transaction)
     -> ThoughtRelationRepository (History relation queries)
     -> LoadThoughtAnalytics -> ThoughtAnalyticsRepository (read-only SQLite aggregates)
-    -> GenerateReviewSummary -> ReviewSummaryClient / ReviewSummaryRepository
     -> PrepareDailySummary / GenerateDailySummary -> ReviewSummaryClient / DailySummaryRepository
-    -> ReviewSummaryExporter -> ReviewSummaryRepository -> ShareSheet
     -> ThoughtExporter -> ThoughtRepository
     -> ShareSheet (UIActivityViewController)
     -> ExternalBackupManager -> ExternalBackupService / RestoreCoordinator
@@ -32,16 +30,11 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 
 ## Main Components
 
-- `TimelineView`: placeholder付きComposer、Lazy Timeline、Quick Capture／Detail／Thought検索／History ReviewへのNavigation、相対日時、操作メニュー、削除確認、Empty State、エラー表示。
+- `TimelineView`: placeholder付きComposer、Lazy Timeline、Quick Capture／Detail／Thought検索／Daily SummaryへのNavigation、相対日時、操作メニュー、削除確認、Empty State、エラー表示。タグはThoughtの文脈内で`tag.fill`と名前を表示し、独立したトップバー入口は置かない。
 - `AppRoute` / `QuickCaptureView`: scene直下のQuick Capture表示routeと、独立draft、自動focus、文字数、投稿、破棄確認だけを持つ集中入力画面。将来の外部起動元は同じrouteを要求する。
 - `QuickCaptureWidget` / `QuickCaptureRoute`: systemSmallの固定表示Widgetと、app／Extension間で共有する外部URL契約。Widgetは`widgetURL`だけを発行し、appの`onOpenURL`が既存`AppRoute.quickCapture`へ変換する。
-- `HistoryReviewView`: 今日／昨日／過去7日／今週／過去30日／今月／日付指定、単一タグ絞り込み、期間・表示件数・活動日数の概要、日単位group、古い順のThought、Continuation件数、最新AI要約と要約履歴への入口を表示。
 - `ThoughtAnalyticsView`: 直近30日の基本サマリー、日別／曜日別／時間帯別分布、上位タグ、Continuation件数を標準SwiftUIの縦Sectionと簡易バーで表示する完全ローカル画面。
 - `DailySummaryCalendarView`: 月単位で要約済み／Thoughtあり未要約／Thoughtなしを表示し、日別詳細と明示生成の送信前プレビューへ遷移する。
-- `ReviewSummaryHistoryView`: 選択期間に保存された要約を新しい順に並べ、最新表示、生成日時、対象件数、provider／model、確認付き個別削除を提供。
-- `ReviewSummaryExporter`: 要約IDをRepositoryで再確認し、単一の保存済み要約をMarkdownまたはJSON schema v1へ変換して一時ファイルへatomic write。
-- `GenerateReviewSummary`: 選択期間のThought本文だけからpromptを作り、抽象化されたclientを呼び、原文と別の要約repositoryへ保存。
-- `PrepareReviewSummary`: Repositoryから指定Review期間を再取得し、表示対象Thoughtと最終`ReviewSummaryRequest`を同じimmutable previewへ固定。
 - `ReviewSummaryClient`: MockとFirebase AI Logic clientを差し替える通信境界。通常起動はFirebase、UIテスト／CoreテストはMockを使用。
 - `ReviewSummaryGeneratingTransport`: Firebase SDK importをapp layerへ閉じ込め、request変換、応答変換、空応答、typed errorを外部通信なしでテストする境界。
 - `ThoughtDetailView`: 現在Thought、縦型History、削除済みplaceholder、「続きを書く」Composerを表示。
@@ -49,6 +42,8 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
 - `Thought` / `ThoughtDraft`: 原文モデルと140文字ルール。
 - `Persona` / `PersonaRepository` / `AuthoredThoughtRepository`: 人間／AIに共通する投稿者モデル、複数Personaの管理、任意Persona IDとThoughtを同一transactionで保存する境界。固定IDの人間Personaは無効化できない。
+- `AIPersonaConfiguration` / `GenerateAIPost`: Personaごとの役割・指示、ユーザー依頼からimmutableな送信前previewを作り、明示確定後の応答だけをAI名義で投稿する。140文字を超える応答や空応答は保存しない。
+- `ThoughtMention` / `ThoughtMentionRepository`: Thought本文の文字列解析ではなく、ThoughtとAI Persona IDの単一メンション関連をatomic保存・一括取得する。メンション作成自体はAI clientを呼ばない。
 - `ThoughtRepository`: create、Timeline query、literal部分一致検索、日付範囲query、ID取得、全件取得、soft deleteの保存境界。
 - `ThoughtTag` / `ThoughtTagRepository`: Thought原文から独立したタグ、正規化、付与・解除transaction、Thought別／全タグ／タグ別Thought queryの境界。
 - `ThoughtAnalytics` / `ThoughtAnalyticsRepository`: typed集計結果、Calendar由来の日／時間帯境界、SQLite集計専用read境界。CRUD RepositoryやAI通信から分離する。
@@ -56,7 +51,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `ThoughtRelationRepository`: Relation作成、source／target方向の1ステップ取得境界。
 - `ThoughtContinuationRepository`: 新規Thoughtと`continues` Relationを同一transactionで作成する境界。
 - `ThoughtHistory`: 現在Thoughtからrootを求め、Relation APIだけで分岐を安定順に取得するuse case。
-- `SQLiteThoughtRepository`: schema v4、Thought／Tag／Relation／期間要約query、旧JSON importと2世代backupを所有する正本実装。
+- `SQLiteThoughtRepository`: schema v8、Thought／Persona／Mention／Tag／Relation／AI生成情報／Daily Summary query、旧JSON importと2世代backupを所有する正本実装。旧期間要約tableは既存データ互換のため維持する。
 - `ThoughtExporter`: Repositoryから未削除Thoughtを取得し、Markdown／JSONを生成。
 - `ShareSheet`: ExportファイルをiOS標準共有UIへ渡すUIKit bridge。
 - `ExternalBackupManager`: Filesフォルダpicker、security-scoped bookmark、バックアップ状態と確認UIのpresentation境界。
@@ -73,11 +68,7 @@ Timelineは`ScrollView`と`LazyVStack`で構成します。Composerは画面下�
 
 Thought DetailはrootからContinuationをdepth-firstで並べた静かな縦型Historyです。現在位置を控えめな背景とlabelで示し、削除済みThoughtはRelationを切らず「削除されたThought」と表示します。Continuation成功後は新Thoughtを現在位置にし、同じThoughtをTimelineにも即時反映します。
 
-History ReviewはCalendarの日境界から期間を作り、開始inclusive／終了exclusiveのSQLite queryで対象Thoughtだけを取得します。日付、`createdAt`、UUIDの順で古いThoughtから安定表示し、soft delete済みは除外します。Continuation件数は対象IDをまとめた1 queryで取得します。
-
-過去7日／過去30日は今日を含む連続した7／30暦日、今週は端末Calendarの週開始日から今日末まで、今月は月初から今日末までです。単一タグ選択時は`thoughts`と`thought_tags`をSQLiteでJOINし、同じ期間境界と昇順規則で絞ります。UIで期間全件を取得してからタグfilterはしません。概要の活動日数と日別groupは、絞り込み済みの少量なReview結果を端末Calendarの日境界でまとめます。
-
-AI要約の保存・履歴・previewは期間境界だけを正本としているため、タグ絞り込みは適用しません。Storeは期間全件数と表示用タグ絞り込み結果を分離し、AI準備処理は従来の`ThoughtRepository.fetchThoughts(from:to:)`を使います。タグ選択中はこの対象差をReview上部へ表示します。
+振り返りUIはDaily Summaryへ統一します。Calendarの日境界で1日を開始inclusive／終了exclusiveとして扱い、月カレンダーから過去日の日別Thought、既存タグ、Continuation件数、保存済みSummaryを確認します。生成は送信前プレビューを経由し、確認後に対象が変わった場合は送信しません。
 
 ローカル分析は今日を含む直近30暦日を固定対象にします。Coreが端末Calendar／timezoneから30個の日境界と各日の0／6／12／18時境界を生成し、SQLiteは境界CTEへactive ThoughtをLEFT JOINして日別・時間帯別に`COUNT`／`GROUP BY`します。曜日分布は日別集計だけをCalendar weekdayへ畳み込み、ViewへThought原文全件を渡しません。タグは期間内active ThoughtをJOINして件数降順・正規化名・ID順の上位5件、Continuationは期間内のactiveな親子が持つ`continues` Relationの親distinct件数です。集計はSELECTだけでbackupやDB更新を行いません。
 
@@ -85,19 +76,15 @@ Thought検索はtrim後の空文字をUI stateで初期状態として扱い、�
 
 タグは表示名を前後trimしてUnicode正規合成し、POSIX localeの小文字表現を`normalized_name`として一意化します。Thought Detailからの追加は、タグの`INSERT OR IGNORE`と`thought_tags`付与を同一transactionで行います。解除も中間行だけをtransaction内で削除し、Thought本文とタグmasterは変更しません。Timeline／本文検索は本文queryと分離したタグ取得を表示に合成し、タグ絞り込みは`ThoughtTagRepository`の独立queryを使います。
 
-AI要約はHistory Reviewのボタン押下後に送信前プレビューを作り、対象期間、件数、payload／本文文字数、日時順のThought本文を表示します。キャンセルではclientを呼びません。送信確定時は期間内ThoughtをRepositoryから再取得し、プレビューのsnapshotと完全一致する場合だけ、プレビューに固定済みの同じ`ReviewSummaryRequest`をclientへ渡します。期間またはThoughtが変わっていれば送信を中止してReviewを再読込します。promptへUUID、Relation、SQLite情報、アプリ状態は含めません。成功結果は同一期間への追記として保存するため再要約履歴を失わず、Reviewには最新結果、履歴画面には全結果を新しい順で表示します。通常起動でFirebase未設定なら送信せず設定エラーとなり、UIテストはMockで同じ保存経路を確認します。
-
-AI要約の削除は`ReviewSummaryRepository.deleteSummary(id:)`を通じ、一意な要約IDに一致する1レコードだけを物理削除します。期間条件やThought tableをDELETE対象に使いません。成功後はStoreの現在期間一覧から同じIDだけを除き、先頭を最新要約として選び直します。0件ならReviewは要約未生成状態へ戻ります。
-
-AI要約Exportは履歴内の明示操作で形式を選び、IDで再取得できた1件だけを既存Share Sheetへ渡します。Export documentは期間、要約本文、生成日時、対象件数、provider、modelだけを持ち、Thought本文、送信prompt、secret、Firebase設定、内部pathのfieldを持ちません。JSONの`period.endExclusive`はReview queryと同じ終了排他境界です。ExportはSQLiteを更新しません。
+Daily Summaryは構造化された要約結果をThought原文と分離して1日1件保存します。通常起動でFirebase未設定なら送信せず設定エラーとなり、UIテスト／CoreテストはMockで同じ保存経路を確認します。旧History ReviewのUI、期間要約生成、履歴、個別Export導線は提供しませんが、既存SQLiteを安全に開くため旧`review_summaries` tableは削除しません。
 
 ## Persistence
 
-schema v6の`personas`と`thought_authors`は既存Thoughtを固定のデフォルト人間Personaへ移行し、新規Thought／Continuationの作成と投稿者関連を同一transactionで保存します。プロフィール画像は最大512pxへ正方形化したJPEGのBLOBとして保存され、SQLite snapshotとRestoreに含まれます。
+schema v8の`personas`と`thought_authors`は既存Thoughtを固定のデフォルト人間Personaへ移行し、新規Thought／Continuationの作成と投稿者関連を同一transactionで保存します。`ai_persona_configurations`と`ai_post_generations`は役割・指示とAI生成来歴を本文から分離し、`thought_mentions`は投稿とAI Personaの関連を保存します。プロフィール画像は最大512pxへ正方形化したJPEGのBLOBとして保存され、SQLite snapshotとRestoreに含まれます。
 
 Widget Extensionは永続化層をリンクせず、固定表示とQuick Capture URLだけを持ちます。App Group、共有container、SQLite path変更はなく、既存appだけがApplication Support内の正本DBを読み書きします。
 
-`Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。schema v6はPersona投稿者関連に加え、既存の`tags`と`thought_tags`、正規化名のUNIQUE制約、Thought／Tag外部キー、複合主キーを維持します。soft deleteでは中間行を保持し、通常のタグqueryがdeleted Thoughtを除外します。既存の`thought_relations`と`review_summaries`は維持します。初回に旧`thoughts.json`があればtransaction内で`INSERT OR IGNORE`し、各IDの主要データを照合してmigration markerを記録します。JSONは削除しません。
+`Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。schema v8はPersona、AI設定・生成来歴、メンションに加え、既存の`tags`と`thought_tags`、正規化名のUNIQUE制約、Thought／Tag外部キー、複合主キーを維持します。soft deleteでは中間行を保持し、通常のタグqueryがdeleted Thoughtを除外します。既存の`thought_relations`と`review_summaries`は維持します。初回に旧`thoughts.json`があればtransaction内で`INSERT OR IGNORE`し、各IDの主要データを照合してmigration markerを記録します。JSONは削除しません。
 
 初期化成功後とcreate／soft delete成功後にSQLite Online Backup APIでスナップショットを作り、`.backup.1`と`.backup.2`だけを保持します。バックアップ失敗は成功済み投稿を失敗扱いにせずログへ記録し、破損時の自動巻き戻しは行いません。
 

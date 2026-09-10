@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ThoughtAnalyticsView: View {
     @ObservedObject var store: ThoughtStore
+    private let calendar = Calendar.current
 
     var body: some View {
         List {
@@ -58,13 +59,14 @@ struct ThoughtAnalyticsView: View {
 
     private func dailySection(_ analytics: ThoughtAnalyticsSnapshot) -> some View {
         Section("過去30日の日別投稿数") {
-            ForEach(analytics.dailyCounts) { item in
-                DistributionRow(
-                    title: item.date.formatted(.dateTime.month().day()),
-                    count: item.count,
-                    maximum: analytics.dailyCounts.map(\.count).max() ?? 0
-                )
-            }
+            DailyActivityCalendar(
+                counts: analytics.dailyCounts,
+                calendar: calendar
+            )
+
+            Text("色が濃い日ほど投稿数が多く、枠線は今日を示します。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -136,6 +138,85 @@ struct ThoughtAnalyticsView: View {
         let symbols = formatter.weekdaySymbols ?? []
         guard symbols.indices.contains(weekday - 1) else { return "曜日\(weekday)" }
         return symbols[weekday - 1]
+    }
+}
+
+private struct DailyActivityCalendar: View {
+    let counts: [DailyThoughtCount]
+    let calendar: Calendar
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+
+    private var maximum: Int { counts.map(\.count).max() ?? 0 }
+
+    private var weekdaySymbols: [String] {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        let index = calendar.firstWeekday - 1
+        return Array(symbols[index...] + symbols[..<index])
+    }
+
+    private var leadingEmptyDayCount: Int {
+        guard let firstDate = counts.first?.date else { return 0 }
+        return (calendar.component(.weekday, from: firstDate) - calendar.firstWeekday + 7) % 7
+    }
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 5) {
+            ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                Text(symbol)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityHidden(true)
+            }
+
+            ForEach(0..<leadingEmptyDayCount, id: \.self) { _ in
+                Color.clear
+                    .frame(minHeight: 46)
+                    .accessibilityHidden(true)
+            }
+
+            ForEach(Array(counts.enumerated()), id: \.offset) { index, item in
+                dayCell(item, isFirst: index == 0)
+            }
+        }
+    }
+
+    private func dayCell(_ item: DailyThoughtCount, isFirst: Bool) -> some View {
+        let isToday = calendar.isDateInToday(item.date)
+
+        return VStack(spacing: 3) {
+            Text(dayLabel(item.date, isFirst: isFirst))
+                .font(.caption2.weight(isToday ? .bold : .regular))
+            Text("\(item.count)件")
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, minHeight: 46)
+        .background(activityColor(for: item.count), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if isToday {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.accentColor, lineWidth: 1.5)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(item.date.formatted(date: .long, time: .omitted))、\(item.count)件")
+        .accessibilityIdentifier(isToday ? "analyticsDailyCellToday" : "analyticsDailyCell")
+    }
+
+    private func dayLabel(_ date: Date, isFirst: Bool) -> String {
+        let day = calendar.component(.day, from: date)
+        if isFirst || day == 1 {
+            return date.formatted(.dateTime.month(.defaultDigits).day())
+        }
+        return "\(day)"
+    }
+
+    private func activityColor(for count: Int) -> Color {
+        guard count > 0, maximum > 0 else { return Color.secondary.opacity(0.08) }
+        let intensity = Double(count) / Double(maximum)
+        return Color.accentColor.opacity(0.18 + 0.52 * intensity)
     }
 }
 

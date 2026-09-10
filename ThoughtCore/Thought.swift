@@ -65,3 +65,101 @@ public protocol PersonaRepository: Sendable {
 public protocol AuthoredThoughtRepository: Sendable {
     func create(_ thought: Thought, authorPersonaID: UUID) throws
 }
+
+public struct ThoughtMention: Equatable, Sendable {
+    public let thoughtID: UUID
+    public let personaID: UUID
+    public let createdAt: Date
+    public init(thoughtID: UUID, personaID: UUID, createdAt: Date = Date()) { self.thoughtID = thoughtID; self.personaID = personaID; self.createdAt = createdAt }
+}
+
+public protocol ThoughtMentionRepository: Sendable {
+    func create(_ thought: Thought, authorPersonaID: UUID, mentionedPersonaID: UUID?) throws
+    func fetchMentionedPersonas(for thoughtIDs: [UUID]) throws -> [UUID: Persona]
+}
+
+public struct AIPersonaConfiguration: Equatable, Sendable {
+    public let personaID: UUID
+    public var role: String
+    public var instructions: String
+    public var updatedAt: Date
+
+    public init(personaID: UUID, role: String, instructions: String, updatedAt: Date = Date()) {
+        self.personaID = personaID; self.role = role; self.instructions = instructions; self.updatedAt = updatedAt
+    }
+}
+
+public struct AIPostGeneration: Equatable, Sendable {
+    public let thoughtID: UUID
+    public let personaID: UUID
+    public let userRequest: String
+    public let provider: String
+    public let model: String
+    public let promptVersion: Int
+    public let generatedAt: Date
+}
+
+public protocol AIPersonaRepository: Sendable {
+    func fetchAIConfigurations() throws -> [UUID: AIPersonaConfiguration]
+    func saveAIConfiguration(_ configuration: AIPersonaConfiguration) throws
+    func createAIPersona(_ persona: Persona, configuration: AIPersonaConfiguration) throws
+    func saveGeneratedThought(_ thought: Thought, authorPersonaID: UUID, generation: AIPostGeneration) throws
+}
+
+public struct AIPostPreview: Identifiable, Equatable, Sendable {
+    public let id = UUID()
+    public let persona: Persona
+    public let configuration: AIPersonaConfiguration
+    public let userRequest: String
+    public let request: ReviewSummaryRequest
+}
+
+public enum AIPostError: Error, LocalizedError, Equatable {
+    case invalidRequest, inactivePersona, missingConfiguration, emptyResponse, responseTooLong
+    public var errorDescription: String? {
+        switch self {
+        case .invalidRequest: "AIへの依頼を入力してください。"
+        case .inactivePersona: "このAI Personaは利用できません。"
+        case .missingConfiguration: "AI Personaの役割と指示を設定してください。"
+        case .emptyResponse: "AIから空の応答が返されました。"
+        case .responseTooLong: "AIの応答が140文字を超えたため投稿しませんでした。"
+        }
+    }
+}
+
+public enum AIPostPrompt {
+    public static let version = 1
+    public static func prepare(persona: Persona, configuration: AIPersonaConfiguration, userRequest: String) throws -> AIPostPreview {
+        let request = userRequest.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty else { throw AIPostError.invalidRequest }
+        guard persona.kind == .ai, persona.deletedAt == nil else { throw AIPostError.inactivePersona }
+        guard !configuration.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !configuration.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AIPostError.missingConfiguration }
+        let prompt = """
+        あなたはプライベートなThought Timelineへ参加するAI Personaです。
+        Persona名: \(persona.displayName)
+        役割: \(configuration.role)
+        指示: \(configuration.instructions)
+        ユーザーの依頼: \(request)
+
+        日本語で140文字以内の投稿本文だけを返してください。前置き、引用符、Markdown、文字数の説明は付けないでください。
+        """
+        return AIPostPreview(persona: persona, configuration: configuration, userRequest: request, request: ReviewSummaryRequest(prompt: prompt))
+    }
+}
+
+public struct GenerateAIPost: Sendable {
+    private let client: any ReviewSummaryClient
+    private let repository: any AIPersonaRepository
+    public init(client: any ReviewSummaryClient, repository: any AIPersonaRepository) { self.client = client; self.repository = repository }
+    public func callAsFunction(preview: AIPostPreview, now: Date = Date(), thoughtID: UUID = UUID()) async throws -> Thought {
+        let response = try await client.generateSummary(preview.request)
+        let body = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { throw AIPostError.emptyResponse }
+        guard body.count <= ThoughtDraft.characterLimit else { throw AIPostError.responseTooLong }
+        let thought = Thought(id: thoughtID, body: body, createdAt: now)
+        let generation = AIPostGeneration(thoughtID: thoughtID, personaID: preview.persona.id, userRequest: preview.userRequest, provider: response.provider, model: response.model, promptVersion: AIPostPrompt.version, generatedAt: now)
+        try repository.saveGeneratedThought(thought, authorPersonaID: preview.persona.id, generation: generation)
+        return thought
+    }
+}

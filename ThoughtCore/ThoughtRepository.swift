@@ -15,7 +15,7 @@ public protocol ThoughtRepository: Sendable {
 }
 
 /// A small repository useful for previews and domain tests. SQLite is the app's durable store.
-public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
+public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
     private var records: [Thought]
     private var relations: [ThoughtRelation]
     private var summaries: [ReviewSummary]
@@ -25,6 +25,9 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
     private var defaultPersona = Persona(id: Persona.defaultHumanID, displayName: "自分", kind: .human)
     private var personas: [UUID: Persona] = [:]
     private var authorIDs: [UUID: UUID] = [:]
+    private var aiConfigurations: [UUID: AIPersonaConfiguration] = [:]
+    private var aiGenerations: [UUID: AIPostGeneration] = [:]
+    private var mentionIDs: [UUID: UUID] = [:]
     private let lock = NSLock()
 
     public init(records: [Thought] = [], relations: [ThoughtRelation] = [], summaries: [ReviewSummary] = [], dailySummaries: [DailySummary] = [], tags: [ThoughtTag] = [], thoughtTagIDs: [UUID: Set<UUID>] = [:]) {
@@ -48,6 +51,14 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
             records.append(thought); authorIDs[thought.id] = authorPersonaID
         }
     }
+    public func create(_ thought: Thought, authorPersonaID: UUID, mentionedPersonaID: UUID?) throws {
+        try lock.withLock {
+            guard personas[authorPersonaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) }
+            if let mentionedPersonaID { guard personas[mentionedPersonaID]?.kind == .ai, personas[mentionedPersonaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) }; mentionIDs[thought.id] = mentionedPersonaID }
+            records.append(thought); authorIDs[thought.id] = authorPersonaID
+        }
+    }
+    public func fetchMentionedPersonas(for thoughtIDs: [UUID]) throws -> [UUID: Persona] { lock.withLock { Dictionary(uniqueKeysWithValues: thoughtIDs.compactMap { id in mentionIDs[id].flatMap { personas[$0] }.map { (id, $0) } }) } }
 
     public func fetchDefaultHumanPersona() throws -> Persona { lock.withLock { defaultPersona } }
     public func fetchPersonas(includeInactive: Bool) throws -> [Persona] { lock.withLock { personas.values.filter { includeInactive || $0.deletedAt == nil }.sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt } } }
@@ -60,6 +71,10 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         lock.withLock { personas[persona.id] = persona; if persona.id == Persona.defaultHumanID { defaultPersona = persona } }
     }
     public func deactivatePersona(id: UUID, at date: Date) throws -> Bool { lock.withLock { guard id != Persona.defaultHumanID, var persona = personas[id], persona.deletedAt == nil else { return false }; persona.deletedAt = date; persona.updatedAt = date; personas[id] = persona; return true } }
+    public func fetchAIConfigurations() throws -> [UUID: AIPersonaConfiguration] { lock.withLock { aiConfigurations } }
+    public func saveAIConfiguration(_ configuration: AIPersonaConfiguration) throws { lock.withLock { aiConfigurations[configuration.personaID] = configuration } }
+    public func createAIPersona(_ persona: Persona, configuration: AIPersonaConfiguration) throws { try lock.withLock { guard persona.kind == .ai, persona.id == configuration.personaID, personas[persona.id] == nil else { throw CocoaError(.fileWriteFileExists) }; personas[persona.id] = persona; aiConfigurations[persona.id] = configuration } }
+    public func saveGeneratedThought(_ thought: Thought, authorPersonaID: UUID, generation: AIPostGeneration) throws { try lock.withLock { guard personas[authorPersonaID]?.deletedAt == nil, aiConfigurations[authorPersonaID] != nil, generation.thoughtID == thought.id else { throw CocoaError(.fileNoSuchFile) }; records.append(thought); authorIDs[thought.id] = authorPersonaID; aiGenerations[thought.id] = generation } }
 
     public func fetchTimeline() throws -> [Thought] {
         lock.withLock {

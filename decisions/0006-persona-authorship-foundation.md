@@ -19,4 +19,4 @@ Accepted — 2026-09-10
 
 ## Consequences
 
-通常投稿はデフォルト人間に属する。AI Personaは複数作成・編集・無効化でき、`AuthoredThoughtRepository`から明示したPersona IDで投稿できる。AI通信と生成メタデータは次段階で追加し、本文・AI設定・生成来歴はPersonaから分離したまま維持する。
+通常投稿はデフォルト人間に属する。AI Personaは複数作成・編集・無効化でき、`AuthoredThoughtRepository`から明示したPersona IDで投稿できる。AI設定と生成来歴はschema v7の別テーブルへ分離し、ユーザーの明示依頼と送信確定がある場合だけ生成・投稿する。

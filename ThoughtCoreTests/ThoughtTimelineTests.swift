@@ -287,7 +287,7 @@ struct ThoughtTagTests {
         try fixture.writeV3Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 6)
+        #expect(SQLiteThoughtRepository.schemaVersion == 8)
         #expect(try repository.fetchByID(original.id) == original)
         guard case .added(let tag) = try repository.addTag(named: "移行後", to: original.id) else { return }
         #expect(try repository.fetchTags(for: original.id) == [tag])
@@ -427,7 +427,7 @@ struct ThoughtHistoryTests {
         try fixture.writeV1Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 6)
+        #expect(SQLiteThoughtRepository.schemaVersion == 8)
         #expect(try repository.fetchAll() == [original])
         #expect(try repository.fetchBySourceThoughtID(original.id).isEmpty)
     }
@@ -1076,7 +1076,7 @@ struct ExternalBackupTests {
         #expect(analytics.dailyCounts.first?.count == 1)
         #expect(analytics.dailyCounts.last?.count == 2)
         #expect(try repository.fetchAll() == before)
-        #expect(SQLiteThoughtRepository.schemaVersion == 6)
+        #expect(SQLiteThoughtRepository.schemaVersion == 8)
     }
 
     @Test func emptyLocalAnalyticsReturnsZeroFilledDistributions() throws {
@@ -1248,6 +1248,46 @@ struct PersonaTests {
         let thought = Thought(body: "保存されない")
         #expect(throws: SQLiteThoughtRepositoryError.self) { try repository.create(thought, authorPersonaID: UUID()) }
         #expect(try repository.fetchByID(thought.id) == nil)
+    }
+
+    @Test func explicitPreviewGeneratesAndAtomicallySavesAIAuthoredThought() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let persona = Persona(displayName: "問いかけ役", kind: .ai)
+        let configuration = AIPersonaConfiguration(personaID: persona.id, role: "視点を増やす", instructions: "短く問いかける")
+        try repository.createAIPersona(persona, configuration: configuration)
+        let preview = try AIPostPrompt.prepare(persona: persona, configuration: configuration, userRequest: "今日の記録に反応して")
+        let thoughtID = UUID(), now = Date(timeIntervalSince1970: 800)
+        let thought = try await GenerateAIPost(client: MockReviewSummaryClient(text: "別の見方もありそう。"), repository: repository)(preview: preview, now: now, thoughtID: thoughtID)
+        #expect(thought.body == "別の見方もありそう。")
+        #expect(try repository.fetchPersona(for: thoughtID)?.id == persona.id)
+        #expect(preview.request.prompt.contains("送信を押す") == false)
+    }
+
+    @Test func overlongAIResponseIsNeverPosted() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let persona = Persona(displayName: "長文AI", kind: .ai)
+        let configuration = AIPersonaConfiguration(personaID: persona.id, role: "補助", instructions: "簡潔に")
+        try repository.createAIPersona(persona, configuration: configuration)
+        let preview = try AIPostPrompt.prepare(persona: persona, configuration: configuration, userRequest: "投稿して")
+        await #expect(throws: AIPostError.responseTooLong) { try await GenerateAIPost(client: MockReviewSummaryClient(text: String(repeating: "あ", count: 141)), repository: repository)(preview: preview) }
+        #expect(try repository.fetchTimeline().isEmpty)
+    }
+
+    @Test func mentionIsStoredAtomicallyByPersonaIDWithoutStartingAI() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let ai = Persona(displayName: "整理役", kind: .ai)
+        try repository.createAIPersona(ai, configuration: AIPersonaConfiguration(personaID: ai.id, role: "整理", instructions: "短く"))
+        let thought = Thought(body: "@文字列ではなく関連で保存")
+        try repository.create(thought, authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: ai.id)
+        #expect(try repository.fetchMentionedPersonas(for: [thought.id])[thought.id]?.id == ai.id)
+        #expect(try repository.fetchPersona(for: thought.id)?.kind == .human)
+
+        let invalid = Thought(body: "無効なメンション")
+        #expect(throws: SQLiteThoughtRepositoryError.self) { try repository.create(invalid, authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: UUID()) }
+        #expect(try repository.fetchByID(invalid.id) == nil)
     }
 }
 
