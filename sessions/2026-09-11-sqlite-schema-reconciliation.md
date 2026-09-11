@@ -6,3 +6,4 @@
 - 新規DBの`ai_post_generations` CREATE TABLEも現在コードが期待する9列を直接含む定義へ更新した。
 - 既存AI投稿を持つ欠損v13 DBからの補修、データ保持、生成情報SELECT、再オープンを回帰テストへ追加した。
 - `swift test`全111件とiOS Simulator Debug buildに成功した。
+- 実機で`ai_api_usage`テーブル自体の欠落が判明したため、存在確認後に限り現行18列定義とindexを新規作成する補修を追加した。

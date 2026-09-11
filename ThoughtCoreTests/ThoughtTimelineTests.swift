@@ -1280,7 +1280,7 @@ struct PersonaTests {
         do {
             let repaired = try fixture.repository()
             #expect(try fixture.tableColumns("ai_post_generations").isSuperset(of: ["thought_id", "persona_id", "user_request", "provider", "model", "prompt_version", "generated_at", "generation_kind", "reply_target_thought_id"]))
-            #expect(try fixture.tableColumns("ai_api_usage").contains("source_type"))
+            #expect(try fixture.tableColumns("ai_api_usage").isSuperset(of: ["id", "started_at", "finished_at", "feature", "persona_id", "provider", "model", "status", "input_characters", "output_characters", "input_tokens", "output_tokens", "total_tokens", "latency_milliseconds", "external_brain_used", "retrieved_chunk_count", "error_category", "source_type"]))
             #expect(try fixture.tableColumns("knowledge_documents").isSuperset(of: ["status", "superseded_by_knowledge_id", "superseded_at", "archived_at", "retrieval_count", "last_retrieved_at"]))
             let generation = try repaired.fetchAIPostGeneration(for: thoughtID)
             #expect(generation?.kind == .standalone)
@@ -1351,8 +1351,9 @@ struct PersonaTests {
     @Test func generatedRepliesPersistRelationMetadataAndAllowMultipleReplies() async throws {
         let fixture = try Fixture(); defer { fixture.remove() }
         let repository = try fixture.repository()
-        let persona = Persona(displayName: "ノア", kind: .ai)
-        let configuration = AIPersonaConfiguration(personaID: persona.id, role: "整理", instructions: "短く")
+        let personaDate = Date(timeIntervalSince1970: 900)
+        let persona = Persona(displayName: "ノア", kind: .ai, createdAt: personaDate, updatedAt: personaDate)
+        let configuration = AIPersonaConfiguration(personaID: persona.id, role: "整理", instructions: "短く", updatedAt: personaDate)
         try repository.createAIPersona(persona, configuration: configuration)
         let target = Thought(body: "この考えどう思う？", createdAt: Date(timeIntervalSince1970: 1_000))
         try repository.create(target, authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: persona.id)
@@ -1549,7 +1550,7 @@ private struct Fixture {
                 FROM ai_post_generations_current;
             DROP TABLE ai_post_generations_current;
             CREATE INDEX ai_post_generations_persona_idx ON ai_post_generations(persona_id, generated_at DESC);
-            ALTER TABLE ai_api_usage DROP COLUMN source_type;
+            DROP TABLE ai_api_usage;
             ALTER TABLE knowledge_documents DROP COLUMN status;
             ALTER TABLE knowledge_documents DROP COLUMN superseded_by_knowledge_id;
             ALTER TABLE knowledge_documents DROP COLUMN superseded_at;

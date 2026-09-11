@@ -1183,9 +1183,7 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         }
         if version < 10 {
             try transaction {
-                try execute("CREATE TABLE ai_api_usage (id TEXT PRIMARY KEY NOT NULL, started_at REAL NOT NULL, finished_at REAL NULL, feature TEXT NOT NULL, persona_id TEXT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('success', 'failed', 'cancelled')), input_characters INTEGER NOT NULL CHECK (input_characters >= 0), output_characters INTEGER NOT NULL CHECK (output_characters >= 0), input_tokens INTEGER NULL CHECK (input_tokens IS NULL OR input_tokens >= 0), output_tokens INTEGER NULL CHECK (output_tokens IS NULL OR output_tokens >= 0), total_tokens INTEGER NULL CHECK (total_tokens IS NULL OR total_tokens >= 0), latency_milliseconds INTEGER NULL CHECK (latency_milliseconds IS NULL OR latency_milliseconds >= 0), external_brain_used INTEGER NOT NULL CHECK (external_brain_used IN (0, 1)), retrieved_chunk_count INTEGER NOT NULL CHECK (retrieved_chunk_count >= 0), error_category TEXT NULL)")
-                try execute("CREATE INDEX ai_api_usage_started_idx ON ai_api_usage(started_at DESC)")
-                try execute("CREATE INDEX ai_api_usage_dimensions_idx ON ai_api_usage(feature, persona_id, provider, model, status, started_at DESC)")
+                try createAIAPIUsageTableIfMissing()
                 try execute("PRAGMA user_version = 10")
             }
         }
@@ -1220,12 +1218,13 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         }
         let requiresColumnRepair = try
             !tableColumns("ai_post_generations").isSuperset(of: ["generation_kind", "reply_target_thought_id"]) ||
-            !tableColumns("ai_api_usage").contains("source_type") ||
+            !tableExists("ai_api_usage") || !tableColumns("ai_api_usage").contains("source_type") ||
             !tableColumns("knowledge_documents").isSuperset(of: ["status", "superseded_by_knowledge_id", "superseded_at", "archived_at", "retrieval_count", "last_retrieved_at"])
         if version < 14 || requiresColumnRepair {
             try transaction {
                 try addColumnIfMissing(table: "ai_post_generations", column: "generation_kind", definition: "TEXT NOT NULL DEFAULT 'standalone' CHECK (generation_kind IN ('standalone', 'reply'))")
                 try addColumnIfMissing(table: "ai_post_generations", column: "reply_target_thought_id", definition: "TEXT NULL REFERENCES thoughts(id)")
+                try createAIAPIUsageTableIfMissing()
                 try addColumnIfMissing(table: "ai_api_usage", column: "source_type", definition: "TEXT NULL")
                 try addColumnIfMissing(table: "knowledge_documents", column: "status", definition: "TEXT NOT NULL DEFAULT 'active'")
                 try addColumnIfMissing(table: "knowledge_documents", column: "superseded_by_knowledge_id", definition: "TEXT NULL")
@@ -1237,6 +1236,22 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 try execute("PRAGMA user_version = 14")
             }
         }
+    }
+
+    private func createAIAPIUsageTableIfMissing() throws {
+        guard try !tableExists("ai_api_usage") else { return }
+        try execute("CREATE TABLE ai_api_usage (id TEXT PRIMARY KEY NOT NULL, started_at REAL NOT NULL, finished_at REAL NULL, feature TEXT NOT NULL, persona_id TEXT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('success', 'failed', 'cancelled')), input_characters INTEGER NOT NULL CHECK (input_characters >= 0), output_characters INTEGER NOT NULL CHECK (output_characters >= 0), input_tokens INTEGER NULL CHECK (input_tokens IS NULL OR input_tokens >= 0), output_tokens INTEGER NULL CHECK (output_tokens IS NULL OR output_tokens >= 0), total_tokens INTEGER NULL CHECK (total_tokens IS NULL OR total_tokens >= 0), latency_milliseconds INTEGER NULL CHECK (latency_milliseconds IS NULL OR latency_milliseconds >= 0), external_brain_used INTEGER NOT NULL CHECK (external_brain_used IN (0, 1)), retrieved_chunk_count INTEGER NOT NULL CHECK (retrieved_chunk_count >= 0), error_category TEXT NULL, source_type TEXT NULL)")
+        try execute("CREATE INDEX ai_api_usage_started_idx ON ai_api_usage(started_at DESC)")
+        try execute("CREATE INDEX ai_api_usage_dimensions_idx ON ai_api_usage(feature, persona_id, provider, model, status, started_at DESC)")
+    }
+
+    private func tableExists(_ table: String) throws -> Bool {
+        let statement = try prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+        defer { sqlite3_finalize(statement) }
+        try bind(table, to: 1, in: statement)
+        let result = sqlite3_step(statement)
+        guard result == SQLITE_ROW || result == SQLITE_DONE else { throw lastError() }
+        return result == SQLITE_ROW
     }
 
     private func addColumnIfMissing(table: String, column: String, definition: String) throws {
