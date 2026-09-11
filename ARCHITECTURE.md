@@ -35,6 +35,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `QuickCaptureWidget` / `QuickCaptureRoute`: systemSmallの固定表示Widgetと、app／Extension間で共有する外部URL契約。Widgetは`widgetURL`だけを発行し、appの`onOpenURL`が既存`AppRoute.quickCapture`へ変換する。
 - `ThoughtAnalyticsView`: 直近30日の基本サマリー、日別／曜日別／時間帯別分布、上位タグ、Continuation件数を標準SwiftUIの縦Sectionと簡易バーで表示する完全ローカル画面。
 - `DailySummaryCalendarView`: 月単位で要約済み／Thoughtあり未要約／Thoughtなしを表示し、日別詳細と明示生成の送信前プレビューへ遷移する。
+- `DailySummaryContent` / `PrepareDailySummary`: Human Thoughtを主データ、AI投稿を対話補助として分離し、Humanタグ、共通時間帯、日内Relationをtyped previewへ固定する。v1保存JSONは追加fieldを空配列として後方互換decodeする。
 - `ReviewSummaryClient`: MockとFirebase AI Logic clientを差し替える通信境界。通常起動はFirebase、UIテスト／CoreテストはMockを使用。
 - `ReviewSummaryGeneratingTransport`: Firebase SDK importをapp layerへ閉じ込め、request変換、応答変換、空応答、typed errorを外部通信なしでテストする境界。
 - `ThoughtDetailView`: 現在Thought、縦型History、削除済みplaceholder、「続きを書く」Composerを表示。
@@ -78,7 +79,7 @@ Thought検索はtrim後の空文字をUI stateで初期状態として扱い、�
 
 タグは表示名を前後trimしてUnicode正規合成し、POSIX localeの小文字表現を`normalized_name`として一意化します。Thought Detailからの追加は、タグの`INSERT OR IGNORE`と`thought_tags`付与を同一transactionで行います。解除も中間行だけをtransaction内で削除し、Thought本文とタグmasterは変更しません。Timeline／本文検索は本文queryと分離したタグ取得を表示に合成し、タグ絞り込みは`ThoughtTagRepository`の独立queryを使います。
 
-Daily Summaryは構造化された要約結果をThought原文と分離して1日1件保存します。通常起動でFirebase未設定なら送信せず設定エラーとなり、UIテスト／CoreテストはMockで同じ保存経路を確認します。旧History ReviewのUI、期間要約生成、履歴、個別Export導線は提供しませんが、既存SQLiteを安全に開くため旧`review_summaries` tableは削除しません。
+Daily SummaryはHumanの概要・テーマ・思考と、既存Humanタグ別、AI Persona別対話、任意の時間帯Insightを分けた構造化結果をThought原文と別に1日1件保存します。Preview後は本文・時刻・投稿者・Humanタグ・日内Relationを再取得し、一致したpayloadだけを明示送信します。schema v9の`content_json`を使うためDB migrationはありません。
 
 ## Persistence
 

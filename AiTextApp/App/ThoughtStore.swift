@@ -230,8 +230,8 @@ final class ThoughtStore: ObservableObject {
         let start = calendar.startOfDay(for: day)
         do {
             dailySummary = try dailySummaryRepository?.fetchDailySummary(dayStart: start)
-            if let thoughtRepository, let tagRepository, let relationRepository,
-               let preview = try? PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository)(day: day, calendar: calendar) {
+            if let thoughtRepository, let tagRepository, let relationRepository, let personaRepository,
+               let preview = try? PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: day, calendar: calendar) {
                 dailySummaryDayThoughts = preview.thoughts
                 dailySummaryDayTags = preview.existingTags
                 dailySummaryDayContinuationCount = preview.continuationCount
@@ -246,9 +246,9 @@ final class ThoughtStore: ObservableObject {
     }
 
     func prepareDailySummary(for day: Date, calendar: Calendar = .current) {
-        guard let thoughtRepository, let tagRepository, let relationRepository else { dailySummaryError = "要約対象を読み込めませんでした。"; return }
+        guard let thoughtRepository, let tagRepository, let relationRepository, let personaRepository else { dailySummaryError = "要約対象を読み込めませんでした。"; return }
         do {
-            dailySummaryPreview = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository)(day: day, calendar: calendar)
+            dailySummaryPreview = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: day, calendar: calendar)
             dailySummaryError = nil
         } catch ReviewSummaryError.noThoughts { dailySummaryPreview = nil; dailySummaryError = "Thoughtが0件の日は要約できません。" }
         catch { dailySummaryPreview = nil; dailySummaryError = "要約対象を準備できませんでした。" }
@@ -261,9 +261,9 @@ final class ThoughtStore: ObservableObject {
         isGeneratingDailySummary = true; dailySummaryError = nil
         defer { isGeneratingDailySummary = false }
         do {
-            guard let tagRepository, let relationRepository else { throw ReviewSummaryError.stalePreview }
-            let current = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository)(day: preview.interval.start)
-            guard current.thoughts == preview.thoughts && current.existingTags == preview.existingTags && current.continuationCount == preview.continuationCount else { throw ReviewSummaryError.stalePreview }
+            guard let tagRepository, let relationRepository, let personaRepository else { throw ReviewSummaryError.stalePreview }
+            let current = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: preview.interval.start)
+            guard current.inputs == preview.inputs && current.relations == preview.relations && current.existingTags == preview.existingTags && current.continuationCount == preview.continuationCount else { throw ReviewSummaryError.stalePreview }
             let value = try await GenerateDailySummary(client: summaryClient, repository: dailySummaryRepository)(preview: preview)
             dailySummary = value
             dailySummaries.removeAll { $0.dayStart == value.dayStart }

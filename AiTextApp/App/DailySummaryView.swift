@@ -4,15 +4,25 @@ struct DailySummarySections: View {
     let summary: DailySummary
     var body: some View {
         Section("概要") { Text(summary.content.overview) }
-        valueSection("主なテーマ / ジャンル", summary.content.themes)
-        valueSection("既存タグ候補", summary.content.existingTagCandidates)
-        valueSection("新規タグ候補", summary.content.newTagCandidates)
+        valueSection("主なテーマ", summary.content.themes)
+        if !summary.content.tagGroups.isEmpty {
+            Section("タグ別") { ForEach(summary.content.tagGroups, id: \.tagName) { group in VStack(alignment: .leading, spacing: 4) { Text("#\(group.tagName)").font(.headline); Text(group.summary); if !group.themes.isEmpty { Text(group.themes.joined(separator: "、")).font(.caption).foregroundStyle(.secondary) }; Text("\(group.thoughtCount)件").font(.caption2).foregroundStyle(.secondary) } } }
+        }
+        if !summary.content.aiInteractions.isEmpty {
+            Section("AIとの対話") { ForEach(summary.content.aiInteractions, id: \.personaName) { interaction in VStack(alignment: .leading, spacing: 4) { Text(interaction.personaName).font(.headline); Text(interaction.summary); if !interaction.topics.isEmpty { Text(interaction.topics.joined(separator: "、")).font(.caption).foregroundStyle(.secondary) } } } }
+        }
         valueSection("思考パターン", summary.content.thoughtPatterns)
         valueSection("深掘りしていた内容", summary.content.deepDives)
         valueSection("悩み / 検討", summary.content.concerns)
         Section("思考の流れ") { Text(summary.content.thoughtFlow) }
+        if !summary.content.timeOfDayInsights.isEmpty {
+            Section("時間帯の傾向") { ForEach(summary.content.timeOfDayInsights, id: \.period) { value in VStack(alignment: .leading, spacing: 4) { Text(value.period).font(.headline); Text(value.insight) } } }
+        }
         valueSection("継続候補", summary.content.continuationCandidates)
         valueSection("明日以降への持ち越し", summary.content.carryOvers)
+        if !summary.content.existingTagCandidates.isEmpty || !summary.content.newTagCandidates.isEmpty {
+            Section("タグ候補") { if !summary.content.existingTagCandidates.isEmpty { LabeledContent("既存タグ", value: summary.content.existingTagCandidates.joined(separator: "、")) }; if !summary.content.newTagCandidates.isEmpty { LabeledContent("AIの新規提案", value: summary.content.newTagCandidates.joined(separator: "、")) } }
+        }
         Section("生成情報") {
             LabeledContent("生成日時", value: summary.createdAt.formatted())
             LabeledContent("生成元", value: "\(summary.provider) / \(summary.model)")
@@ -157,6 +167,11 @@ private struct DailySummaryPreviewView: View {
                     LabeledContent("Continuation", value: "\(preview.continuationCount)件")
                 }
                 Section("対象Thought") { ForEach(preview.thoughts) { Text($0.body) } }
+                Section("構造化された送信対象") {
+                    ForEach(preview.inputs, id: \.thought.id) { input in
+                        HStack(alignment: .top, spacing: 10) { PersonaIcon(persona: input.author, size: 32); VStack(alignment: .leading, spacing: 3) { Text(input.author.displayName).font(.subheadline.weight(.semibold)); Text(input.author.kind == .human ? "Human" : "AI").font(.caption2).foregroundStyle(.secondary); if input.author.kind == .human, !input.tags.isEmpty { Text(input.tags.map { "#\($0.name)" }.joined(separator: " ")).font(.caption).foregroundStyle(.tint) }; Text(input.thought.body) } }
+                    }
+                }
                 Section("最終payload") { Text(preview.request.prompt).font(.caption).textSelection(.enabled) }
             }
             .navigationTitle("送信前プレビュー")

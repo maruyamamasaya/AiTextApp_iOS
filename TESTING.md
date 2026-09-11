@@ -10,7 +10,7 @@ UI非依存のドメイン／永続化／ExportはSwift PackageとしてLinux/ma
 swift test
 ```
 
-入力境界（空、trim、140／141文字）と共通`ThoughtTimeline.post`、Unicode、SQLite順序、soft delete、再読込、本文検索、タグ、Personaのv9 migration・AI投稿・AI返信validation／Relation／来歴／rollback、Reply Contextの最大5件／順序／投稿者／deleted／cycle／duplicate／Continuation分離／stale preview、人間返信chain、メンションatomic保存、ローカル分析、backup、Export、History、AI要約を検証します。Firebase SDKと実通信はUnit Testに含めません。
+入力境界、SQLite、Persona、AI Reply／Context、タグ、ローカル分析、backup、Export、Historyに加え、Daily Summary v2のHuman／AI分類、Humanタグ限定、複数AI、Relation、共通時間帯とtimezone境界、空Insight、v1 decode／v2 round-trip、SQLite再読込、stale previewを検証します。Firebase SDKと実通信はUnit Testに含めません。
 
 ## UI Test
 

@@ -21,10 +21,11 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - AI Personaへの単一メンションv1。Timeline Composer／Quick CaptureでactiveなAIを選択し、schema v8の`thought_mentions`へ本文と同じtransactionでPersona IDを保存する。Timelineは現在のPersona名を`@名前`で表示し、メンションだけではAI通信を開始しない。
 - メンション付きThoughtから明示的に依頼するAI返信v1。送信前にAI、対象Thought、役割、指示、最終payload、provider／modelを確認し、対象Thoughtだけを送る。成功した140文字以内の応答はAI名義Thought、`repliesTo` Relation、返信先を含む生成来歴としてschema v9へatomic保存する。同一Thoughtへの複数返信を許可し、Detailで返信一覧を確認できる。
 - AI Reply Context v1。対象Thoughtから`repliesTo`だけを遡る直近最大5件を、Human／AI投稿者付き・古い順で送信前previewとpromptへ含める。削除済み本文、Continuation、重複、cycleを除外し、送信直前のContext再取得でThought・Relation・投稿者・対象が変わっていればAIを呼ばない。Mentionだけでは通信しない。AI Replyへの人間返信は相手AIを自動メンションして同じReply chainへatomic保存する。
+- Daily Summary v2。`thought_authors`でHumanを主分析、AI投稿／Replyを「AIとの対話」へ分離し、Human Thoughtだけを既存タグ別に分類する。時刻・共通`TimeOfDay`・`continues`／`repliesTo`を補助情報としてpromptへ渡すが、少数データでは時間帯を断定しない。typedなタグ別／AI対話／任意時間帯Insight、送信前の構造化preview、Thought・時刻・投稿者・Tag・Relationのstale防止を提供する。v1 JSONは新fieldを空配列として読める。
 - 振り返り導線をDaily Summaryへ統一。TimelineのHistory Review入口と画面、旧期間AI要約UIを外し、既存の`review_summaries`はデータ互換のためSQLite内に保持する。
 - Timelineトップバーの独立タグ一覧ボタンを外し、Thoughtに付いたタグは`tag.fill`と名前を組み合わせて文脈内で識別しやすく表示する。
 
-- 端末Calendar／timezoneの1日境界で明示生成するAI Daily Summary v1。月カレンダーで要約済み／Thoughtあり未要約／Thoughtなしと今日を区別し、過去日の日別詳細、送信前Thought／payloadプレビュー、構造化結果の表示と再読込を提供する。
+- 端末Calendar／timezoneの1日境界で明示生成するAI Daily Summary v2。月カレンダーで要約済み／Thoughtあり未要約／Thoughtなしと今日を区別し、過去日の日別詳細、送信前Thought／payloadプレビュー、Human中心の構造化結果の表示と再読込を提供する。
 - SQLite schema v5の`daily_summaries`。Thought原文と分離した1日1件の正式Summaryとして構造化結果と生成メタデータを保存し、AI候補からタグ／Thought／Continuationを自動変更しない。
 - タグチップ、タグ追加、タグ編集ボタンの操作領域を44pt以上へ拡大。
 
@@ -80,12 +81,10 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - `AiTextAppWidget` Extension targetとappへの埋め込み設定。WidgetはSQLite、Repository、Firebase、Thought本文へ依存せず、App Group／entitlement／schema変更を行わない。
 - Timelineから開くローカル分析画面。今日／過去7日／過去30日、活動日数、1活動日平均、30日の日別カレンダー（件数・濃淡・今日の枠線）、曜日別・時間帯別分布、上位5タグ、Continuationを持つThought数を表示。
 - typed分析model、端末Calendarから30日の日／時間帯境界を構築する`LoadThoughtAnalytics`、CRUDから分離したread-only `ThoughtAnalyticsRepository`。
-- AI Daily Summary v1: Calendar日境界、構造化Gemini応答、独立SQLite保存、月間カレンダー、日別詳細、Timeline統合。
+- AI Daily Summary v2: Calendar日境界、Human／AI分離、Humanタグ分類、任意時間帯Insight、構造化Gemini応答、独立SQLite保存、月間カレンダー、日別詳細、Timeline統合。
 - SQLiteの境界CTE＋`COUNT`／`GROUP BY`、タグJOIN集計、activeな期間内親子のRelation集計。原文全件をViewへ取得せず、deleted／期間外ThoughtをSQLで除外する。
 
 ## 未実装
-
-- Daily SummaryがAI投稿も集計対象に含む現仕様を維持している。Human／AIの対象範囲を分けるかは別機能として検討する。
 
 - Release用App Attest providerのFirebase Console登録と実機通信。Debug Providerは実機で実通信とSQLite保存を確認済み。
 - AI分類など要約以外の派生情報、クラウド同期、アカウント、その他の外部連携。

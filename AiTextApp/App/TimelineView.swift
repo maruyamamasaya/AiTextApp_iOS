@@ -938,7 +938,7 @@ private struct AIReplyPreviewView: View {
     }
 }
 
-private struct PersonaIcon: View {
+struct PersonaIcon: View {
     let persona: Persona
     let size: CGFloat
 

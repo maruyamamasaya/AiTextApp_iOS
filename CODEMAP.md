@@ -43,7 +43,7 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 - `ThoughtCore/ThoughtRepository.swift` — CRUD・本文検索・日付範囲repository境界、今日／昨日／直近日数／今週／今月／指定日のReview期間計算、テスト用メモリ実装。
 - `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v9、Persona／投稿者／AI設定・生成来歴／メンション／AI返信Relation、各種query、Continuation／AI返信transaction、旧JSON migration／2世代backup。
 - `ThoughtCore/ReviewSummary.swift` — AI要約model、immutable送信preview、通信／transport／保存protocol、中央provider／model設定、typed service error、対象準備／鮮度検証／生成・保存use case、Mock client。
-- `ThoughtCore/DailySummary.swift` — 構造化model、prompt、preview、準備／生成use case、1日1件のrepository境界。
+- `ThoughtCore/DailySummary.swift` — Human／AI・Humanタグ・時間帯・Relationを分離したv2構造化model、v1互換decode、prompt、stale対応preview、準備／生成use case。
 - `ThoughtCore/ReviewSummaryExporter.swift` — 旧期間要約の互換コード。現在のUIからは利用せず、既存データを壊さないため保持する。
 - `ThoughtCore/ThoughtExporter.swift` — Repository経由のMarkdown／JSON生成。
 - `ThoughtCore/ExternalBackup.swift` — manifest、外部2世代backup、検証、pending Restore／rollback。
