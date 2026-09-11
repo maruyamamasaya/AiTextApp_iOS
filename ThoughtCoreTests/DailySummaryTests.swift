@@ -107,4 +107,29 @@ struct DailySummaryTests {
         #expect(utcPreview.inputs[0].timeOfDay == .lateNight); #expect(tokyoPreview.inputs[0].timeOfDay == .afternoon)
         #expect(utcPreview.request.prompt.contains("[05:30]")); #expect(tokyoPreview.request.prompt.contains("[14:30]"))
     }
+
+    @Test func thoughtTagSuggestionsResolveOnlyValidHumanIndicesWithoutSavingTags() async throws {
+        let start = calendar.startOfDay(for: Date()), repository = MemoryThoughtRepository()
+        let human = Thought(body: "Relation設計を検討", createdAt: start.addingTimeInterval(60)); try repository.create(human)
+        let ai = Persona(displayName: "Architect", kind: .ai); try repository.createPersona(ai)
+        let aiThought = Thought(body: "分離を提案", createdAt: start.addingTimeInterval(120)); try repository.create(aiThought, authorPersonaID: ai.id)
+        let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar)
+        let json = #"{"overview":"概要","themes":[],"existingTagCandidates":[],"newTagCandidates":["設計"],"humanThoughtPatterns":[],"deepDives":[],"concerns":[],"thoughtFlow":"","tagGroups":[],"aiInteractions":[],"timeOfDayInsights":[],"continuationCandidates":[],"carryOvers":[],"thoughtTagSuggestions":[{"thoughtIndex":1,"tagName":" 設計 ","reason":"Relation構造を検討していたため"},{"thoughtIndex":2,"tagName":"AI用","reason":"AIなので無効"},{"thoughtIndex":99,"tagName":"不正","reason":"範囲外"}]}"#
+        let summary = try await GenerateDailySummary(client: MockReviewSummaryClient(text: json), repository: repository)(preview: preview)
+        #expect(summary.content.thoughtTagSuggestions.count == 1)
+        #expect(summary.content.thoughtTagSuggestions.first?.thoughtID == human.id); #expect(summary.content.thoughtTagSuggestions.first?.tagName == "設計")
+        #expect(try repository.fetchTags(for: human.id).isEmpty)
+        #expect(!preview.request.prompt.contains(human.id.uuidString)); #expect(preview.request.prompt.contains("既存の表記を優先"))
+    }
+
+    @Test func suggestedTagIsPersistedOnlyThroughExplicitTagRepositoryAction() async throws {
+        let start = calendar.startOfDay(for: Date()), repository = MemoryThoughtRepository()
+        let thought = Thought(body: "設計", createdAt: start.addingTimeInterval(60)); try repository.create(thought)
+        let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar)
+        let json = #"{"overview":"","themes":[],"existingTagCandidates":[],"newTagCandidates":[],"humanThoughtPatterns":[],"deepDives":[],"concerns":[],"thoughtFlow":"","tagGroups":[],"aiInteractions":[],"timeOfDayInsights":[],"continuationCandidates":[],"carryOvers":[],"thoughtTagSuggestions":[{"thoughtIndex":1,"tagName":"設計","reason":"設計を検討"}]}"#
+        _ = try await GenerateDailySummary(client: MockReviewSummaryClient(text: json), repository: repository)(preview: preview)
+        #expect(try repository.fetchTags(for: thought.id).isEmpty)
+        _ = try repository.addTag(named: "設計", to: thought.id)
+        #expect(try repository.fetchTags(for: thought.id).map(\.name) == ["設計"])
+    }
 }

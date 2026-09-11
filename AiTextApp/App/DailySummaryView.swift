@@ -2,11 +2,12 @@ import SwiftUI
 
 struct DailySummarySections: View {
     let summary: DailySummary
+    @ObservedObject var store: ThoughtStore
     var body: some View {
         Section("概要") { Text(summary.content.overview) }
         valueSection("主なテーマ", summary.content.themes)
         if !summary.content.tagGroups.isEmpty {
-            Section("タグ別") { ForEach(summary.content.tagGroups, id: \.tagName) { group in VStack(alignment: .leading, spacing: 4) { Text("#\(group.tagName)").font(.headline); Text(group.summary); if !group.themes.isEmpty { Text(group.themes.joined(separator: "、")).font(.caption).foregroundStyle(.secondary) }; Text("\(group.thoughtCount)件").font(.caption2).foregroundStyle(.secondary) } } }
+            Section("タグ別（確定タグ）") { ForEach(summary.content.tagGroups, id: \.tagName) { group in VStack(alignment: .leading, spacing: 4) { Text("#\(group.tagName)").font(.headline); Text(group.summary); if !group.themes.isEmpty { Text(group.themes.joined(separator: "、")).font(.caption).foregroundStyle(.secondary) }; Text("\(group.thoughtCount)件").font(.caption2).foregroundStyle(.secondary) } } }
         }
         if !summary.content.aiInteractions.isEmpty {
             Section("AIとの対話") { ForEach(summary.content.aiInteractions, id: \.personaName) { interaction in VStack(alignment: .leading, spacing: 4) { Text(interaction.personaName).font(.headline); Text(interaction.summary); if !interaction.topics.isEmpty { Text(interaction.topics.joined(separator: "、")).font(.caption).foregroundStyle(.secondary) } } } }
@@ -21,7 +22,26 @@ struct DailySummarySections: View {
         valueSection("継続候補", summary.content.continuationCandidates)
         valueSection("明日以降への持ち越し", summary.content.carryOvers)
         if !summary.content.existingTagCandidates.isEmpty || !summary.content.newTagCandidates.isEmpty {
-            Section("タグ候補") { if !summary.content.existingTagCandidates.isEmpty { LabeledContent("既存タグ", value: summary.content.existingTagCandidates.joined(separator: "、")) }; if !summary.content.newTagCandidates.isEmpty { LabeledContent("AIの新規提案", value: summary.content.newTagCandidates.joined(separator: "、")) } }
+            Section("AIタグ候補（1日）") { if !summary.content.existingTagCandidates.isEmpty { LabeledContent("確定タグからの候補", value: summary.content.existingTagCandidates.joined(separator: "、")) }; if !summary.content.newTagCandidates.isEmpty { LabeledContent("新規候補", value: summary.content.newTagCandidates.joined(separator: "、")) } }
+        }
+        if !summary.content.thoughtTagSuggestions.isEmpty {
+            Section("AIタグ候補") {
+                ForEach(Array(summary.content.thoughtTagSuggestions.enumerated()), id: \.offset) { _, suggestion in
+                    if let thoughtID = suggestion.thoughtID, let thought = store.dailySummaryDayThoughts.first(where: { $0.id == thoughtID }) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("#\(suggestion.tagName)").font(.headline)
+                            Text(thought.body)
+                            Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
+                            if isAttached(suggestion.tagName, to: thoughtID) {
+                                Text("追加済み").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            } else {
+                                Button("追加") { store.addTag(named: suggestion.tagName, to: thoughtID) }
+                                    .buttonStyle(.bordered).accessibilityLabel("\(thought.body)に\(suggestion.tagName)タグを追加")
+                            }
+                        }
+                    }
+                }
+            }
         }
         Section("生成情報") {
             LabeledContent("生成日時", value: summary.createdAt.formatted())
@@ -32,6 +52,11 @@ struct DailySummarySections: View {
 
     @ViewBuilder private func valueSection(_ title: String, _ values: [String]) -> some View {
         if !values.isEmpty { Section(title) { ForEach(values, id: \.self) { Text($0) } } }
+    }
+
+    private func isAttached(_ name: String, to thoughtID: UUID) -> Bool {
+        let normalized = ThoughtTag.normalize(name)
+        return (store.tagsByThoughtID[thoughtID] ?? []).contains { $0.normalizedName == normalized }
     }
 }
 
@@ -132,7 +157,7 @@ private struct DailySummaryDetailView: View {
                 LabeledContent("既存タグ", value: store.dailySummaryDayTags.isEmpty ? "なし" : store.dailySummaryDayTags.joined(separator: "、"))
             }
             if let summary = store.dailySummary {
-                DailySummarySections(summary: summary)
+                DailySummarySections(summary: summary, store: store)
             } else {
                 Section {
                     Button("この日をまとめる") { store.prepareDailySummary(for: day) }

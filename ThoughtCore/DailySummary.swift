@@ -21,6 +21,14 @@ public struct DailySummaryTimeInsight: Codable, Equatable, Sendable {
     public init(period: String, insight: String) { self.period = period; self.insight = insight }
 }
 
+public struct DailySummaryThoughtTagSuggestion: Codable, Equatable, Sendable {
+    public let thoughtIndex: Int
+    public let thoughtID: UUID?
+    public let tagName: String
+    public let reason: String
+    public init(thoughtIndex: Int, thoughtID: UUID? = nil, tagName: String, reason: String) { self.thoughtIndex = thoughtIndex; self.thoughtID = thoughtID; self.tagName = tagName; self.reason = reason }
+}
+
 public struct DailySummaryContent: Codable, Equatable, Sendable {
     public let overview: String
     public let themes: [String]
@@ -35,8 +43,9 @@ public struct DailySummaryContent: Codable, Equatable, Sendable {
     public let tagGroups: [DailySummaryTagGroup]
     public let aiInteractions: [DailySummaryAIInteraction]
     public let timeOfDayInsights: [DailySummaryTimeInsight]
+    public let thoughtTagSuggestions: [DailySummaryThoughtTagSuggestion]
 
-    public init(overview: String, themes: [String], existingTagCandidates: [String], newTagCandidates: [String], thoughtPatterns: [String], deepDives: [String], concerns: [String], thoughtFlow: String, continuationCandidates: [String], carryOvers: [String], tagGroups: [DailySummaryTagGroup] = [], aiInteractions: [DailySummaryAIInteraction] = [], timeOfDayInsights: [DailySummaryTimeInsight] = []) {
+    public init(overview: String, themes: [String], existingTagCandidates: [String], newTagCandidates: [String], thoughtPatterns: [String], deepDives: [String], concerns: [String], thoughtFlow: String, continuationCandidates: [String], carryOvers: [String], tagGroups: [DailySummaryTagGroup] = [], aiInteractions: [DailySummaryAIInteraction] = [], timeOfDayInsights: [DailySummaryTimeInsight] = [], thoughtTagSuggestions: [DailySummaryThoughtTagSuggestion] = []) {
         self.overview = overview
         self.themes = themes
         self.existingTagCandidates = existingTagCandidates
@@ -47,11 +56,11 @@ public struct DailySummaryContent: Codable, Equatable, Sendable {
         self.thoughtFlow = thoughtFlow
         self.continuationCandidates = continuationCandidates
         self.carryOvers = carryOvers
-        self.tagGroups = tagGroups; self.aiInteractions = aiInteractions; self.timeOfDayInsights = timeOfDayInsights
+        self.tagGroups = tagGroups; self.aiInteractions = aiInteractions; self.timeOfDayInsights = timeOfDayInsights; self.thoughtTagSuggestions = thoughtTagSuggestions
     }
 
 
-    private enum CodingKeys: String, CodingKey { case overview, themes, existingTagCandidates, newTagCandidates, thoughtPatterns, humanThoughtPatterns, deepDives, concerns, thoughtFlow, continuationCandidates, carryOvers, tagGroups, aiInteractions, timeOfDayInsights }
+    private enum CodingKeys: String, CodingKey { case overview, themes, existingTagCandidates, newTagCandidates, thoughtPatterns, humanThoughtPatterns, deepDives, concerns, thoughtFlow, continuationCandidates, carryOvers, tagGroups, aiInteractions, timeOfDayInsights, thoughtTagSuggestions }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         overview = try values.decode(String.self, forKey: .overview); themes = try values.decodeIfPresent([String].self, forKey: .themes) ?? []
@@ -61,10 +70,11 @@ public struct DailySummaryContent: Codable, Equatable, Sendable {
         deepDives = try values.decodeIfPresent([String].self, forKey: .deepDives) ?? []; concerns = try values.decodeIfPresent([String].self, forKey: .concerns) ?? []; thoughtFlow = try values.decodeIfPresent(String.self, forKey: .thoughtFlow) ?? ""
         continuationCandidates = try values.decodeIfPresent([String].self, forKey: .continuationCandidates) ?? []; carryOvers = try values.decodeIfPresent([String].self, forKey: .carryOvers) ?? []
         tagGroups = try values.decodeIfPresent([DailySummaryTagGroup].self, forKey: .tagGroups) ?? []; aiInteractions = try values.decodeIfPresent([DailySummaryAIInteraction].self, forKey: .aiInteractions) ?? []; timeOfDayInsights = try values.decodeIfPresent([DailySummaryTimeInsight].self, forKey: .timeOfDayInsights) ?? []
+        thoughtTagSuggestions = try values.decodeIfPresent([DailySummaryThoughtTagSuggestion].self, forKey: .thoughtTagSuggestions) ?? []
     }
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(overview, forKey: .overview); try values.encode(themes, forKey: .themes); try values.encode(existingTagCandidates, forKey: .existingTagCandidates); try values.encode(newTagCandidates, forKey: .newTagCandidates); try values.encode(thoughtPatterns, forKey: .humanThoughtPatterns); try values.encode(deepDives, forKey: .deepDives); try values.encode(concerns, forKey: .concerns); try values.encode(thoughtFlow, forKey: .thoughtFlow); try values.encode(continuationCandidates, forKey: .continuationCandidates); try values.encode(carryOvers, forKey: .carryOvers); try values.encode(tagGroups, forKey: .tagGroups); try values.encode(aiInteractions, forKey: .aiInteractions); try values.encode(timeOfDayInsights, forKey: .timeOfDayInsights)
+        try values.encode(overview, forKey: .overview); try values.encode(themes, forKey: .themes); try values.encode(existingTagCandidates, forKey: .existingTagCandidates); try values.encode(newTagCandidates, forKey: .newTagCandidates); try values.encode(thoughtPatterns, forKey: .humanThoughtPatterns); try values.encode(deepDives, forKey: .deepDives); try values.encode(concerns, forKey: .concerns); try values.encode(thoughtFlow, forKey: .thoughtFlow); try values.encode(continuationCandidates, forKey: .continuationCandidates); try values.encode(carryOvers, forKey: .carryOvers); try values.encode(tagGroups, forKey: .tagGroups); try values.encode(aiInteractions, forKey: .aiInteractions); try values.encode(timeOfDayInsights, forKey: .timeOfDayInsights); try values.encode(thoughtTagSuggestions, forKey: .thoughtTagSuggestions)
     }
 }
 
@@ -132,9 +142,10 @@ public enum DailySummaryPrompt {
         以下は利用者が明示的に選択した1日分のThoughtです。Human Thoughtを振り返りの主データとし、AI Thought／AI Replyは「AIとの対話」だけで補助的に扱ってください。AIの発言をHuman本人の考えとして扱わないでください。
         Human Thoughtにない内容を補完せず、診断的表現、性格・生活習慣の断定、少数データからの傾向断定を避けてください。
         タグ別分析はHuman Thoughtに実際に付与済みのタグだけを事実として使ってください。タグなしThoughtへ既存タグを付けたことにせず、AIタグ候補を既存タグとして扱わず、自動変更を指示しないでください。
+        Thought単位のAIタグ候補はthoughtTagSuggestionsだけへ提案し、同じSummaryの概要・テーマ・タグ別分析では確定情報として再利用しないでください。thoughtIndexは下記の連番を使い、Human Thoughtだけを対象にしてください。不正な連番やUUIDは出力しないでください。意味的に近い既存タグがある場合は既存の表記を優先しますが、同義だと断定しないでください。
         時間帯情報は提供しますが、明確な意味がある場合だけ分析してください。投稿数が少ない、関連が弱い、偶然と考えられる場合は言及せずtimeOfDayInsightsを空配列にしてください。時間帯から性格や生活習慣を断定しないでください。
         JSON以外を出力せず、次のキーを必ず含めてください。
-        {"overview":"", "themes":[], "humanThoughtPatterns":[], "deepDives":[], "concerns":[], "thoughtFlow":"", "tagGroups":[{"tagName":"","summary":"","themes":[],"thoughtCount":0}], "aiInteractions":[{"personaName":"","topics":[],"summary":""}], "timeOfDayInsights":[{"period":"","insight":""}], "continuationCandidates":[], "carryOvers":[], "existingTagCandidates":[], "newTagCandidates":[]}
+        {"overview":"", "themes":[], "humanThoughtPatterns":[], "deepDives":[], "concerns":[], "thoughtFlow":"", "tagGroups":[{"tagName":"","summary":"","themes":[],"thoughtCount":0}], "aiInteractions":[{"personaName":"","topics":[],"summary":""}], "timeOfDayInsights":[{"period":"","insight":""}], "continuationCandidates":[], "carryOvers":[], "existingTagCandidates":[], "newTagCandidates":[], "thoughtTagSuggestions":[{"thoughtIndex":1,"tagName":"","reason":""}]}
 
         既存タグ: \(existingTags.joined(separator: ", "))
         Thought（古い順、内部UUIDなし）:
@@ -188,6 +199,12 @@ public struct GenerateDailySummary: Sendable {
         let existing = Set(preview.existingTags)
         let humanTagCounts = Dictionary(grouping: preview.inputs.filter { $0.author.kind == .human }.flatMap { input in input.tags.map { ($0.name, input.thought.id) } }, by: { $0.0 }).mapValues { Set($0.map { $0.1 }).count }
         let aiNames = Set(preview.inputs.filter { $0.author.kind == .ai }.map { $0.author.displayName })
+        let resolvedSuggestions = content.thoughtTagSuggestions.compactMap { suggestion -> DailySummaryThoughtTagSuggestion? in
+            let offset = suggestion.thoughtIndex - 1
+            guard preview.inputs.indices.contains(offset), preview.inputs[offset].author.kind == .human,
+                  let name = ThoughtTag.displayName(from: suggestion.tagName), !suggestion.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return DailySummaryThoughtTagSuggestion(thoughtIndex: suggestion.thoughtIndex, thoughtID: preview.inputs[offset].thought.id, tagName: name, reason: suggestion.reason.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
         let sanitized = DailySummaryContent(
             overview: content.overview,
             themes: content.themes,
@@ -201,7 +218,8 @@ public struct GenerateDailySummary: Sendable {
             carryOvers: content.carryOvers,
             tagGroups: content.tagGroups.compactMap { group in humanTagCounts[group.tagName].map { DailySummaryTagGroup(tagName: group.tagName, summary: group.summary, themes: group.themes, thoughtCount: $0) } },
             aiInteractions: content.aiInteractions.filter { aiNames.contains($0.personaName) },
-            timeOfDayInsights: content.timeOfDayInsights
+            timeOfDayInsights: content.timeOfDayInsights,
+            thoughtTagSuggestions: resolvedSuggestions
         )
         let summary = DailySummary(dayStart: preview.interval.start, dayEnd: preview.interval.end, content: sanitized, createdAt: now, provider: response.provider, model: response.model, promptVersion: DailySummaryPrompt.version, thoughtCount: preview.thoughts.count)
         try repository.saveDailySummary(summary)

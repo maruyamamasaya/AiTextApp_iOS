@@ -10,7 +10,7 @@ UI非依存のドメイン／永続化／ExportはSwift PackageとしてLinux/ma
 swift test
 ```
 
-入力境界、SQLite、Persona、AI Reply／Context、タグ、ローカル分析、backup、Export、Historyに加え、Daily Summary v2のHuman／AI分類、Humanタグ限定、複数AI、Relation、共通時間帯とtimezone境界、空Insight、v1 decode／v2 round-trip、SQLite再読込、stale previewを検証します。Firebase SDKと実通信はUnit Testに含めません。
+入力境界、SQLite、Persona、AI Reply／Context、タグ、ローカル分析、backup、Export、Historyに加え、Daily Summary v2のHuman／AI分類、Humanタグ限定、AIタグ候補のHuman index解決／不正index除外／生成時非保存／明示追加、複数AI、Relation、共通時間帯とtimezone境界、空Insight、v1 decode／v2 round-trip、SQLite再読込、stale previewを検証します。
 
 ## UI Test
 

@@ -36,6 +36,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `ThoughtAnalyticsView`: 直近30日の基本サマリー、日別／曜日別／時間帯別分布、上位タグ、Continuation件数を標準SwiftUIの縦Sectionと簡易バーで表示する完全ローカル画面。
 - `DailySummaryCalendarView`: 月単位で要約済み／Thoughtあり未要約／Thoughtなしを表示し、日別詳細と明示生成の送信前プレビューへ遷移する。
 - `DailySummaryContent` / `PrepareDailySummary`: Human Thoughtを主データ、AI投稿を対話補助として分離し、Humanタグ、共通時間帯、日内Relationをtyped previewへ固定する。v1保存JSONは追加fieldを空配列として後方互換decodeする。
+- `DailySummaryThoughtTagSuggestion`: AI応答のprompt連番をPreview内のHuman Thought IDへ検証付きで解決する提案モデル。生成時はTagを変更せず、Detailの明示的な追加操作だけが既存Tag repositoryを呼ぶ。
 - `ReviewSummaryClient`: MockとFirebase AI Logic clientを差し替える通信境界。通常起動はFirebase、UIテスト／CoreテストはMockを使用。
 - `ReviewSummaryGeneratingTransport`: Firebase SDK importをapp layerへ閉じ込め、request変換、応答変換、空応答、typed errorを外部通信なしでテストする境界。
 - `ThoughtDetailView`: 現在Thought、縦型History、削除済みplaceholder、「続きを書く」Composerを表示。

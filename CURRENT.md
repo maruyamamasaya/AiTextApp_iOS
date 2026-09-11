@@ -22,6 +22,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - メンション付きThoughtから明示的に依頼するAI返信v1。送信前にAI、対象Thought、役割、指示、最終payload、provider／modelを確認し、対象Thoughtだけを送る。成功した140文字以内の応答はAI名義Thought、`repliesTo` Relation、返信先を含む生成来歴としてschema v9へatomic保存する。同一Thoughtへの複数返信を許可し、Detailで返信一覧を確認できる。
 - AI Reply Context v1。対象Thoughtから`repliesTo`だけを遡る直近最大5件を、Human／AI投稿者付き・古い順で送信前previewとpromptへ含める。削除済み本文、Continuation、重複、cycleを除外し、送信直前のContext再取得でThought・Relation・投稿者・対象が変わっていればAIを呼ばない。Mentionだけでは通信しない。AI Replyへの人間返信は相手AIを自動メンションして同じReply chainへatomic保存する。
 - Daily Summary v2。`thought_authors`でHumanを主分析、AI投稿／Replyを「AIとの対話」へ分離し、Human Thoughtだけを既存タグ別に分類する。時刻・共通`TimeOfDay`・`continues`／`repliesTo`を補助情報としてpromptへ渡すが、少数データでは時間帯を断定しない。typedなタグ別／AI対話／任意時間帯Insight、送信前の構造化preview、Thought・時刻・投稿者・Tag・Relationのstale防止を提供する。v1 JSONは新fieldを空配列として読める。
+- AI Tag Suggestions。Daily SummaryがHuman Thoughtのprompt連番単位でタグ名・理由を提案し、生成後に有効なHuman indexだけを内部Thought IDへ解決する。確定タグ分析とは分離し、不正indexとAI Thought候補を除外する。Detailの「追加」を押した場合だけ既存`ThoughtTagRepository`の独立transactionで確定タグにする。
 - 振り返り導線をDaily Summaryへ統一。TimelineのHistory Review入口と画面、旧期間AI要約UIを外し、既存の`review_summaries`はデータ互換のためSQLite内に保持する。
 - Timelineトップバーの独立タグ一覧ボタンを外し、Thoughtに付いたタグは`tag.fill`と名前を組み合わせて文脈内で識別しやすく表示する。
 
