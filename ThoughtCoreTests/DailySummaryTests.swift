@@ -56,7 +56,7 @@ struct DailySummaryTests {
         _ = try await GenerateDailySummary(client: MockReviewSummaryClient(text: json), repository: first)(preview: preview)
         let reopened = try SQLiteThoughtRepository(databaseURL: url)
         #expect(try reopened.fetchDailySummary(dayStart: start)?.content.overview == "保存済み")
-        #expect(SQLiteThoughtRepository.schemaVersion == 14)
+        #expect(SQLiteThoughtRepository.schemaVersion == 16)
     }
 
     @Test func v1ContentDecodesWithV2FieldsDefaulted() throws {

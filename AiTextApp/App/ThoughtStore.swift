@@ -123,7 +123,7 @@ final class ThoughtStore: ObservableObject {
                 backupManager = ExternalBackupManager(repository: sqliteRepository)
             }
         } catch {
-            errorMessage = "保存したThoughtを読み込めませんでした。"
+            errorMessage = "保存データの整合性確認に失敗しました。アプリを削除せず、バックアップから復元してください。"
         }
         externalBackupManager = backupManager
         refreshTags(for: thoughts.map(\.id))
@@ -134,12 +134,14 @@ final class ThoughtStore: ObservableObject {
         if let startupError { errorMessage = startupError }
     }
 
-    func updateDefaultHumanPersona(displayName: String, iconData: Data?) -> Bool {
+    func updateDefaultHumanPersona(displayName: String, handle: String, iconData: Data?) -> Bool {
         guard let personaRepository else { errorMessage = "プロフィールを保存できませんでした。"; return false }
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 40 else { errorMessage = "表示名は1〜40文字で入力してください。"; return false }
+        guard let normalizedHandle = ActorHandle.normalize(handle) else { errorMessage = "@IDは半角英数字と_の3〜30文字で入力してください。"; return false }
         var persona = defaultHumanPersona
         persona.displayName = name
+        persona.handle = normalizedHandle
         persona.iconData = iconData
         persona.iconMIMEType = iconData == nil ? nil : "image/jpeg"
         persona.updatedAt = Date()
@@ -155,22 +157,24 @@ final class ThoughtStore: ObservableObject {
         }
     }
 
-    func createAIPersona(displayName: String, iconData: Data?, role: String, instructions: String, externalBrainEnabled: Bool = false, agentPath: String = "", maxRetrievedChunks: Int = 5) -> Bool {
+    func createAIPersona(displayName: String, handle: String, iconData: Data?, role: String, instructions: String, externalBrainEnabled: Bool = false, agentPath: String = "", maxRetrievedChunks: Int = 5) -> Bool {
         guard let aiPersonaRepository else { errorMessage = "AI Personaを保存できませんでした。"; return false }
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let role = role.trimmingCharacters(in: .whitespacesAndNewlines), instructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 40, !role.isEmpty, !instructions.isEmpty else { errorMessage = "表示名・役割・指示を入力してください。"; return false }
-        let persona = Persona(displayName: name, kind: .ai, iconData: iconData, iconMIMEType: iconData == nil ? nil : "image/jpeg")
+        guard let normalizedHandle = ActorHandle.normalize(handle) else { errorMessage = "@IDは半角英数字と_の3〜30文字で入力してください。"; return false }
+        let persona = Persona(displayName: name, handle: normalizedHandle, kind: .ai, iconData: iconData, iconMIMEType: iconData == nil ? nil : "image/jpeg")
         do { try aiPersonaRepository.createAIPersona(persona, configuration: AIPersonaConfiguration(personaID: persona.id, role: role, instructions: instructions)); externalBrainManager.savePersona(.init(personaID: persona.id, enabled: externalBrainEnabled, agentPath: agentPath, maxRetrievedChunks: maxRetrievedChunks)); loadPersonas(); loadAIConfigurations(); return true }
         catch { errorMessage = "AI Personaを保存できませんでした。"; return false }
     }
 
-    func updateAIPersona(_ original: Persona, displayName: String, iconData: Data?, role: String, instructions: String) -> Bool {
+    func updateAIPersona(_ original: Persona, displayName: String, handle: String, iconData: Data?, role: String, instructions: String) -> Bool {
         guard original.kind == .ai, let personaRepository, let aiPersonaRepository else { return false }
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let role = role.trimmingCharacters(in: .whitespacesAndNewlines), instructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 40, !role.isEmpty, !instructions.isEmpty else { errorMessage = "表示名・役割・指示を入力してください。"; return false }
-        var persona = original; persona.displayName = name; persona.iconData = iconData; persona.iconMIMEType = iconData == nil ? nil : "image/jpeg"; persona.updatedAt = Date()
+        guard let normalizedHandle = ActorHandle.normalize(handle) else { errorMessage = "@IDは半角英数字と_の3〜30文字で入力してください。"; return false }
+        var persona = original; persona.displayName = name; persona.handle = normalizedHandle; persona.iconData = iconData; persona.iconMIMEType = iconData == nil ? nil : "image/jpeg"; persona.updatedAt = Date()
         do { try personaRepository.updatePersona(persona); try aiPersonaRepository.saveAIConfiguration(AIPersonaConfiguration(personaID: persona.id, role: role, instructions: instructions)); loadPersonas(); loadAIConfigurations(); refreshAuthors(for: thoughts.map(\.id)); return true }
         catch { errorMessage = "AI Personaを保存できませんでした。"; return false }
     }
@@ -186,6 +190,30 @@ final class ThoughtStore: ObservableObject {
         catch { errorMessage = "Personaを読み込めませんでした。" }
     }
     private func loadAIConfigurations() { aiConfigurations = (try? aiPersonaRepository?.fetchAIConfigurations()) ?? [:] }
+
+    func thoughts(authoredBy personaID: UUID) -> [Thought] {
+        thoughts.filter { personasByThoughtID[$0.id]?.id == personaID }
+    }
+
+    func prepareAutonomousAIPost(persona: Persona) {
+        let ownPosts = thoughts(authoredBy: persona.id).prefix(5)
+        let recentTimeline = thoughts.prefix(8)
+        let ownText = ownPosts.isEmpty ? "（過去の発言なし）" : ownPosts.map { "- \($0.body)" }.joined(separator: "\n")
+        let timelineText = recentTimeline.isEmpty ? "（最近の投稿なし）" : recentTimeline.map { thought in
+            let actor = personasByThoughtID[thought.id]?.displayName ?? "不明"
+            return "- [\(actor)] \(thought.body)"
+        }.joined(separator: "\n")
+        let request = """
+        テーマは指定しません。あなた自身のRoleとPersonalityを軸に、過去の発言と最近のタイムラインを参考にして、今この場で自然な1件を自由に考えてください。毎回知識の説明に偏らず、フリートーク、気づき、考察、質問、軽い話題も選択肢に含め、過去の発言の単純な繰り返しは避けてください。
+
+        あなたの最近の発言:
+        \(ownText)
+
+        最近のタイムライン:
+        \(timelineText)
+        """
+        prepareAIPost(persona: persona, userRequest: request)
+    }
 
     func prepareAIPost(persona: Persona, userRequest: String) {
         guard let configuration = aiConfigurations[persona.id] else { aiPostError = AIPostError.missingConfiguration.localizedDescription; return }
@@ -359,6 +387,30 @@ final class ThoughtStore: ObservableObject {
         draft = ThoughtDraft.limited(value)
     }
 
+    var mentionSuggestions: [Persona] {
+        guard let query = trailingMentionQuery(in: draft) else { return [] }
+        return personas.filter { query.isEmpty || $0.handle.hasPrefix(query.lowercased()) }.prefix(6).map { $0 }
+    }
+
+    func insertMention(_ persona: Persona) {
+        guard let range = draft.range(of: "@[A-Za-z0-9_]*$", options: .regularExpression) else { return }
+        updateDraft(draft.replacingCharacters(in: range, with: "@\(persona.handle) "))
+    }
+
+    private func trailingMentionQuery(in body: String) -> String? {
+        guard let range = body.range(of: "@[A-Za-z0-9_]*$", options: .regularExpression) else { return nil }
+        return String(body[range].dropFirst())
+    }
+
+    private func resolvedMentions(in thought: Thought) -> [ThoughtMention] {
+        let text = thought.body as NSString
+        return personas.flatMap { persona -> [ThoughtMention] in
+            let pattern = "(?i)(?<![A-Za-z0-9_])@\(NSRegularExpression.escapedPattern(for: persona.handle))(?![A-Za-z0-9_])"
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+            return regex.matches(in: thought.body, range: NSRange(location: 0, length: text.length)).map { .init(thoughtID: thought.id, personaID: persona.id, handleSnapshot: persona.handle, rangeLocation: $0.range.location, rangeLength: $0.range.length, createdAt: thought.createdAt) }
+        }.sorted { $0.rangeLocation < $1.rangeLocation }
+    }
+
     var canPostContinuation: Bool {
         ThoughtDraft.validBody(from: continuationDraft) != nil
     }
@@ -435,13 +487,22 @@ final class ThoughtStore: ObservableObject {
     @discardableResult func postHumanReply(to target: Thought) -> Thought? {
         guard let humanReplyRepository, let thoughtRepository else { errorMessage = "返信を保存できませんでした。"; return nil }
         let targetAuthor = personasByThoughtID[target.id]
-        let mentionID = targetAuthor?.kind == .ai && targetAuthor?.deletedAt == nil ? targetAuthor?.id : nil
+        let mentionID = targetAuthor?.deletedAt == nil ? targetAuthor?.id : nil
         do {
             guard let reply = try humanReplyRepository.createHumanReply(body: humanReplyDraft, targetThoughtID: target.id, mentionedPersonaID: mentionID, now: Date(), thoughtID: UUID(), relationID: UUID()) else { return nil }
             timeline = try ThoughtTimeline(repository: thoughtRepository); thoughts = timeline?.thoughts ?? []; humanReplyDraft = ""
             refreshAuthors(for: thoughts.map(\.id)); refreshMentions(for: thoughts.map(\.id)); refreshReplyRelations(for: thoughts.map(\.id)); loadAIReplies(to: target.id)
             return reply
-        } catch { errorMessage = "返信を保存できませんでした。入力内容は残しています。"; return nil }
+        } catch {
+#if DEBUG
+            let diagnostic = String(reflecting: error)
+            print("Human reply persistence failed: \(diagnostic)")
+            errorMessage = "返信を保存できませんでした。入力内容は残しています。\nDebug: \(diagnostic)"
+#else
+            errorMessage = "返信を保存できませんでした。入力内容は残しています。"
+#endif
+            return nil
+        }
     }
 
     func loadHistory(for thoughtID: UUID) {
@@ -456,6 +517,7 @@ final class ThoughtStore: ObservableObject {
             ).entries(containing: thoughtID)
             historyCurrentID = thoughtID
             refreshTags(for: history.map(\.id))
+            refreshAuthors(for: history.map(\.id))
         } catch {
             errorMessage = "Thought Historyを読み込めませんでした。"
         }
@@ -581,9 +643,15 @@ final class ThoughtStore: ObservableObject {
         isPosting = true
         defer { isPosting = false }
         do {
-            if let persona {
+            let validBody = ThoughtDraft.validBody(from: body)
+            if persona != nil || (validBody.map { !resolvedMentions(in: Thought(body: $0)).isEmpty } ?? false) {
                 guard let mentionRepository, let validBody = ThoughtDraft.validBody(from: body) else { return false }
-                try mentionRepository.create(Thought(body: validBody), authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: persona.id)
+                let thought = Thought(body: validBody)
+                var mentions = resolvedMentions(in: thought)
+                if let persona, !mentions.contains(where: { $0.personaID == persona.id }) {
+                    mentions.append(.init(thoughtID: thought.id, personaID: persona.id, handleSnapshot: persona.handle, rangeLocation: 0, rangeLength: 0, createdAt: thought.createdAt))
+                }
+                try mentionRepository.create(thought, authorPersonaID: Persona.defaultHumanID, mentions: mentions)
                 timeline = try ThoughtTimeline(repository: thoughtRepository)
             } else {
                 guard try timeline.post(body) != nil else { return false }

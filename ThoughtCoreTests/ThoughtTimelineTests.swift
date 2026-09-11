@@ -287,7 +287,7 @@ struct ThoughtTagTests {
         try fixture.writeV3Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 14)
+        #expect(SQLiteThoughtRepository.schemaVersion == 16)
         #expect(try repository.fetchByID(original.id) == original)
         guard case .added(let tag) = try repository.addTag(named: "移行後", to: original.id) else { return }
         #expect(try repository.fetchTags(for: original.id) == [tag])
@@ -427,7 +427,7 @@ struct ThoughtHistoryTests {
         try fixture.writeV1Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 14)
+        #expect(SQLiteThoughtRepository.schemaVersion == 16)
         #expect(try repository.fetchAll() == [original])
         #expect(try repository.fetchBySourceThoughtID(original.id).isEmpty)
     }
@@ -1076,7 +1076,7 @@ struct ExternalBackupTests {
         #expect(analytics.dailyCounts.first?.count == 1)
         #expect(analytics.dailyCounts.last?.count == 2)
         #expect(try repository.fetchAll() == before)
-        #expect(SQLiteThoughtRepository.schemaVersion == 14)
+        #expect(SQLiteThoughtRepository.schemaVersion == 16)
     }
 
     @Test func emptyLocalAnalyticsReturnsZeroFilledDistributions() throws {
@@ -1203,6 +1203,44 @@ struct ExternalBackupTests {
 
 @Suite("Personas", .serialized)
 struct PersonaTests {
+    @Test func handlesNormalizeValidateRemainUniqueAndKeepActorIdentity() throws {
+        #expect(ActorHandle.normalize("Masaya_01") == "masaya_01")
+        #expect(ActorHandle.normalize("ab") == nil)
+        #expect(ActorHandle.normalize("日本語") == nil)
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        var human = try repository.fetchDefaultHumanPersona()
+        let humanID = human.id
+        human.handle = ActorHandle.normalize("Masaya")!
+        try repository.updatePersona(human)
+        let ai = Persona(displayName: "Developer AI", handle: "dev_ai", kind: .ai)
+        try repository.createAIPersona(ai, configuration: .init(personaID: ai.id, role: "開発", instructions: "短く"))
+        #expect(try repository.fetchDefaultHumanPersona().handle == "masaya")
+        #expect(try repository.fetchDefaultHumanPersona().id == humanID)
+        #expect(try repository.fetchPersonas(includeInactive: false).contains { $0.id == ai.id && $0.handle == "dev_ai" })
+        #expect(throws: SQLiteThoughtRepositoryError.self) {
+            try repository.createPersona(Persona(displayName: "Duplicate", handle: "MASAYA", kind: .human))
+        }
+    }
+
+    @Test func humanAndAIMentionsPersistSnapshotsRangesAndSurviveHandleChange() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        var human = try repository.fetchDefaultHumanPersona(); human.handle = "masaya"; try repository.updatePersona(human)
+        var ai = Persona(displayName: "Developer AI", handle: "dev_ai", kind: .ai)
+        try repository.createAIPersona(ai, configuration: .init(personaID: ai.id, role: "開発", instructions: "短く"))
+        let thought = Thought(body: "@masaya @dev_ai 確認")
+        try repository.create(thought, authorPersonaID: human.id, mentions: [
+            .init(thoughtID: thought.id, personaID: human.id, handleSnapshot: "masaya", rangeLocation: 0, rangeLength: 7),
+            .init(thoughtID: thought.id, personaID: ai.id, handleSnapshot: "dev_ai", rangeLocation: 8, rangeLength: 7)
+        ])
+        ai.handle = "review_ai"; try repository.updatePersona(ai)
+        let mentions = try repository.fetchMentions(for: [thought.id])[thought.id] ?? []
+        #expect(mentions.map(\.personaID) == [human.id, ai.id])
+        #expect(mentions.map(\.handleSnapshot) == ["masaya", "dev_ai"])
+        #expect(try repository.fetchMentionedPersonas(for: [thought.id])[thought.id] != nil)
+    }
+
     @Test func existingAndNewThoughtsUseDefaultHumanAndProfilePersists() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
@@ -1291,6 +1329,41 @@ struct PersonaTests {
 
         let reopened = try fixture.repository()
         #expect(try reopened.fetchAIPostGeneration(for: thoughtID)?.kind == .standalone)
+    }
+
+    @Test func repairsLegacyRelationConstraintEvenWhenDatabaseClaimsCurrentSchema() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let parent = Thought(body: "既存Thought", createdAt: Date(timeIntervalSince1970: 100))
+        do {
+            let repository = try fixture.repository()
+            try repository.create(parent)
+            _ = try repository.createContinuation(body: "既存Continuation", parentThoughtID: parent.id, now: Date(timeIntervalSince1970: 200))
+        }
+        try fixture.replaceRelationTableWithLegacyConstraintAndMarkV14()
+
+        let repaired = try fixture.repository()
+        let reply = try repaired.createHumanReply(
+            body: "修復後の返信",
+            targetThoughtID: parent.id,
+            mentionedPersonaID: nil,
+            now: Date(timeIntervalSince1970: 300),
+            thoughtID: UUID(),
+            relationID: UUID()
+        )
+
+        #expect(reply?.body == "修復後の返信")
+        #expect(try repaired.fetchAIReplies(to: parent.id).map(\.body).contains("修復後の返信"))
+        #expect(try fixture.sqliteUserVersion() == SQLiteThoughtRepository.schemaVersion)
+    }
+
+    @Test func detectsMissingCriticalTableEvenWhenDatabaseClaimsCurrentSchema() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        do { _ = try fixture.repository() }
+        try fixture.dropTagsTableAndMarkCurrent()
+
+        #expect(throws: SQLiteThoughtRepositoryError.self) {
+            _ = try fixture.repository()
+        }
     }
 
     @Test func overlongAIResponseIsNeverPosted() async throws {
@@ -1558,6 +1631,52 @@ private struct Fixture {
             ALTER TABLE knowledge_documents DROP COLUMN retrieval_count;
             ALTER TABLE knowledge_documents DROP COLUMN last_retrieved_at;
             PRAGMA user_version = 13;
+            """
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
+        }
+    }
+
+    func replaceRelationTableWithLegacyConstraintAndMarkV14() throws {
+        var database: OpaquePointer?
+        guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
+            throw SQLiteThoughtRepositoryError.open("test setup")
+        }
+        defer { sqlite3_close(database) }
+        let sql = """
+            PRAGMA foreign_keys = OFF;
+            ALTER TABLE thought_relations RENAME TO thought_relations_current;
+            CREATE TABLE thought_relations (
+                id TEXT PRIMARY KEY NOT NULL,
+                source_thought_id TEXT NOT NULL REFERENCES thoughts(id),
+                target_thought_id TEXT NOT NULL REFERENCES thoughts(id),
+                relation_type TEXT NOT NULL CHECK (relation_type = 'continues'),
+                created_at REAL NOT NULL,
+                CHECK (source_thought_id <> target_thought_id),
+                UNIQUE (source_thought_id, target_thought_id, relation_type)
+            );
+            INSERT INTO thought_relations SELECT * FROM thought_relations_current;
+            DROP TABLE thought_relations_current;
+            CREATE INDEX thought_relations_source_idx ON thought_relations(source_thought_id);
+            CREATE INDEX thought_relations_target_idx ON thought_relations(target_thought_id);
+            PRAGMA user_version = 14;
+            """
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
+        }
+    }
+
+    func dropTagsTableAndMarkCurrent() throws {
+        var database: OpaquePointer?
+        guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
+            throw SQLiteThoughtRepositoryError.open("test setup")
+        }
+        defer { sqlite3_close(database) }
+        let sql = """
+            PRAGMA foreign_keys = OFF;
+            DROP TABLE thought_tags;
+            DROP TABLE tags;
+            PRAGMA user_version = 15;
             """
         guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
             throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))

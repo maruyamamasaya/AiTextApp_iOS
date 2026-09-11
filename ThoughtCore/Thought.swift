@@ -28,11 +28,31 @@ public enum PersonaKind: String, Codable, Sendable {
     case ai
 }
 
+/// Timeline actors share one durable identity regardless of whether they are human or AI.
+public typealias ActorType = PersonaKind
+public typealias Actor = Persona
+
+public enum ActorHandle {
+    public static let minimumLength = 3
+    public static let maximumLength = 30
+
+    public static func normalize(_ value: String) -> String? {
+        let normalized = value.lowercased()
+        guard (minimumLength...maximumLength).contains(normalized.count),
+              normalized.unicodeScalars.allSatisfy({
+                  ($0.value >= 97 && $0.value <= 122) ||
+                  ($0.value >= 48 && $0.value <= 57) || $0.value == 95
+              }) else { return nil }
+        return normalized
+    }
+}
+
 public struct Persona: Identifiable, Equatable, Sendable {
     public static let defaultHumanID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     public let id: UUID
     public var displayName: String
+    public var handle: String
     public let kind: PersonaKind
     public var iconData: Data?
     public var iconMIMEType: String?
@@ -40,9 +60,11 @@ public struct Persona: Identifiable, Equatable, Sendable {
     public var updatedAt: Date
     public var deletedAt: Date?
 
-    public init(id: UUID = UUID(), displayName: String, kind: PersonaKind, iconData: Data? = nil, iconMIMEType: String? = nil, createdAt: Date = Date(), updatedAt: Date? = nil, deletedAt: Date? = nil) {
+    public init(id: UUID = UUID(), displayName: String, handle: String? = nil, kind: PersonaKind, iconData: Data? = nil, iconMIMEType: String? = nil, createdAt: Date = Date(), updatedAt: Date? = nil, deletedAt: Date? = nil) {
         self.id = id
         self.displayName = displayName
+        let fallback = id == Self.defaultHumanID ? "myself" : "\(kind.rawValue)_\(id.uuidString.replacingOccurrences(of: "-", with: "").prefix(8).lowercased())"
+        self.handle = ActorHandle.normalize(handle ?? fallback) ?? (handle ?? fallback).lowercased()
         self.kind = kind
         self.iconData = iconData
         self.iconMIMEType = iconMIMEType
@@ -69,13 +91,18 @@ public protocol AuthoredThoughtRepository: Sendable {
 public struct ThoughtMention: Equatable, Sendable {
     public let thoughtID: UUID
     public let personaID: UUID
+    public let handleSnapshot: String
+    public let rangeLocation: Int
+    public let rangeLength: Int
     public let createdAt: Date
-    public init(thoughtID: UUID, personaID: UUID, createdAt: Date = Date()) { self.thoughtID = thoughtID; self.personaID = personaID; self.createdAt = createdAt }
+    public init(thoughtID: UUID, personaID: UUID, handleSnapshot: String, rangeLocation: Int, rangeLength: Int, createdAt: Date = Date()) { self.thoughtID = thoughtID; self.personaID = personaID; self.handleSnapshot = handleSnapshot; self.rangeLocation = rangeLocation; self.rangeLength = rangeLength; self.createdAt = createdAt }
 }
 
 public protocol ThoughtMentionRepository: Sendable {
     func create(_ thought: Thought, authorPersonaID: UUID, mentionedPersonaID: UUID?) throws
     func fetchMentionedPersonas(for thoughtIDs: [UUID]) throws -> [UUID: Persona]
+    func create(_ thought: Thought, authorPersonaID: UUID, mentions: [ThoughtMention]) throws
+    func fetchMentions(for thoughtIDs: [UUID]) throws -> [UUID: [ThoughtMention]]
 }
 
 public struct AIPersonaConfiguration: Equatable, Sendable {

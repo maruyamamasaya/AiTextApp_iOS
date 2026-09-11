@@ -39,6 +39,8 @@ CI/CD、配布用bundle identifier、code signing、provisioning、TestFlight/Ap
 
 正常なDB初期化後とThoughtの書き込み後には、`thought-timeline.sqlite3.backup.1`（最新）と`.backup.2`（ひとつ前）をSQLite Online Backup APIで更新します。自動復元は行いません。DB初期化失敗時はアプリを削除せず、正本を退避してからバックアップコピーを復元します。調査なしに新規DBで上書きしないでください。
 
+起動時はmigration後にDB health checkを実行します。Consoleの`Thought database initialization failed`には`quick_check`、`foreign_key_check`、または不足schema名が記録されます。UIに「保存データの整合性確認に失敗しました」と表示された場合は、アプリの削除・再インストール・空DB作成を行わず、先に正本DBと`.backup.1`／`.backup.2`を保全してください。既知の旧`thought_relations`制約だけは、既存Relationを保持してschema v15へ自動補修します。
+
 通常の持ち出しは画面右上のExportからMarkdown（人間向け）またはJSON（原文バックアップ／将来Import向け）を選び、標準Share SheetでFilesやAirDropへ保存します。Export失敗はSQLiteとComposerを変更しません。
 
 Daily Summaryはアプリ内の日別振り返りとしてSQLiteと外部完全バックアップに含まれます。旧History Reviewの期間要約Export導線は現在提供しません。

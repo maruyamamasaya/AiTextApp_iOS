@@ -22,7 +22,7 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
     private var dailySummaries: [DailySummary]
     private var tags: [ThoughtTag]
     private var thoughtTagIDs: [UUID: Set<UUID>]
-    private var defaultPersona = Persona(id: Persona.defaultHumanID, displayName: "自分", kind: .human)
+    private var defaultPersona = Persona(id: Persona.defaultHumanID, displayName: "自分", handle: "myself", kind: .human)
     private var personas: [UUID: Persona] = [:]
     private var authorIDs: [UUID: UUID] = [:]
     private var aiConfigurations: [UUID: AIPersonaConfiguration] = [:]
@@ -52,13 +52,28 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         }
     }
     public func create(_ thought: Thought, authorPersonaID: UUID, mentionedPersonaID: UUID?) throws {
+        let mentions: [ThoughtMention] = try lock.withLock {
+            guard let mentionedPersonaID, let persona = personas[mentionedPersonaID], persona.deletedAt == nil else { return [] }
+            let token = "@\(persona.handle)", range = (thought.body as NSString).range(of: token, options: .caseInsensitive)
+            return [ThoughtMention(thoughtID: thought.id, personaID: persona.id, handleSnapshot: persona.handle, rangeLocation: range.location == NSNotFound ? 0 : range.location, rangeLength: range.location == NSNotFound ? 0 : range.length, createdAt: thought.createdAt)]
+        }
+        try create(thought, authorPersonaID: authorPersonaID, mentions: mentions)
+    }
+    public func create(_ thought: Thought, authorPersonaID: UUID, mentions: [ThoughtMention]) throws {
         try lock.withLock {
             guard personas[authorPersonaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) }
-            if let mentionedPersonaID { guard personas[mentionedPersonaID]?.kind == .ai, personas[mentionedPersonaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) }; mentionIDs[thought.id] = mentionedPersonaID }
+            for mention in mentions { guard mention.thoughtID == thought.id, personas[mention.personaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) } }
+            if let first = mentions.first { mentionIDs[thought.id] = first.personaID }
             records.append(thought); authorIDs[thought.id] = authorPersonaID
         }
     }
     public func fetchMentionedPersonas(for thoughtIDs: [UUID]) throws -> [UUID: Persona] { lock.withLock { Dictionary(uniqueKeysWithValues: thoughtIDs.compactMap { id in mentionIDs[id].flatMap { personas[$0] }.map { (id, $0) } }) } }
+    public func fetchMentions(for thoughtIDs: [UUID]) throws -> [UUID: [ThoughtMention]] { lock.withLock {
+        Dictionary(uniqueKeysWithValues: thoughtIDs.compactMap { thoughtID in
+            guard let personaID = mentionIDs[thoughtID], let persona = personas[personaID] else { return nil }
+            return (thoughtID, [ThoughtMention(thoughtID: thoughtID, personaID: personaID, handleSnapshot: persona.handle, rangeLocation: 0, rangeLength: 0)])
+        })
+    } }
 
     public func fetchDefaultHumanPersona() throws -> Persona { lock.withLock { defaultPersona } }
     public func fetchPersonas(includeInactive: Bool) throws -> [Persona] { lock.withLock { personas.values.filter { includeInactive || $0.deletedAt == nil }.sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt } } }
@@ -66,14 +81,14 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         lock.withLock { authorIDs[thoughtID].flatMap { personas[$0] } }
     }
     public func fetchPersonas(for thoughtIDs: [UUID]) throws -> [UUID: Persona] { lock.withLock { Dictionary(uniqueKeysWithValues: thoughtIDs.compactMap { id in authorIDs[id].flatMap { personas[$0] }.map { (id, $0) } }) } }
-    public func createPersona(_ persona: Persona) throws { try lock.withLock { guard personas[persona.id] == nil else { throw CocoaError(.fileWriteFileExists) }; personas[persona.id] = persona } }
+    public func createPersona(_ persona: Persona) throws { try lock.withLock { guard personas[persona.id] == nil, ActorHandle.normalize(persona.handle) == persona.handle, !personas.values.contains(where: { $0.handle == persona.handle }) else { throw CocoaError(.fileWriteFileExists) }; personas[persona.id] = persona } }
     public func updatePersona(_ persona: Persona) throws {
-        lock.withLock { personas[persona.id] = persona; if persona.id == Persona.defaultHumanID { defaultPersona = persona } }
+        try lock.withLock { guard ActorHandle.normalize(persona.handle) == persona.handle, !personas.values.contains(where: { $0.id != persona.id && $0.handle == persona.handle }) else { throw CocoaError(.fileWriteFileExists) }; personas[persona.id] = persona; if persona.id == Persona.defaultHumanID { defaultPersona = persona } }
     }
     public func deactivatePersona(id: UUID, at date: Date) throws -> Bool { lock.withLock { guard id != Persona.defaultHumanID, var persona = personas[id], persona.deletedAt == nil else { return false }; persona.deletedAt = date; persona.updatedAt = date; personas[id] = persona; return true } }
     public func fetchAIConfigurations() throws -> [UUID: AIPersonaConfiguration] { lock.withLock { aiConfigurations } }
     public func saveAIConfiguration(_ configuration: AIPersonaConfiguration) throws { lock.withLock { aiConfigurations[configuration.personaID] = configuration } }
-    public func createAIPersona(_ persona: Persona, configuration: AIPersonaConfiguration) throws { try lock.withLock { guard persona.kind == .ai, persona.id == configuration.personaID, personas[persona.id] == nil else { throw CocoaError(.fileWriteFileExists) }; personas[persona.id] = persona; aiConfigurations[persona.id] = configuration } }
+    public func createAIPersona(_ persona: Persona, configuration: AIPersonaConfiguration) throws { try lock.withLock { guard persona.kind == .ai, persona.id == configuration.personaID, personas[persona.id] == nil, ActorHandle.normalize(persona.handle) == persona.handle, !personas.values.contains(where: { $0.handle == persona.handle }) else { throw CocoaError(.fileWriteFileExists) }; personas[persona.id] = persona; aiConfigurations[persona.id] = configuration } }
     public func saveGeneratedThought(_ thought: Thought, authorPersonaID: UUID, generation: AIPostGeneration) throws { try lock.withLock { guard personas[authorPersonaID]?.deletedAt == nil, aiConfigurations[authorPersonaID] != nil, generation.thoughtID == thought.id, generation.personaID == authorPersonaID, generation.kind == .standalone, generation.replyTargetThoughtID == nil else { throw CocoaError(.fileNoSuchFile) }; records.append(thought); authorIDs[thought.id] = authorPersonaID; aiGenerations[thought.id] = generation } }
     public func saveGeneratedReply(_ thought: Thought, authorPersonaID: UUID, targetThoughtID: UUID, generation: AIPostGeneration, relationID: UUID) throws { try lock.withLock {
         guard personas[authorPersonaID]?.kind == .ai, personas[authorPersonaID]?.deletedAt == nil, aiConfigurations[authorPersonaID] != nil,
@@ -107,7 +122,7 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
     } }
     public func createHumanReply(body: String, targetThoughtID: UUID, mentionedPersonaID: UUID?, now: Date, thoughtID: UUID, relationID: UUID) throws -> Thought? { try lock.withLock {
         guard let body = ThoughtDraft.validBody(from: body), records.contains(where: { $0.id == targetThoughtID && $0.deletedAt == nil }) else { return nil }
-        if let mentionedPersonaID { guard personas[mentionedPersonaID]?.kind == .ai, personas[mentionedPersonaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) } }
+        if let mentionedPersonaID { guard personas[mentionedPersonaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) } }
         let thought = Thought(id: thoughtID, body: body, createdAt: now), relation = ThoughtRelation(id: relationID, sourceThoughtID: thoughtID, targetThoughtID: targetThoughtID, type: .repliesTo, createdAt: now)
         try validate(relation, includingSource: thoughtID); records.append(thought); authorIDs[thoughtID] = Persona.defaultHumanID; if let mentionedPersonaID { mentionIDs[thoughtID] = mentionedPersonaID }; relations.append(relation); return thought
     } }

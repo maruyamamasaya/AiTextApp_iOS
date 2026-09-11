@@ -41,6 +41,31 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertFalse(postedThought.waitForExistence(timeout: 1), "削除確定後はTimelineから消える")
     }
 
+    func testActorIconOpensReadOnlyProfileAndPostDetail() {
+        let composer = app.textViews["thoughtComposer"]
+        let body = "プロフィールから開くThought"
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText(body)
+        app.buttons["postButton"].tap()
+
+        let actorIcon = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "actorIcon_")
+        ).firstMatch
+        XCTAssertTrue(actorIcon.waitForExistence(timeout: 2))
+        actorIcon.tap()
+
+        XCTAssertTrue(app.navigationBars["プロフィール"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Display Name"].exists)
+        XCTAssertTrue(app.staticTexts["@myself"].exists)
+        XCTAssertTrue(app.staticTexts["Posts / 過去の発言"].exists)
+        XCTAssertTrue(app.staticTexts[body].exists)
+
+        app.staticTexts[body].tap()
+        XCTAssertTrue(app.navigationBars["Thought"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["detailActorProfileLink"].exists)
+    }
+
     func testCreateContinuationAndShowItInHistoryAndTimeline() {
         let composer = app.textViews["thoughtComposer"]
         let parent = "History A"

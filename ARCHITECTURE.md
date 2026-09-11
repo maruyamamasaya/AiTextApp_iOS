@@ -1,5 +1,7 @@
 # Architecture
 
+HumanとAI Personaは`Persona`（公開上は`Actor` alias）という単一モデルで扱い、不変UUIDを参照キー、変更可能な一意`handle`を表示用IDとする。Mentionは本文とは別にActor ID、投稿時handle snapshot、UTF-16範囲を保存し、Replyは既存の`thought_relations.repliesTo`で独立して表現する。
+
 この文書は将来構想ではなく、2026-09-07時点でリポジトリに存在する構成を記録します。
 
 ## System Overview
@@ -67,7 +69,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `ThoughtRelationRepository`: Relation作成、source／target方向の1ステップ取得境界。
 - `ThoughtContinuationRepository`: 新規Thoughtと`continues` Relationを同一transactionで作成する境界。
 - `ThoughtHistory`: 現在Thoughtからrootを求め、Relation APIだけで分岐を安定順に取得するuse case。
-- `SQLiteThoughtRepository`: schema v14、Thought／Persona／Mention／Tag／Relation／AI生成情報／Daily Summary／AI Usage metadata、Knowledge Review／Quality／usage metadataとDraft FTS query、旧JSON importと2世代backupを所有する正本実装。v14はversion値だけでなく実カラムを照合して不足列を非破壊で補修する。旧期間要約tableは既存データ互換のため維持する。
+- `SQLiteThoughtRepository`: schema v15、Thought／Persona／Mention／Tag／Relation／AI生成情報／Daily Summary／AI Usage metadata、Knowledge Review／Quality／usage metadataとDraft FTS query、旧JSON importと2世代backupを所有する正本実装。version値だけでなく実table／column／Relation制約を照合し、安全に補修可能な不足列と旧Relation制約は非破壊で補修する。旧期間要約tableは既存データ互換のため維持する。
 - `ThoughtExporter`: Repositoryから未削除Thoughtを取得し、Markdown／JSONを生成。
 - `ShareSheet`: ExportファイルをiOS標準共有UIへ渡すUIKit bridge。
 - `ExternalBackupManager`: Filesフォルダpicker、security-scoped bookmark、バックアップ状態と確認UIのpresentation境界。
@@ -107,6 +109,8 @@ Widget Extensionは永続化層をリンクせず、固定表示とQuick Capture
 `Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。schema v9はPersona、AI設定・生成来歴、メンション、`continues`／`repliesTo` Relationを保持します。既存の独立AI投稿は`standalone`として移行し、返信は`reply`と返信先IDを保存します。soft deleteでは中間行を保持し、通常queryがdeleted Thoughtを除外します。
 
 初期化成功後とcreate／soft delete成功後にSQLite Online Backup APIでスナップショットを作り、`.backup.1`と`.backup.2`だけを保持します。バックアップ失敗は成功済み投稿を失敗扱いにせずログへ記録し、破損時の自動巻き戻しは行いません。
+
+Repository初期化はmigration後、バックアップ更新前に`PRAGMA quick_check`、`PRAGMA foreign_key_check`、必須table／column、`thought_relations`の`repliesTo`対応制約を検査します。`user_version`が最新でも実schemaが不整合なら検知します。安全な既知パターンだけをmigrationで補修し、それ以外の欠落・破損は正本DBを上書きせず初期化を中止して、Consoleに詳細、UIに削除せず復元する案内を表示します。
 
 外部完全バックアップは選択されたFilesフォルダ配下の`AiText Backup/latest`と`previous`に、SQLite全体と`manifest.json`を保存します。作成中はUUID付き一時directoryを使い、integrity、schema、サイズ、SHA-256を検証できた新snapshotだけをlatestへ切り替えます。Restoreは外部ファイルを直接正本にせずApplication Supportへcopy・再検証してpendingにし、次回起動時にSQLite connection生成前に正本・WAL・SHMをrollback用へ退避して適用します。適用後のSQLite確認が失敗すれば元の組を戻します。
 

@@ -12,6 +12,8 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ## 実装済み
 
+- @ID／Mention／Reply v1。HumanとAI Personaを不変UUIDの共通Actorとして扱い、3〜30文字の一意な小文字handleを設定できる。Composerの`@`候補はHuman／AIを表示し、保存時にActor ID・handle snapshot・UTF-16範囲をschema v16のRelationへ保存する。既存`repliesTo` chain、返信先preview、Actor Profileをhandle表示へ接続し、handle変更後もRelationを維持する。
+
 - GitHub Repository Settings v1。Settings > External Brainからowner／repository／branchを既存UserDefaultsへ、PATを既存Keychainへ分離保存し、Token置換・確認付き削除、Repository変更時のローカルKnowledge保持警告を提供する。既存GitHub Contents clientのread-only接続確認でAuthentication／Repository／Branchとpush権限由来のDraft／Knowledge capability、分類済み接続エラー、rate limit残数を表示する。Draft／Knowledge pathはdomain定義をread-only表示する。
 - Knowledge Quality & Consolidation v1。正式Knowledgeを手動ローカル解析し、正規化title／body一致、本文token類似度、tag重複からDuplicate／Similar候補を、180日未更新かつ未参照からStale候補を提示する。Quality画面でCompare、Dismiss、A/Bを並べたMerge Draft作成を行い、既存Review／Promoteへ戻す。明示操作だけでArchive／Supersedeし、対象pathを通常Retrieval indexから除外する。active KnowledgeのretrievalCount／lastRetrievedAtを記録し、単一のブラックボックスQuality Scoreは持たない。
 - Knowledge Review & Promote Pipeline v1。SQLiteへDraft／provenance／Review状態／GitHub同期状態を永続化し、一覧・FTS検索・状態filter・編集可能Review・Approve／Reject・確認付きPromoteを提供する。`approved`だけを`projects/aitextapp/knowledge/`へnew-file-onlyで昇格し、成功時だけKnowledgeDocument、path、SHA、promotedAtを保存してローカルExternal Brain FTSへ即時反映する。Review操作はAI APIを呼ばず、lifecycle analyticsへsource type付きで記録する。
@@ -30,7 +32,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - AI Personaへの単一メンションv1。Timeline Composer／Quick CaptureでactiveなAIを選択し、schema v8の`thought_mentions`へ本文と同じtransactionでPersona IDを保存する。Timelineは現在のPersona名を`@名前`で表示し、メンションだけではAI通信を開始しない。
 - メンション付きThoughtから明示的に依頼するAI返信v1。送信前にAI、対象Thought、役割、指示、最終payload、provider／modelを確認し、対象Thoughtだけを送る。成功した140文字以内の応答はAI名義Thought、`repliesTo` Relation、返信先を含む生成来歴としてschema v9へatomic保存する。同一Thoughtへの複数返信を許可し、Detailで返信一覧を確認できる。
 - AI Reply Context v1。対象Thoughtから`repliesTo`だけを遡る直近最大5件を、Human／AI投稿者付き・古い順で送信前previewとpromptへ含める。削除済み本文、Continuation、重複、cycleを除外し、送信直前のContext再取得でThought・Relation・投稿者・対象が変わっていればAIを呼ばない。Mentionだけでは通信しない。AI Replyへの人間返信は相手AIを自動メンションして同じReply chainへatomic保存する。
-- Timeline Reply Context。Human／AI双方の返信を通常Timelineへ独立Thoughtとして表示し、`repliesTo`から取得した返信先Personaと本文を最大2行の文脈として添える。人間の返信投稿が成功したらDetailを閉じてTimelineへ戻り、失敗時は入力と画面を保持する。返信先本文は複製保存せず、削除済みの場合もRelationを保持してplaceholderを表示する。
+- Timeline Reply Context。Human／AI双方の返信を通常Timelineへ独立Thoughtとして表示し、`repliesTo`から取得した返信先Personaと本文を最大2行の文脈として添える。Human／AI返信の保存が成功したらDetailを閉じてTimelineへ戻り、失敗時は入力と画面を保持する。返信先本文は複製保存せず、削除済みの場合もRelationを保持してplaceholderを表示する。schema v15は`user_version`だけ進んで旧`continues`限定制約が残ったDBを実定義から検知・非破壊補修し、起動時DB health checkでその他の破損・必須schema欠落を即時検知する。
 - Daily Summary v2。`thought_authors`でHumanを主分析、AI投稿／Replyを「AIとの対話」へ分離し、Human Thoughtだけを既存タグ別に分類する。時刻・共通`TimeOfDay`・`continues`／`repliesTo`を補助情報としてpromptへ渡すが、少数データでは時間帯を断定しない。typedなタグ別／AI対話／任意時間帯Insight、送信前の構造化preview、Thought・時刻・投稿者・Tag・Relationのstale防止を提供する。v1 JSONは新fieldを空配列として読める。
 - AI Tag Suggestions。Daily SummaryがHuman Thoughtのprompt連番単位でタグ名・理由を提案し、生成後に有効なHuman indexだけを内部Thought IDへ解決する。確定タグ分析とは分離し、不正indexとAI Thought候補を除外する。Detailの「追加」を押した場合だけ既存`ThoughtTagRepository`の独立transactionで確定タグにする。
 - 振り返り導線をDaily Summaryへ統一。TimelineのHistory Review入口と画面、旧期間AI要約UIを外し、既存の`review_summaries`はデータ互換のためSQLite内に保持する。
