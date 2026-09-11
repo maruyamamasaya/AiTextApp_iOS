@@ -69,6 +69,32 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts[child].waitForExistence(timeout: 2), "Continuationが通常Timelineにも表示される")
     }
 
+    func testWriteReplyOpensFocusedComposerAndPostsReply() {
+        let composer = app.textViews["thoughtComposer"]
+        let parent = "返信先Thought"
+        let reply = "返信したThought"
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText(parent)
+        app.buttons["postButton"].tap()
+
+        app.staticTexts[parent].tap()
+        let writeReply = app.buttons["writeReplyButton"]
+        XCTAssertTrue(writeReply.waitForExistence(timeout: 2))
+        writeReply.tap()
+
+        let replyComposer = app.textViews["humanReplyComposer"]
+        XCTAssertTrue(replyComposer.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2), "返信入力欄へfocusする")
+        replyComposer.typeText(reply)
+        let postReply = app.buttons["postHumanReplyButton"]
+        XCTAssertTrue(postReply.isEnabled)
+        postReply.tap()
+
+        XCTAssertTrue(app.staticTexts[reply].waitForExistence(timeout: 2))
+        XCTAssertFalse(replyComposer.exists)
+    }
+
     func testTimelineOpensLocalAnalyticsAndShowsSummary() {
         let composer = app.textViews["thoughtComposer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5))

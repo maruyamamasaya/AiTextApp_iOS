@@ -681,6 +681,7 @@ private struct ThoughtDetailView: View {
                             .accessibilityIdentifier("editThoughtTagsButton")
                         Button("続きを書く") {
                             showsComposer.toggle()
+                            showsHumanReplyComposer = false
                             if showsComposer { composerIsFocused = true }
                         }
                         .buttonStyle(.borderedProminent)
@@ -694,7 +695,11 @@ private struct ThoughtDetailView: View {
                                 .disabled(store.isGeneratingAIReply || !store.personas.contains(where: { $0.id == store.mentionedPersonasByThoughtID[currentThought.id]?.id }))
                                 .accessibilityIdentifier("requestAIReplyButton")
                         }
-                        Button("返信を書く") { showsHumanReplyComposer.toggle() }
+                        Button("返信を書く") {
+                            showsHumanReplyComposer.toggle()
+                            showsComposer = false
+                            if showsHumanReplyComposer { composerIsFocused = true }
+                        }
                             .buttonStyle(.bordered)
                             .accessibilityIdentifier("writeReplyButton")
                         if let input = store.knowledgeDraftInput(for: currentThought) {
@@ -837,7 +842,12 @@ private struct ThoughtDetailView: View {
     private func humanReplyComposer(target: Thought) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("返信を書く").font(.headline)
-            TextEditor(text: Binding(get: { store.humanReplyDraft }, set: store.updateHumanReplyDraft)).frame(minHeight: 80).padding(8).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)).accessibilityIdentifier("humanReplyComposer")
+            TextEditor(text: Binding(get: { store.humanReplyDraft }, set: store.updateHumanReplyDraft))
+                .focused($composerIsFocused)
+                .frame(minHeight: 80)
+                .padding(8)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityIdentifier("humanReplyComposer")
             HStack { Text("\(store.humanReplyDraft.count) / \(ThoughtDraft.characterLimit)").font(.caption.monospacedDigit()); Spacer(); Button("返信") { if let reply = store.postHumanReply(to: target) { currentThoughtID = reply.id; showsHumanReplyComposer = false; store.loadHistory(for: reply.id); store.loadAIReplies(to: reply.id) } }.buttonStyle(.borderedProminent).disabled(!store.canPostHumanReply).accessibilityIdentifier("postHumanReplyButton") }
         }.padding(.horizontal, 16).padding(.bottom, 16)
     }
