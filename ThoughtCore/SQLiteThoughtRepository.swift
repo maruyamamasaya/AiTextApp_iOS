@@ -25,8 +25,8 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 9
+public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, AIAPIUsageRepository, AIAPIUsageAnalyticsRepository, @unchecked Sendable {
+    public static let schemaVersion: Int32 = 10
 
     private let databaseURL: URL
     private let legacyJSONURL: URL
@@ -231,6 +231,37 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
             }
             createRollingBackupIfPossible()
+        }
+    }
+
+    public func saveUsage(_ record: AIAPIUsageRecord) throws {
+        try lock.withLock {
+            let statement = try prepare("INSERT INTO ai_api_usage (id, started_at, finished_at, feature, persona_id, provider, model, status, input_characters, output_characters, input_tokens, output_tokens, total_tokens, latency_milliseconds, external_brain_used, retrieved_chunk_count, error_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            defer { sqlite3_finalize(statement) }
+            try bind(record.id.uuidString, to: 1, in: statement); try bind(record.startedAt.timeIntervalSince1970, to: 2, in: statement); try bindOptional(record.finishedAt?.timeIntervalSince1970, to: 3, in: statement)
+            try bind(record.feature.rawValue, to: 4, in: statement); try bindOptional(record.personaID?.uuidString, to: 5, in: statement); try bind(record.provider, to: 6, in: statement); try bind(record.model, to: 7, in: statement); try bind(record.status.rawValue, to: 8, in: statement)
+            try bind(Int32(record.inputCharacters), to: 9, in: statement); try bind(Int32(record.outputCharacters), to: 10, in: statement); try bindOptional(record.inputTokens.map(Double.init), to: 11, in: statement); try bindOptional(record.outputTokens.map(Double.init), to: 12, in: statement); try bindOptional(record.totalTokens.map(Double.init), to: 13, in: statement); try bindOptional(record.latencyMilliseconds.map(Double.init), to: 14, in: statement)
+            try bind(record.externalBrainUsed ? Int32(1) : Int32(0), to: 15, in: statement); try bind(Int32(record.retrievedChunkCount), to: 16, in: statement); try bindOptional(record.errorCategory?.rawValue, to: 17, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func fetchUsage(from start: Date?, to end: Date?) throws -> [AIAPIUsageRecord] {
+        try lock.withLock {
+            var clauses: [String] = []; if start != nil { clauses.append("started_at >= ?") }; if end != nil { clauses.append("started_at < ?") }
+            let sql = "SELECT id, started_at, finished_at, feature, persona_id, provider, model, status, input_characters, output_characters, input_tokens, output_tokens, total_tokens, latency_milliseconds, external_brain_used, retrieved_chunk_count, error_category FROM ai_api_usage" + (clauses.isEmpty ? "" : " WHERE " + clauses.joined(separator: " AND ")) + " ORDER BY started_at ASC, id ASC"
+            let statement = try prepare(sql); defer { sqlite3_finalize(statement) }
+            var index: Int32 = 1; if let start { try bind(start.timeIntervalSince1970, to: index, in: statement); index += 1 }; if let end { try bind(end.timeIntervalSince1970, to: index, in: statement) }
+            var values: [AIAPIUsageRecord] = []; var result = sqlite3_step(statement)
+            while result == SQLITE_ROW {
+                guard let idText = sqlite3_column_text(statement, 0), let id = UUID(uuidString: String(cString: idText)), let featureText = sqlite3_column_text(statement, 3), let feature = AIAPIFeature(rawValue: String(cString: featureText)), let providerText = sqlite3_column_text(statement, 5), let modelText = sqlite3_column_text(statement, 6), let statusText = sqlite3_column_text(statement, 7), let status = AIAPICallStatus(rawValue: String(cString: statusText)) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                func optionalInt(_ column: Int32) -> Int? { sqlite3_column_type(statement, column) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, column)) }
+                let personaID = sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : UUID(uuidString: String(cString: sqlite3_column_text(statement, 4)))
+                let category = sqlite3_column_type(statement, 16) == SQLITE_NULL ? nil : AIAPIErrorCategory(rawValue: String(cString: sqlite3_column_text(statement, 16)))
+                values.append(.init(id: id, startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)), finishedAt: sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)), feature: feature, personaID: personaID, provider: String(cString: providerText), model: String(cString: modelText), status: status, inputCharacters: Int(sqlite3_column_int64(statement, 8)), outputCharacters: Int(sqlite3_column_int64(statement, 9)), inputTokens: optionalInt(10), outputTokens: optionalInt(11), totalTokens: optionalInt(12), latencyMilliseconds: optionalInt(13), externalBrainUsed: sqlite3_column_int(statement, 14) != 0, retrievedChunkCount: Int(sqlite3_column_int64(statement, 15)), errorCategory: category))
+                result = sqlite3_step(statement)
+            }
+            guard result == SQLITE_DONE else { throw lastError() }; return values
         }
     }
 
@@ -1110,6 +1141,14 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 try execute("CREATE INDEX thought_relations_target_idx ON thought_relations(target_thought_id)")
                 try execute("CREATE INDEX ai_post_generations_reply_target_idx ON ai_post_generations(reply_target_thought_id, generated_at ASC)")
                 try execute("PRAGMA user_version = 9")
+            }
+        }
+        if version < 10 {
+            try transaction {
+                try execute("CREATE TABLE ai_api_usage (id TEXT PRIMARY KEY NOT NULL, started_at REAL NOT NULL, finished_at REAL NULL, feature TEXT NOT NULL, persona_id TEXT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('success', 'failed', 'cancelled')), input_characters INTEGER NOT NULL CHECK (input_characters >= 0), output_characters INTEGER NOT NULL CHECK (output_characters >= 0), input_tokens INTEGER NULL CHECK (input_tokens IS NULL OR input_tokens >= 0), output_tokens INTEGER NULL CHECK (output_tokens IS NULL OR output_tokens >= 0), total_tokens INTEGER NULL CHECK (total_tokens IS NULL OR total_tokens >= 0), latency_milliseconds INTEGER NULL CHECK (latency_milliseconds IS NULL OR latency_milliseconds >= 0), external_brain_used INTEGER NOT NULL CHECK (external_brain_used IN (0, 1)), retrieved_chunk_count INTEGER NOT NULL CHECK (retrieved_chunk_count >= 0), error_category TEXT NULL)")
+                try execute("CREATE INDEX ai_api_usage_started_idx ON ai_api_usage(started_at DESC)")
+                try execute("CREATE INDEX ai_api_usage_dimensions_idx ON ai_api_usage(feature, persona_id, provider, model, status, started_at DESC)")
+                try execute("PRAGMA user_version = 10")
             }
         }
     }

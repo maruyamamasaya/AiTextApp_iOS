@@ -40,6 +40,10 @@
 		D10000000000000000000003 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000003 /* FirebaseAppCheck */; };
 		A1D000000000000000000001 /* DailySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D000000000000000000001 /* DailySummary.swift */; };
 		A1D000000000000000000002 /* DailySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D000000000000000000002 /* DailySummaryView.swift */; };
+		F10000000000000000000001 /* ExternalBrain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* ExternalBrain.swift */; };
+		F10000000000000000000002 /* ExternalBrainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* ExternalBrainManager.swift */; };
+		G10000000000000000000001 /* AIAPIUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = G20000000000000000000001 /* AIAPIUsage.swift */; };
+		G10000000000000000000002 /* AIAPIUsageAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G20000000000000000000002 /* AIAPIUsageAnalyticsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +112,10 @@
 		C20000000000000000000005 /* App Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2D000000000000000000001 /* DailySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailySummary.swift; sourceTree = "<group>"; };
 		A2D000000000000000000002 /* DailySummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailySummaryView.swift; sourceTree = "<group>"; };
+		F20000000000000000000001 /* ExternalBrain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalBrain.swift; sourceTree = "<group>"; };
+		F20000000000000000000002 /* ExternalBrainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalBrainManager.swift; sourceTree = "<group>"; };
+		G20000000000000000000001 /* AIAPIUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAPIUsage.swift; sourceTree = "<group>"; };
+		G20000000000000000000002 /* AIAPIUsageAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAPIUsageAnalyticsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -176,6 +184,8 @@
 				A20000000000000000000025 /* QuickCaptureView.swift */,
 				B20000000000000000000027 /* ThoughtAnalyticsView.swift */,
 				A2D000000000000000000002 /* DailySummaryView.swift */,
+				F20000000000000000000002 /* ExternalBrainManager.swift */,
+				G20000000000000000000002 /* AIAPIUsageAnalyticsView.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -196,6 +206,8 @@
 				A20000000000000000000024 /* ThoughtTag.swift */,
 				B20000000000000000000026 /* ThoughtAnalytics.swift */,
 				A2D000000000000000000001 /* DailySummary.swift */,
+				F20000000000000000000001 /* ExternalBrain.swift */,
+				G20000000000000000000001 /* AIAPIUsage.swift */,
 			);
 			path = ThoughtCore;
 			sourceTree = "<group>";
@@ -427,6 +439,10 @@
 				C10000000000000000000001 /* QuickCaptureRoute.swift in Sources */,
 				A1D000000000000000000001 /* DailySummary.swift in Sources */,
 				A1D000000000000000000002 /* DailySummaryView.swift in Sources */,
+				F10000000000000000000001 /* ExternalBrain.swift in Sources */,
+				F10000000000000000000002 /* ExternalBrainManager.swift in Sources */,
+				G10000000000000000000001 /* AIAPIUsage.swift in Sources */,
+				G10000000000000000000002 /* AIAPIUsageAnalyticsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

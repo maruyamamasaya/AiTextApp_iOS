@@ -44,9 +44,11 @@ public protocol ReviewSummaryRepository: Sendable {
 
 public struct ReviewSummaryRequest: Equatable, Sendable {
     public let prompt: String
+    public let usageContext: AIAPIUsageContext?
 
-    public init(prompt: String) {
+    public init(prompt: String, usageContext: AIAPIUsageContext? = nil) {
         self.prompt = prompt
+        self.usageContext = usageContext
     }
 }
 
@@ -77,11 +79,13 @@ public struct ReviewSummaryResponse: Equatable, Sendable {
     public let text: String
     public let provider: String
     public let model: String
+    public let tokenUsage: AIAPITokenUsage?
 
-    public init(text: String, provider: String, model: String) {
+    public init(text: String, provider: String, model: String, tokenUsage: AIAPITokenUsage? = nil) {
         self.text = text
         self.provider = provider
         self.model = model
+        self.tokenUsage = tokenUsage
     }
 }
 
@@ -299,6 +303,10 @@ public struct MockReviewSummaryClient: ReviewSummaryClient, @unchecked Sendable 
 
     public init(error: Error) {
         result = .failure(error)
+    }
+
+    public init(response: ReviewSummaryResponse) {
+        result = .success(response)
     }
 
     public func generateSummary(_ request: ReviewSummaryRequest) async throws -> ReviewSummaryResponse {

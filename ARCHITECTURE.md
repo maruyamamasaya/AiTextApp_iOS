@@ -9,6 +9,7 @@ Quick Capture Widget -> custom URL -> SwiftUI onOpenURL -> AppRoute.quickCapture
 SwiftUI AppRoute -> TimelineView / QuickCaptureView
   TimelineView -> DailySummaryCalendarView / ThoughtDetailView / Continuation Composer
   TimelineView -> ThoughtAnalyticsView / ThoughtSearchView
+  SettingsView -> AIAPIUsageAnalyticsView -> LoadAIAPIUsageAnalytics
   -> ThoughtStore (presentation state)
     -> ThoughtTimeline (validation/order/delete use cases)
       -> ThoughtRepository / ThoughtTagRepository / PersonaRepository protocols
@@ -17,6 +18,8 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
     -> ThoughtRelationRepository (History relation queries)
     -> LoadThoughtAnalytics -> ThoughtAnalyticsRepository (read-only SQLite aggregates)
     -> PrepareDailySummary / GenerateDailySummary -> ReviewSummaryClient / DailySummaryRepository
+    -> AIAPIUsageRecorder -> AIAPIUsageRepository（best-effort metadata）
+    -> ExternalBrainManager -> GitHub read-only API -> Local Markdown Cache -> SQLite FTS5 -> AI Reply Preview
     -> ThoughtExporter -> ThoughtRepository
     -> ShareSheet (UIActivityViewController)
     -> ExternalBackupManager -> ExternalBackupService / RestoreCoordinator
@@ -34,6 +37,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `AppRoute` / `QuickCaptureView`: scene直下のQuick Capture表示routeと、独立draft、自動focus、文字数、投稿、破棄確認だけを持つ集中入力画面。将来の外部起動元は同じrouteを要求する。
 - `QuickCaptureWidget` / `QuickCaptureRoute`: systemSmallの固定表示Widgetと、app／Extension間で共有する外部URL契約。Widgetは`widgetURL`だけを発行し、appの`onOpenURL`が既存`AppRoute.quickCapture`へ変換する。
 - `ThoughtAnalyticsView`: 直近30日の基本サマリー、日別／曜日別／時間帯別分布、上位タグ、Continuation件数を標準SwiftUIの縦Sectionと簡易バーで表示する完全ローカル画面。
+- `AIAPIUsageAnalyticsView`: 今日／7日／30日／全期間のAI Call、成功率、文字数または完全な実測token、Feature／Persona／Provider・Model／Error、Latency、External Brain、日別推移をSQLiteだけで表示する。
 - `DailySummaryCalendarView`: 月単位で要約済み／Thoughtあり未要約／Thoughtなしを表示し、日別詳細と明示生成の送信前プレビューへ遷移する。
 - `DailySummaryContent` / `PrepareDailySummary`: Human Thoughtを主データ、AI投稿を対話補助として分離し、Humanタグ、共通時間帯、日内Relationをtyped previewへ固定する。v1保存JSONは追加fieldを空配列として後方互換decodeする。
 - `DailySummaryThoughtTagSuggestion`: AI応答のprompt連番をPreview内のHuman Thought IDへ検証付きで解決する提案モデル。生成時はTagを変更せず、Detailの明示的な追加操作だけが既存Tag repositoryを呼ぶ。
@@ -46,6 +50,8 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `Persona` / `PersonaRepository` / `AuthoredThoughtRepository`: 人間／AIに共通する投稿者モデル、複数Personaの管理、任意Persona IDとThoughtを同一transactionで保存する境界。固定IDの人間Personaは無効化できない。
 - `AIPersonaConfiguration` / `GenerateAIPost`: Personaごとの役割・指示、ユーザー依頼からimmutableな送信前previewを作り、明示確定後の応答だけをAI名義で投稿する。140文字を超える応答や空応答は保存しない。
 - `AIThoughtReplyPrompt` / `GenerateAIThoughtReply`: メンション対象AIと対象Thoughtだけからimmutableな返信previewを作り、成功応答をAI名義Thought、`repliesTo` Relation、reply生成来歴として同一transactionで保存する。
+- `ExternalBrainCache` / `ExternalBrainIndex` / `ExternalBrainRetriever`: 単一GitHub RepositoryのMarkdownをSHA差分同期し、front matterを解析してheading単位に分割した派生cacheをSQLite FTS5で検索する。PersonaのAGENT.mdからrouteとrulesを解決し、最大5件をAI Replyの参考資料としてimmutable previewへ固定する。
+- `ExternalBrainManager` / `GitHubExternalBrainRemote`: Repository設定とPersona別設定、同期状態を管理するapp層。GitHub tokenはKeychainへ保存し、GitHub APIはtree／contentsのGETだけを使う。
 - `AIReplyContextRepository`: 対象から`repliesTo`だけを逆向きに辿り、削除済み本文を除いた直近最大5件を投稿者付き・古い順で返す。PreviewはThought・Relation・Personaを固定し、生成直前の再取得結果と異なる場合は通信前に中止する。
 - `ThoughtMention` / `ThoughtMentionRepository`: Thought本文の文字列解析ではなく、ThoughtとAI Persona IDの単一メンション関連をatomic保存・一括取得する。メンション作成自体はAI clientを呼ばない。
 - `ThoughtRepository`: create、Timeline query、literal部分一致検索、日付範囲query、ID取得、全件取得、soft deleteの保存境界。
@@ -55,7 +61,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `ThoughtRelationRepository`: Relation作成、source／target方向の1ステップ取得境界。
 - `ThoughtContinuationRepository`: 新規Thoughtと`continues` Relationを同一transactionで作成する境界。
 - `ThoughtHistory`: 現在Thoughtからrootを求め、Relation APIだけで分岐を安定順に取得するuse case。
-- `SQLiteThoughtRepository`: schema v9、Thought／Persona／Mention／Tag／Relation／AI生成情報／Daily Summary query、旧JSON importと2世代backupを所有する正本実装。旧期間要約tableは既存データ互換のため維持する。
+- `SQLiteThoughtRepository`: schema v10、Thought／Persona／Mention／Tag／Relation／AI生成情報／Daily Summary／AI Usage metadata query、旧JSON importと2世代backupを所有する正本実装。旧期間要約tableは既存データ互換のため維持する。
 - `ThoughtExporter`: Repositoryから未削除Thoughtを取得し、Markdown／JSONを生成。
 - `ShareSheet`: ExportファイルをiOS標準共有UIへ渡すUIKit bridge。
 - `ExternalBackupManager`: Filesフォルダpicker、security-scoped bookmark、バックアップ状態と確認UIのpresentation境界。
@@ -83,6 +89,8 @@ Thought検索はtrim後の空文字をUI stateで初期状態として扱い、�
 Daily SummaryはHumanの概要・テーマ・思考と、既存Humanタグ別、AI Persona別対話、任意の時間帯Insightを分けた構造化結果をThought原文と別に1日1件保存します。Preview後は本文・時刻・投稿者・Humanタグ・日内Relationを再取得し、一致したpayloadだけを明示送信します。schema v9の`content_json`を使うためDB migrationはありません。
 
 ## Persistence
+
+`Application Support/ExternalBrain/files`、`manifest.json`、`index.sqlite3`はGitHub Markdownを正本とする削除・再生成可能な派生データです。Thought DBと外部完全backupには含めません。
 
 schema v9の`personas`と`thought_authors`は既存Thoughtを固定のデフォルト人間Personaへ移行し、新規Thought／Continuationの作成と投稿者関連を同一transactionで保存します。`ai_post_generations`は生成種別と返信先Thought IDも保持し、`thought_relations`はContinuationとAI返信を区別します。`thought_mentions`は投稿とAI Personaの関連を保存します。
 

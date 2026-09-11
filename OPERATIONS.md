@@ -14,6 +14,10 @@ Xcodeの`AiTextApp` shared schemeでbuildします。CLIコマンドとCore test
 
 ## Environment / External Services
 
+### Persona External Brain
+
+設定 > External Brainで単一GitHub Repositoryのowner、repository、branchとread-onlyのfine-grained tokenを設定し、「今すぐ同期」を実行します。tokenはKeychainにのみ保存され、SQLite、Export、backup、ログへ含めません。Persona編集でExternal BrainをONにし、同Repository内のAGENT.md pathと最大参照数を指定します。cacheは`Application Support/ExternalBrain`配下の派生データで、同期失敗時は前回cacheを使い、cacheがなければExternal BrainなしでAI Replyを続行します。
+
 Firebase Apple SDKはSwift Package Managerで12.17.0以降を指定し、app targetへ`FirebaseCore`、`FirebaseAILogic`、`FirebaseAppCheck`をリンクします。APIキーをSwiftコードへ追加しません。
 
 ### Firebase AI Logic / App Check接続

@@ -235,6 +235,12 @@ private struct SettingsView: View {
                     .accessibilityIdentifier("profileButton")
                 }
 
+                Section("AI") {
+                    NavigationLink { ExternalBrainSettingsView(manager: store.externalBrainManager) } label: {
+                        Label("External Brain", systemImage: "brain.head.profile")
+                    }
+                }
+
                 Section("データ") {
                     Button { store.export(.markdown) } label: {
                         Label("Markdownを共有", systemImage: "square.and.arrow.up")
@@ -689,6 +695,14 @@ private struct ThoughtDetailView: View {
                     }
                 }
 
+                Section("分析") {
+                    NavigationLink {
+                        AIAPIUsageAnalyticsView(store: store)
+                    } label: {
+                        Label("AI使用状況", systemImage: "waveform.path.ecg")
+                    }
+                    .accessibilityIdentifier("aiUsageAnalyticsButton")
+                }
                 Divider()
                 Text("History")
                     .font(.headline)
@@ -877,6 +891,39 @@ private struct ThoughtRow: View {
     }
 }
 
+private struct ExternalBrainSettingsView: View {
+    @ObservedObject var manager: ExternalBrainManager
+    @State private var owner = ""
+    @State private var repository = ""
+    @State private var branch = "main"
+    @State private var token = ""
+
+    var body: some View {
+        Form {
+            Section("Repository") {
+                TextField("Owner", text: $owner).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("Repository", text: $repository).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("Branch", text: $branch).textInputAutocapitalization(.never).autocorrectionDisabled()
+                SecureField("GitHub fine-grained token", text: $token)
+                Button("設定を保存") {
+                    manager.repository = .init(owner: owner.trimmingCharacters(in: .whitespacesAndNewlines), repository: repository.trimmingCharacters(in: .whitespacesAndNewlines), branch: branch.trimmingCharacters(in: .whitespacesAndNewlines))
+                    if !token.isEmpty { _ = manager.saveToken(token); token = "" }
+                }
+            }
+            Section("同期") {
+                if let date = manager.manifest.syncedAt { LabeledContent("最終同期", value: date.formatted(date: .abbreviated, time: .shortened)) }
+                else { LabeledContent("最終同期", value: "未同期") }
+                LabeledContent("キャッシュ", value: ByteCountFormatter.string(fromByteCount: manager.cacheByteCount, countStyle: .file))
+                Button(manager.isSyncing ? "同期中…" : "今すぐ同期") { Task { await manager.synchronize() } }.disabled(manager.isSyncing)
+                if let message = manager.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
+            }
+            Section { Text("GitHubは読み取り専用です。TokenはKeychainへ保存され、SQLite・Export・ログには含まれません。同期できない場合もAI ReplyはExternal Brainなしで続行します。").font(.footnote).foregroundStyle(.secondary) }
+        }
+        .navigationTitle("External Brain")
+        .onAppear { owner = manager.repository.owner; repository = manager.repository.repository; branch = manager.repository.branch }
+    }
+}
+
 private struct AIReplyRequestView: View {
     @ObservedObject var store: ThoughtStore
     let thought: Thought
@@ -927,6 +974,17 @@ private struct AIReplyPreviewView: View {
                             VStack(alignment: .leading, spacing: 4) { Text(entry.author.displayName).font(.subheadline.weight(.semibold)); Text(entry.author.kind == .human ? "Human" : "AI").font(.caption2).foregroundStyle(.secondary); Text(entry.thought.body) }
                         }
                     }
+                }
+                Section("External Brain") {
+                    if let brain = preview.externalBrain {
+                        LabeledContent("使用Persona", value: preview.persona.displayName)
+                        LabeledContent("AGENT.md", value: brain.agentPath)
+                        VStack(alignment: .leading, spacing: 4) { Text("Retrieval Route").font(.caption).foregroundStyle(.secondary); ForEach(Array(brain.routes.enumerated()), id: \.offset) { Text("\($0.offset + 1). \($0.element)") } }
+                        if brain.chunks.isEmpty { Text("参照資料なし").foregroundStyle(.secondary) }
+                        ForEach(Array(brain.chunks.enumerated()), id: \.offset) { item in
+                            VStack(alignment: .leading, spacing: 4) { Text(item.element.documentPath).font(.subheadline.weight(.semibold)); Text(item.element.heading).font(.caption).foregroundStyle(.secondary); Text(item.element.excerpt).font(.caption).lineLimit(6) }
+                        }
+                    } else { Text("利用なし").foregroundStyle(.secondary) }
                 }
                 Section("最終payload") { Text(preview.request.prompt).font(.caption).textSelection(.enabled) }
                 Section("生成元") { LabeledContent("Provider", value: ReviewSummaryAIConfiguration.providerName); LabeledContent("Model", value: ReviewSummaryAIConfiguration.modelName) }
@@ -1008,6 +1066,9 @@ private struct AIPersonaEditorView: View {
     @State private var selectedItem: PhotosPickerItem?
     @State private var role: String
     @State private var instructions: String
+    @State private var brainEnabled: Bool
+    @State private var agentPath: String
+    @State private var maxChunks: Int
 
     init(store: ThoughtStore, persona: Persona?) {
         self.store = store; self.persona = persona
@@ -1016,6 +1077,10 @@ private struct AIPersonaEditorView: View {
         let configuration = persona.flatMap { store.aiConfigurations[$0.id] }
         _role = State(initialValue: configuration?.role ?? "")
         _instructions = State(initialValue: configuration?.instructions ?? "")
+        let brain = persona.map { store.externalBrainManager.configuration(for: $0.id) }
+        _brainEnabled = State(initialValue: brain?.enabled ?? false)
+        _agentPath = State(initialValue: brain?.agentPath ?? "")
+        _maxChunks = State(initialValue: brain?.maxRetrievedChunks ?? 5)
     }
 
     var body: some View {
@@ -1029,6 +1094,11 @@ private struct AIPersonaEditorView: View {
                 Section("表示名") { TextField("AI Persona名", text: $displayName) }
                 Section("役割") { TextField("例：アイデアを広げる相棒", text: $role, axis: .vertical) }
                 Section("指示") { TextField("口調、視点、避けることなど", text: $instructions, axis: .vertical).lineLimit(3...8) }
+                Section("External Brain") {
+                    Toggle("External Brain", isOn: $brainEnabled)
+                    TextField("personas/architect/AGENT.md", text: $agentPath).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Stepper("最大参照 \(maxChunks)件", value: $maxChunks, in: 1...5)
+                }
                 if let persona { Section { Button("AI Personaを無効化", role: .destructive) { store.deactivateAIPersona(persona); dismiss() } } }
             }
             .navigationTitle(persona == nil ? "AI Personaを追加" : "AI Personaを編集")
@@ -1038,9 +1108,9 @@ private struct AIPersonaEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
                         let saved = persona.map { store.updateAIPersona($0, displayName: displayName, iconData: iconData, role: role, instructions: instructions) }
-                            ?? store.createAIPersona(displayName: displayName, iconData: iconData, role: role, instructions: instructions)
-                        if saved { dismiss() }
-                    }.disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || displayName.count > 40 || role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            ?? store.createAIPersona(displayName: displayName, iconData: iconData, role: role, instructions: instructions, externalBrainEnabled: brainEnabled, agentPath: agentPath, maxRetrievedChunks: maxChunks)
+                        if saved { if let persona { store.externalBrainManager.savePersona(.init(personaID: persona.id, enabled: brainEnabled, agentPath: agentPath, maxRetrievedChunks: maxChunks)) }; dismiss() }
+                    }.disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || displayName.count > 40 || role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (brainEnabled && !ExternalBrainPath.isSafe(agentPath)))
                 }
             }
             .onChange(of: selectedItem) { item in

@@ -1,6 +1,6 @@
 # Current Project Status
 
-最終照合日: 2026-09-10
+最終照合日: 2026-09-11
 
 ## Project
 
@@ -11,6 +11,9 @@
 Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-09にMac/Xcode 26.6でSwift Testing全60件、Firebase 12.18.0を含むDebug／Release Simulator build、Personal TeamのDebug実機向け署名buildを確認しました。XCUITest targetはcompile済みですが、Simulator serviceが起動時に停止するホスト環境障害のため実行確認は未完了です。
 
 ## 実装済み
+
+- AI API Usage Analytics v1。AI API Callをschema v10の独立したローカルMetadataとして記録し、AI Reply／Daily Summary／Persona Postを共通Recorderへ統合する。Persona／Feature／Provider／Model別件数、成功率、Error、Latency、日別推移を集計し、External Brain使用有無・取得chunk数も保持する。token usageはproviderから取得できる場合だけ実測保存し、現状はnilのまま文字数を常時記録する。prompt／response／Thought／External Brain本文はUsage DBへ保存せず、Telemetry保存失敗は既存AI機能を失敗させない。
+- Persona External Brain v1。単一GitHub RepositoryとPersona別AGENT.md／Retrieval Routeを使い、MarkdownをApplication SupportへSHA差分同期してheading単位のSQLite FTS5 indexから最大5チャンクを取得する。AI Reply送信前Previewで資料と最終payloadを確認できる。GitHubはread-only、tokenはKeychain保存で、障害時はcacheまたはExternal Brainなしで返信を継続する。
 
 - Timelineトップ右上の歯車から開く設定画面。プロフィール／AI Persona、Markdown／JSON Export、外部バックアップを設定内へ集約し、トップの主要導線と分離する。
 - ローカルの単一人間Persona基盤。SQLite schema v6の`personas`／`thought_authors`で既存・新規Thoughtを固定のデフォルト人間へ紐づけ、表示名と512px以下へ正方形化したJPEGアイコンをSQLite内へ保存する。

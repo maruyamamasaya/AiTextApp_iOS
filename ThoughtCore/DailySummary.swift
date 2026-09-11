@@ -181,17 +181,18 @@ public struct PrepareDailySummary: Sendable {
         let existing = names.sorted()
         let counts = try relations.fetchContinuationCounts(for: records.map(\.id))
         relationSnapshot = relationSnapshot.filter { recordIDs.contains($0.targetThoughtID) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        return DailySummaryPreview(interval: interval, thoughts: records, existingTags: existing, continuationCount: counts.values.reduce(0, +), request: .init(prompt: try DailySummaryPrompt.make(inputs: inputs, relations: relationSnapshot, existingTags: existing, calendar: calendar)), inputs: inputs, relations: relationSnapshot)
+        return DailySummaryPreview(interval: interval, thoughts: records, existingTags: existing, continuationCount: counts.values.reduce(0, +), request: .init(prompt: try DailySummaryPrompt.make(inputs: inputs, relations: relationSnapshot, existingTags: existing, calendar: calendar), usageContext: .init(feature: .dailySummary)), inputs: inputs, relations: relationSnapshot)
     }
 }
 
 public struct GenerateDailySummary: Sendable {
     private let client: any ReviewSummaryClient
     private let repository: any DailySummaryRepository
-    public init(client: any ReviewSummaryClient, repository: any DailySummaryRepository) { self.client = client; self.repository = repository }
+    private let usage: AIAPIUsageRecorder?
+    public init(client: any ReviewSummaryClient, repository: any DailySummaryRepository, usageRepository: (any AIAPIUsageRepository)? = nil) { self.client = client; self.repository = repository; usage = usageRepository.map { AIAPIUsageRecorder(repository: $0) } }
     public func callAsFunction(preview: DailySummaryPreview, now: Date = Date()) async throws -> DailySummary {
         guard !preview.thoughts.isEmpty else { throw ReviewSummaryError.noThoughts }
-        let response = try await client.generateSummary(preview.request)
+        let finish: @Sendable (ReviewSummaryResponse) async throws -> DailySummary = { response in
         let raw = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let json = raw.hasPrefix("```") ? raw.replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "").trimmingCharacters(in: .whitespacesAndNewlines) : raw
         guard let data = json.data(using: .utf8) else { throw ReviewSummaryError.emptyResponse }
@@ -224,5 +225,9 @@ public struct GenerateDailySummary: Sendable {
         let summary = DailySummary(dayStart: preview.interval.start, dayEnd: preview.interval.end, content: sanitized, createdAt: now, provider: response.provider, model: response.model, promptVersion: DailySummaryPrompt.version, thoughtCount: preview.thoughts.count)
         try repository.saveDailySummary(summary)
         return summary
+        }
+        if let usage { return try await usage.call(client: client, request: preview.request, finish: finish) }
+        let response = try await client.generateSummary(preview.request)
+        return try await finish(response)
     }
 }

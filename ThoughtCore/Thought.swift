@@ -146,13 +146,14 @@ public struct AIThoughtReplyPreview: Identifiable, Equatable, Sendable {
     public let targetThought: Thought
     public let userRequest: String
     public let context: AIReplyContext
+    public let externalBrain: ExternalBrainContext?
     public let request: ReviewSummaryRequest
 }
 
 public enum AIThoughtReplyPrompt {
-    public static let version = 1
+    public static let version = 2
     public static let maximumContextEntries = 5
-    public static func prepare(persona: Persona, configuration: AIPersonaConfiguration, targetThought: Thought, userRequest: String, context: AIReplyContext) throws -> AIThoughtReplyPreview {
+    public static func prepare(persona: Persona, configuration: AIPersonaConfiguration, targetThought: Thought, userRequest: String, context: AIReplyContext, externalBrain: ExternalBrainContext? = nil) throws -> AIThoughtReplyPreview {
         guard persona.kind == .ai, persona.deletedAt == nil else { throw AIPostError.inactivePersona }
         guard targetThought.deletedAt == nil else { throw AIPostError.invalidRequest }
         guard !targetThought.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AIPostError.invalidRequest }
@@ -167,35 +168,45 @@ public enum AIThoughtReplyPrompt {
         }.joined(separator: "\n\n")
         let target = context.entries.last!
         let targetKind = target.author.kind == .human ? "Human" : "AI"
+        let externalRole = externalBrain.map { "\nExternal Brain上のRole: \($0.role)" } ?? ""
+        let brainSection = externalBrain?.promptSection ?? "--- External Brain ---\n利用なし"
         let prompt = """
+        --- Persona Role / Instructions ---
         あなたはプライベートなThought Timelineへ参加するAI Personaです。
         Persona名: \(persona.displayName)
-        役割: \(configuration.role)
+        役割: \(configuration.role)\(externalRole)
         指示: \(configuration.instructions)
-        ユーザーの依頼: \(normalizedRequest)
+        project固有のdecision、local rule、user固有情報は、一般論より優先してください。
 
-        会話文脈:
+        \(brainSection)
+
+        --- Reply Context ---
         \(contextText)
 
         返信対象:
         \(context.entries.count). [\(targetKind): \(target.author.displayName)]
         \(targetThought.body)
 
+        --- User Request ---
+        \(normalizedRequest)
+
+        --- Output Rules ---
         このThoughtに対する返信を日本語140文字以内で返してください。前置き、引用符、Markdown、文字数説明は不要です。
         """
-        return AIThoughtReplyPreview(persona: persona, configuration: configuration, targetThought: targetThought, userRequest: normalizedRequest, context: context, request: ReviewSummaryRequest(prompt: prompt))
+        return AIThoughtReplyPreview(persona: persona, configuration: configuration, targetThought: targetThought, userRequest: normalizedRequest, context: context, externalBrain: externalBrain, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .thoughtReply, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0)))
     }
 }
 
 public struct GenerateAIThoughtReply: Sendable {
     private let client: any ReviewSummaryClient
     private let repository: any AIThoughtReplyRepository
-    public init(client: any ReviewSummaryClient, repository: any AIThoughtReplyRepository) { self.client = client; self.repository = repository }
+    private let usage: AIAPIUsageRecorder?
+    public init(client: any ReviewSummaryClient, repository: any AIThoughtReplyRepository, usageRepository: (any AIAPIUsageRepository)? = nil) { self.client = client; self.repository = repository; usage = usageRepository.map { AIAPIUsageRecorder(repository: $0) } }
     public func callAsFunction(preview: AIThoughtReplyPreview, now: Date = Date(), thoughtID: UUID = UUID(), relationID: UUID = UUID()) async throws -> Thought {
         guard try repository.fetchActiveAIReplyPersona(id: preview.persona.id) == preview.persona else { throw AIPostError.inactivePersona }
         let currentContext = try repository.loadAIReplyContext(targetThoughtID: preview.targetThought.id, maximumEntries: AIThoughtReplyPrompt.maximumContextEntries)
         guard currentContext == preview.context else { throw ReviewSummaryError.stalePreview }
-        let response = try await client.generateSummary(preview.request)
+        let finish: @Sendable (ReviewSummaryResponse) async throws -> Thought = { response in
         let body = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { throw AIPostError.emptyResponse }
         guard body.count <= ThoughtDraft.characterLimit else { throw AIPostError.responseTooLong }
@@ -203,6 +214,10 @@ public struct GenerateAIThoughtReply: Sendable {
         let generation = AIPostGeneration(thoughtID: thoughtID, personaID: preview.persona.id, userRequest: preview.userRequest, provider: response.provider, model: response.model, promptVersion: AIThoughtReplyPrompt.version, generatedAt: now, kind: .reply, replyTargetThoughtID: preview.targetThought.id)
         try repository.saveGeneratedReply(thought, authorPersonaID: preview.persona.id, targetThoughtID: preview.targetThought.id, generation: generation, relationID: relationID)
         return thought
+        }
+        if let usage { return try await usage.call(client: client, request: preview.request, finish: finish) }
+        let response = try await client.generateSummary(preview.request)
+        return try await finish(response)
     }
 }
 
@@ -244,16 +259,17 @@ public enum AIPostPrompt {
 
         日本語で140文字以内の投稿本文だけを返してください。前置き、引用符、Markdown、文字数の説明は付けないでください。
         """
-        return AIPostPreview(persona: persona, configuration: configuration, userRequest: request, request: ReviewSummaryRequest(prompt: prompt))
+        return AIPostPreview(persona: persona, configuration: configuration, userRequest: request, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .personaPost, personaID: persona.id)))
     }
 }
 
 public struct GenerateAIPost: Sendable {
     private let client: any ReviewSummaryClient
     private let repository: any AIPersonaRepository
-    public init(client: any ReviewSummaryClient, repository: any AIPersonaRepository) { self.client = client; self.repository = repository }
+    private let usage: AIAPIUsageRecorder?
+    public init(client: any ReviewSummaryClient, repository: any AIPersonaRepository, usageRepository: (any AIAPIUsageRepository)? = nil) { self.client = client; self.repository = repository; usage = usageRepository.map { AIAPIUsageRecorder(repository: $0) } }
     public func callAsFunction(preview: AIPostPreview, now: Date = Date(), thoughtID: UUID = UUID()) async throws -> Thought {
-        let response = try await client.generateSummary(preview.request)
+        let finish: @Sendable (ReviewSummaryResponse) async throws -> Thought = { response in
         let body = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { throw AIPostError.emptyResponse }
         guard body.count <= ThoughtDraft.characterLimit else { throw AIPostError.responseTooLong }
@@ -261,5 +277,9 @@ public struct GenerateAIPost: Sendable {
         let generation = AIPostGeneration(thoughtID: thoughtID, personaID: preview.persona.id, userRequest: preview.userRequest, provider: response.provider, model: response.model, promptVersion: AIPostPrompt.version, generatedAt: now)
         try repository.saveGeneratedThought(thought, authorPersonaID: preview.persona.id, generation: generation)
         return thought
+        }
+        if let usage { return try await usage.call(client: client, request: preview.request, finish: finish) }
+        let response = try await client.generateSummary(preview.request)
+        return try await finish(response)
     }
 }

@@ -47,7 +47,11 @@ final class ThoughtStore: ObservableObject {
     @Published var humanReplyDraft = ""
     @Published private(set) var analytics: ThoughtAnalyticsSnapshot?
     @Published private(set) var isLoadingAnalytics = false
+    @Published private(set) var aiUsageAnalytics: AIAPIUsageAnalytics?
+    @Published private(set) var isLoadingAIUsageAnalytics = false
+    @Published var aiUsageAnalyticsError: String?
     let externalBackupManager: ExternalBackupManager?
+    let externalBrainManager: ExternalBrainManager
 
     private var timeline: ThoughtTimeline?
     private var exporter: ThoughtExporter?
@@ -56,21 +60,26 @@ final class ThoughtStore: ObservableObject {
     private var continuationRepository: (any ThoughtContinuationRepository)?
     private var tagRepository: (any ThoughtTagRepository)?
     private var analyticsRepository: (any ThoughtAnalyticsRepository)?
+    private var aiUsageAnalyticsRepository: (any AIAPIUsageAnalyticsRepository)?
+    private var aiUsageRepository: (any AIAPIUsageRepository)?
     private var dailySummaryRepository: (any DailySummaryRepository)?
     private var personaRepository: (any PersonaRepository)?
     private var aiPersonaRepository: (any AIPersonaRepository)?
     private var mentionRepository: (any ThoughtMentionRepository)?
     private var aiReplyRepository: (any AIThoughtReplyRepository)?
     private var humanReplyRepository: (any HumanThoughtReplyRepository)?
-    private let summaryClient: any ReviewSummaryClient
+    private var summaryClient: any ReviewSummaryClient
     private var isPosting = false
 
     init(
         repository: (any ThoughtRepository)? = nil,
         summaryClient: any ReviewSummaryClient = MockReviewSummaryClient(),
-        startupError: String? = nil
+        startupError: String? = nil,
+        externalBrainManager: ExternalBrainManager? = nil
     ) {
         self.summaryClient = summaryClient
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+        self.externalBrainManager = externalBrainManager ?? ExternalBrainManager(rootURL: support.appendingPathComponent("ExternalBrain", isDirectory: true))
         var backupManager: ExternalBackupManager?
         do {
             let repository = try repository ?? SQLiteThoughtRepository()
@@ -81,6 +90,8 @@ final class ThoughtStore: ObservableObject {
             continuationRepository = repository as? any ThoughtContinuationRepository
             tagRepository = repository as? any ThoughtTagRepository
             analyticsRepository = repository as? any ThoughtAnalyticsRepository
+            aiUsageAnalyticsRepository = repository as? any AIAPIUsageAnalyticsRepository
+            aiUsageRepository = repository as? any AIAPIUsageRepository
             dailySummaryRepository = repository as? any DailySummaryRepository
             personaRepository = repository as? any PersonaRepository
             aiPersonaRepository = repository as? any AIPersonaRepository
@@ -129,13 +140,13 @@ final class ThoughtStore: ObservableObject {
         }
     }
 
-    func createAIPersona(displayName: String, iconData: Data?, role: String, instructions: String) -> Bool {
+    func createAIPersona(displayName: String, iconData: Data?, role: String, instructions: String, externalBrainEnabled: Bool = false, agentPath: String = "", maxRetrievedChunks: Int = 5) -> Bool {
         guard let aiPersonaRepository else { errorMessage = "AI Personaを保存できませんでした。"; return false }
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let role = role.trimmingCharacters(in: .whitespacesAndNewlines), instructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 40, !role.isEmpty, !instructions.isEmpty else { errorMessage = "表示名・役割・指示を入力してください。"; return false }
         let persona = Persona(displayName: name, kind: .ai, iconData: iconData, iconMIMEType: iconData == nil ? nil : "image/jpeg")
-        do { try aiPersonaRepository.createAIPersona(persona, configuration: AIPersonaConfiguration(personaID: persona.id, role: role, instructions: instructions)); loadPersonas(); loadAIConfigurations(); return true }
+        do { try aiPersonaRepository.createAIPersona(persona, configuration: AIPersonaConfiguration(personaID: persona.id, role: role, instructions: instructions)); externalBrainManager.savePersona(.init(personaID: persona.id, enabled: externalBrainEnabled, agentPath: agentPath, maxRetrievedChunks: maxRetrievedChunks)); loadPersonas(); loadAIConfigurations(); return true }
         catch { errorMessage = "AI Personaを保存できませんでした。"; return false }
     }
 
@@ -173,7 +184,7 @@ final class ThoughtStore: ObservableObject {
         guard let aiPersonaRepository, let thoughtRepository else { aiPostError = "AI投稿の保存先を利用できません。"; return }
         isGeneratingAIPost = true; aiPostError = nil; defer { isGeneratingAIPost = false }
         do {
-            _ = try await GenerateAIPost(client: summaryClient, repository: aiPersonaRepository)(preview: preview)
+            _ = try await GenerateAIPost(client: summaryClient, repository: aiPersonaRepository, usageRepository: aiUsageRepository)(preview: preview)
             timeline = try ThoughtTimeline(repository: thoughtRepository); thoughts = timeline?.thoughts ?? []
             refreshTags(for: thoughts.map(\.id)); refreshAuthors(for: thoughts.map(\.id)); aiPostPreview = nil
         } catch { aiPostError = error.localizedDescription }
@@ -186,7 +197,9 @@ final class ThoughtStore: ObservableObject {
         }
         do {
             let context = try aiReplyRepository.loadAIReplyContext(targetThoughtID: thought.id, maximumEntries: AIThoughtReplyPrompt.maximumContextEntries)
-            aiReplyPreview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: thought, userRequest: userRequest, context: context); aiReplyError = nil
+            let query = (context.entries.map(\.thought.body) + [userRequest]).joined(separator: " ")
+            let externalBrain = externalBrainManager.retrieve(personaID: persona.id, query: query)
+            aiReplyPreview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: thought, userRequest: userRequest, context: context, externalBrain: externalBrain); aiReplyError = nil
         }
         catch { aiReplyError = error.localizedDescription }
     }
@@ -198,7 +211,7 @@ final class ThoughtStore: ObservableObject {
         guard !isGeneratingAIReply else { return }
         isGeneratingAIReply = true; aiReplyError = nil; defer { isGeneratingAIReply = false }
         do {
-            _ = try await GenerateAIThoughtReply(client: summaryClient, repository: aiReplyRepository)(preview: preview)
+            _ = try await GenerateAIThoughtReply(client: summaryClient, repository: aiReplyRepository, usageRepository: aiUsageRepository)(preview: preview)
             timeline = try ThoughtTimeline(repository: thoughtRepository); thoughts = timeline?.thoughts ?? []
             refreshTags(for: thoughts.map(\.id)); refreshAuthors(for: thoughts.map(\.id)); refreshMentions(for: thoughts.map(\.id)); refreshReplyRelations(for: thoughts.map(\.id)); aiReplyPreview = nil
             loadAIReplies(to: preview.targetThought.id)
@@ -264,7 +277,7 @@ final class ThoughtStore: ObservableObject {
             guard let tagRepository, let relationRepository, let personaRepository else { throw ReviewSummaryError.stalePreview }
             let current = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: preview.interval.start)
             guard current.inputs == preview.inputs && current.relations == preview.relations && current.existingTags == preview.existingTags && current.continuationCount == preview.continuationCount else { throw ReviewSummaryError.stalePreview }
-            let value = try await GenerateDailySummary(client: summaryClient, repository: dailySummaryRepository)(preview: preview)
+            let value = try await GenerateDailySummary(client: summaryClient, repository: dailySummaryRepository, usageRepository: aiUsageRepository)(preview: preview)
             dailySummary = value
             dailySummaries.removeAll { $0.dayStart == value.dayStart }
             dailySummaries.append(value)
@@ -327,6 +340,15 @@ final class ThoughtStore: ObservableObject {
 
     func updateContinuationDraft(_ value: String) {
         continuationDraft = ThoughtDraft.limited(value)
+    }
+
+    func loadAIUsageAnalytics(period: AIAPIUsagePeriod, now: Date = Date(), calendar: Calendar = .current) {
+        guard let aiUsageAnalyticsRepository else { aiUsageAnalyticsError = "AI使用状況を読み込めませんでした。"; return }
+        isLoadingAIUsageAnalytics = true; defer { isLoadingAIUsageAnalytics = false }
+        do {
+            aiUsageAnalytics = try LoadAIAPIUsageAnalytics(repository: aiUsageAnalyticsRepository, personas: personaRepository, calendar: calendar)(period: period, now: now)
+            aiUsageAnalyticsError = nil
+        } catch { aiUsageAnalytics = nil; aiUsageAnalyticsError = "AI使用状況を読み込めませんでした。利用履歴は変更されていません。" }
     }
 
     func updateHumanReplyDraft(_ value: String) { humanReplyDraft = ThoughtDraft.limited(value) }

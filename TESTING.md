@@ -12,6 +12,10 @@ swift test
 
 入力境界、SQLite、Persona、AI Reply／Context、タグ、ローカル分析、backup、Export、Historyに加え、Daily Summary v2のHuman／AI分類、Humanタグ限定、AIタグ候補のHuman index解決／不正index除外／生成時非保存／明示追加、複数AI、Relation、共通時間帯とtimezone境界、空Insight、v1 decode／v2 round-trip、SQLite再読込、stale previewを検証します。
 
+Persona External BrainはAGENT.md解析、`{current_project}`展開、unsafe path拒否、Markdown front matter／heading chunk／draft除外、SHA差分同期・削除・offline cache、FTS route／metadata優先、最大件数、0件、AI Reply promptの参考資料境界を`ExternalBrainTests.swift`で検証します。
+
+AI API Usage Analyticsは`AIAPIUsageTests.swift`でschema v10保存・再読込、success／failure／cancel／retry、Persona有無、External Brain有無、character、実測tokenのnil保持、Latency、Error分類、今日／7日／30日／全期間と各dimension、本文系columnを持たないprivacy、Telemetry書込失敗時の生成結果維持を検証します。
+
 ## UI Test
 
 `AiTextAppUITests`は既存Timeline Composerに加え、Quick Captureの起動、空draft、自動focus、trim投稿、Timeline即時反映、単一投稿、空／141文字拒否、空キャンセル、入力中破棄確認・継続時保持、投稿失敗時の画面・draft保持を検証します。custom URLのcold launch／foreground受信、通常起動ではTimelineのままであること、route dismiss後の消費も検証対象です。本文検索、Thoughtに紐づくタグ、Continuation、Daily Summaryのflowも維持します。
