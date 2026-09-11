@@ -12,6 +12,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ## 実装済み
 
+- External Brain Routing v1。Persona別AGENT.mdのRetrieval RouteをAI Replyだけでなく独立Persona Postにも適用し、依頼文を検索queryとして最大5チャンクを取得する。送信前にroute／source／heading／excerpt／最終payloadを確認でき、Usage metadataへ使用有無とchunk数を記録する。Daily SummaryにはPersona routeを適用しない。
 - AI API Usage Analytics v1。AI API Callをschema v10の独立したローカルMetadataとして記録し、AI Reply／Daily Summary／Persona Postを共通Recorderへ統合する。Persona／Feature／Provider／Model別件数、成功率、Error、Latency、日別推移を集計し、External Brain使用有無・取得chunk数も保持する。token usageはproviderから取得できる場合だけ実測保存し、現状はnilのまま文字数を常時記録する。prompt／response／Thought／External Brain本文はUsage DBへ保存せず、Telemetry保存失敗は既存AI機能を失敗させない。
 - Persona External Brain v1。単一GitHub RepositoryとPersona別AGENT.md／Retrieval Routeを使い、MarkdownをApplication SupportへSHA差分同期してheading単位のSQLite FTS5 indexから最大5チャンクを取得する。AI Reply送信前Previewで資料と最終payloadを確認できる。GitHubはread-only、tokenはKeychain保存で、障害時はcacheまたはExternal Brainなしで返信を継続する。
 
@@ -38,7 +39,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - UUIDと作成・更新・削除日時を持つThought原文モデル。
 - Application Support配下のSQLiteを正本にしたローカル保存、query順序、ソフトデリート。
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
-- `PRAGMA user_version`によるschema version管理（現在v9）。
+- `PRAGMA user_version`によるschema version管理（現在v10）。
 - 画面下部に固定し、入力中だけ枠内右端に投稿ボタンを表示するコンパクトなComposer。
 - Lazy Timeline、自然な相対日時、メニュー内削除、Empty State。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。
@@ -126,21 +127,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ### Xcode環境が利用可能になったら行う検証
 
-1. macOSで`swift test`を実行し、schema v4 migration、本文検索、タグ、Review、既存投稿境界、AI要約対象維持を確認する。
-2. iPhone SEと最新標準iPhone Simulatorでbuild／XCUITestを実行する。
-3. AI要約プレビューの期間・件数・文字数・Thought順序、キャンセル、確定後のMock表示、loading、通信失敗、再試行、Thoughtなし、再要約を手動確認する。
-4. プレビュー表示後に対象Thoughtが変わった場合、AIを呼ばず対象再読込エラーになることを確認する。
-5. AI要約履歴で削除キャンセル、個別削除、最新切替、全件削除後の空状態、削除失敗表示を確認する。
-6. AI要約履歴のMarkdown／JSON形式Menu、ファイル名、Share Sheet、Files／AirDrop保存、削除済み要約の拒否を確認する。
-7. AI要約を含むReview画面をLight／Dark Mode、Dynamic Type、VoiceOverで確認する。
-8. XcodeでFirebase Apple SDK 12.17.0以降をresolveし、`FirebaseCore`／`FirebaseAILogic`／`FirebaseAppCheck`のcompileを確認する（Windowsでは未実行）。
-9. Firebase Consoleから取得した`GoogleService-Info.plist`をローカルでapp targetへ追加し、Debug Providerの出力tokenをConsoleへ登録してSimulator実通信を確認する。plist／tokenは未配置・未コミット。
-10. 実機でApp Attest entitlement／provider、AI Logic実通信、保存されるprovider／model、Firebase未設定、App Check拒否、quota超過、offline、timeout、空応答を確認する（未実行）。
-11. 実機で既存Thought Share Sheet（Files、AirDrop）、外部backup／Restoreを回帰確認する。
-12. `AiTextAppWidget`をbuild・署名し、systemSmallをホーム画面へ配置して、cold launch／foregroundの両方でQuick Captureへ遷移し自動focusすることを確認する。
-13. Widget経由で既存の空／140／141文字validation、trim、単一投稿、失敗時draft保持、投稿後Timeline反映を確認する。
-14. `swift test`でローカル分析の件数、日別／曜日／時間帯、タグ、Continuation、read-only性と既存Repository回帰を確認する。
-15. Timelineから分析画面を開き、小型iPhone、Dynamic Type、Dark Mode、VoiceOverで30日分の可読性を確認する。
+未実行項目と実施順はRepository直下の`MAC_VALIDATION.md`へ集約する。Windowsで機能を追加した場合は、Mac固有のcompile／Simulator／実機／署名確認を同ファイルへ追記してから完了とする。
 
 ### 次の実装候補
 

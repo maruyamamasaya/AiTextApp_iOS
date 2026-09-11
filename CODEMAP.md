@@ -15,7 +15,7 @@
 - `AiTextApp/App/TimelineView.swift` — Composer、Lazy Timeline、トップ右上の歯車から開く設定（プロフィール／Persona、Export、バックアップ）、Thought検索、本文に紐づくタグUI、Thought Detail、History、Continuation Composer、削除UI。独立したHistory Review／タグ一覧のトップバー導線は持たない。
 - `AiTextApp/App/TimelineView.swift`内`ProfileEditorView`／`PersonaIcon` — デフォルト人間の表示名、写真選択・縮小、丸型アイコン表示。
 - `AiTextApp/App/TimelineView.swift`内`PersonaManagementView`／`AIPersonaEditorView` — 複数AI Personaの一覧、追加、編集、無効化。
-- `AiTextApp/App/TimelineView.swift`内`AIPostRequestView`／`AIPostPreviewView` — AIへの依頼入力、最終payload確認、明示送信。
+- `AiTextApp/App/TimelineView.swift`内`AIPostRequestView`／`AIPostPreviewView` — AIへの依頼入力、Persona External Brainのroute／source確認、最終payload確認、明示送信。
 - `AiTextApp/App/TimelineView.swift`内`AIReplyRequestView`／`AIReplyPreviewView` — メンション付きThoughtへのAI返信依頼、対象と最終payload確認、明示送信、Detail返信表示。
 - `AiTextApp/App/ThoughtStore.swift` — Timeline／Quick Capture共通投稿境界、本文検索／タグ／Review／History／Continuation UI stateとCoreの接続。
 - `AiTextApp/App/ShareSheet.swift` — Exportファイルを標準Share Sheetへ渡すbridge。
@@ -48,7 +48,7 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 - `ThoughtCore/ReviewSummaryExporter.swift` — 旧期間要約の互換コード。現在のUIからは利用せず、既存データを壊さないため保持する。
 - `ThoughtCore/ThoughtExporter.swift` — Repository経由のMarkdown／JSON生成。
 - `ThoughtCore/ExternalBackup.swift` — manifest、外部2世代backup、検証、pending Restore／rollback。
-- `ThoughtCore/ExternalBrain.swift` — Persona別設定、AGENT.md／front matter parser、heading chunk、manifest差分cache、SQLite FTS5、route優先retrieval、prompt用provenance。
+- `ThoughtCore/ExternalBrain.swift` — Persona別設定、AGENT.md／front matter parser、heading chunk、manifest差分cache、SQLite FTS5、route優先retrieval、AI Reply／Persona Post共通のprompt用provenance。
 
 Search: `ThoughtRepository|ThoughtRelationRepository|createContinuation|SQLiteThoughtRepository|ExternalBackupService|RestoreCoordinator|legacy_json_v1`
 

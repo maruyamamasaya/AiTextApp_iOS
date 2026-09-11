@@ -226,6 +226,7 @@ public struct AIPostPreview: Identifiable, Equatable, Sendable {
     public let persona: Persona
     public let configuration: AIPersonaConfiguration
     public let userRequest: String
+    public let externalBrain: ExternalBrainContext?
     public let request: ReviewSummaryRequest
 }
 
@@ -243,23 +244,29 @@ public enum AIPostError: Error, LocalizedError, Equatable {
 }
 
 public enum AIPostPrompt {
-    public static let version = 1
-    public static func prepare(persona: Persona, configuration: AIPersonaConfiguration, userRequest: String) throws -> AIPostPreview {
+    public static let version = 2
+    public static func prepare(persona: Persona, configuration: AIPersonaConfiguration, userRequest: String, externalBrain: ExternalBrainContext? = nil) throws -> AIPostPreview {
         let request = userRequest.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty else { throw AIPostError.invalidRequest }
         guard persona.kind == .ai, persona.deletedAt == nil else { throw AIPostError.inactivePersona }
         guard !configuration.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !configuration.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AIPostError.missingConfiguration }
+        let externalRole = externalBrain.map { "\nExternal Brain上のRole: \($0.role)" } ?? ""
+        let brainSection = externalBrain?.promptSection ?? "--- External Brain ---\n利用なし"
         let prompt = """
         あなたはプライベートなThought Timelineへ参加するAI Personaです。
         Persona名: \(persona.displayName)
-        役割: \(configuration.role)
+        役割: \(configuration.role)\(externalRole)
         指示: \(configuration.instructions)
+        project固有のdecision、local rule、user固有情報は、一般論より優先してください。
+
+        \(brainSection)
+
         ユーザーの依頼: \(request)
 
         日本語で140文字以内の投稿本文だけを返してください。前置き、引用符、Markdown、文字数の説明は付けないでください。
         """
-        return AIPostPreview(persona: persona, configuration: configuration, userRequest: request, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .personaPost, personaID: persona.id)))
+        return AIPostPreview(persona: persona, configuration: configuration, userRequest: request, externalBrain: externalBrain, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .personaPost, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0)))
     }
 }
 

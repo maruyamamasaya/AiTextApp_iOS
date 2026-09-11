@@ -174,7 +174,8 @@ final class ThoughtStore: ObservableObject {
 
     func prepareAIPost(persona: Persona, userRequest: String) {
         guard let configuration = aiConfigurations[persona.id] else { aiPostError = AIPostError.missingConfiguration.localizedDescription; return }
-        do { aiPostPreview = try AIPostPrompt.prepare(persona: persona, configuration: configuration, userRequest: userRequest); aiPostError = nil }
+        let externalBrain = externalBrainManager.retrieve(personaID: persona.id, query: userRequest)
+        do { aiPostPreview = try AIPostPrompt.prepare(persona: persona, configuration: configuration, userRequest: userRequest, externalBrain: externalBrain); aiPostError = nil }
         catch { aiPostError = error.localizedDescription }
     }
 

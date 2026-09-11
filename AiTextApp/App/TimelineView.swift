@@ -1156,6 +1156,16 @@ private struct AIPostPreviewView: View {
             List {
                 Section("投稿者") { Text(preview.persona.displayName); LabeledContent("役割", value: preview.configuration.role) }
                 Section("依頼") { Text(preview.userRequest) }
+                Section("External Brain") {
+                    if let brain = preview.externalBrain {
+                        LabeledContent("AGENT.md", value: brain.agentPath)
+                        VStack(alignment: .leading, spacing: 4) { Text("選択Route").font(.caption).foregroundStyle(.secondary); ForEach(Array(brain.routes.enumerated()), id: \.offset) { Text("\($0.offset + 1). \($0.element)") } }
+                        if brain.chunks.isEmpty { Text("参照資料なし").foregroundStyle(.secondary) }
+                        ForEach(Array(brain.chunks.enumerated()), id: \.offset) { item in
+                            VStack(alignment: .leading, spacing: 4) { Text(item.element.documentPath).font(.subheadline.weight(.semibold)); Text(item.element.heading).font(.caption).foregroundStyle(.secondary); Text(item.element.excerpt).font(.caption).lineLimit(6) }
+                        }
+                    } else { Text("利用なし").foregroundStyle(.secondary) }
+                }
                 Section("最終payload") { Text(preview.request.prompt).font(.caption).textSelection(.enabled) }
                 if let error = store.aiPostError { Section { Text(error).foregroundStyle(.red) } }
             }
