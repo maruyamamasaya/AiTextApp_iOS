@@ -15,7 +15,7 @@ public protocol ThoughtRepository: Sendable {
 }
 
 /// A small repository useful for previews and domain tests. SQLite is the app's durable store.
-public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
+public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
     private var records: [Thought]
     private var relations: [ThoughtRelation]
     private var summaries: [ReviewSummary]
@@ -93,6 +93,24 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         let ids = Set(thoughtIDs); return Dictionary(uniqueKeysWithValues: relations.filter { $0.type == .repliesTo && ids.contains($0.sourceThoughtID) }.map { ($0.sourceThoughtID, $0.targetThoughtID) })
     } }
     public func fetchAIPostGeneration(for thoughtID: UUID) throws -> AIPostGeneration? { lock.withLock { aiGenerations[thoughtID] } }
+    public func fetchActiveAIReplyPersona(id: UUID) throws -> Persona? { lock.withLock { guard let persona = personas[id], persona.kind == .ai, persona.deletedAt == nil else { return nil }; return persona } }
+    public func loadAIReplyContext(targetThoughtID: UUID, maximumEntries: Int) throws -> AIReplyContext { try lock.withLock {
+        guard maximumEntries > 0, records.contains(where: { $0.id == targetThoughtID }) else { throw CocoaError(.fileNoSuchFile) }
+        var currentID: UUID? = targetThoughtID, visited = Set<UUID>(), newestFirst: [AIReplyContextEntry] = [], traversed: [ThoughtRelation] = []
+        while let id = currentID, visited.insert(id).inserted, newestFirst.count < maximumEntries {
+            if let thought = records.first(where: { $0.id == id }), thought.deletedAt == nil,
+               let authorID = authorIDs[id], let author = personas[authorID] { newestFirst.append(AIReplyContextEntry(thought: thought, author: author)) }
+            guard let relation = relations.first(where: { $0.sourceThoughtID == id && $0.type == .repliesTo }) else { break }
+            traversed.append(relation); currentID = relation.targetThoughtID
+        }
+        return AIReplyContext(entries: Array(newestFirst.reversed()), targetThoughtID: targetThoughtID, relations: Array(traversed.reversed()))
+    } }
+    public func createHumanReply(body: String, targetThoughtID: UUID, mentionedPersonaID: UUID?, now: Date, thoughtID: UUID, relationID: UUID) throws -> Thought? { try lock.withLock {
+        guard let body = ThoughtDraft.validBody(from: body), records.contains(where: { $0.id == targetThoughtID && $0.deletedAt == nil }) else { return nil }
+        if let mentionedPersonaID { guard personas[mentionedPersonaID]?.kind == .ai, personas[mentionedPersonaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) } }
+        let thought = Thought(id: thoughtID, body: body, createdAt: now), relation = ThoughtRelation(id: relationID, sourceThoughtID: thoughtID, targetThoughtID: targetThoughtID, type: .repliesTo, createdAt: now)
+        try validate(relation, includingSource: thoughtID); records.append(thought); authorIDs[thoughtID] = Persona.defaultHumanID; if let mentionedPersonaID { mentionIDs[thoughtID] = mentionedPersonaID }; relations.append(relation); return thought
+    } }
 
     public func fetchTimeline() throws -> [Thought] {
         lock.withLock {

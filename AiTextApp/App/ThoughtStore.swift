@@ -44,6 +44,7 @@ final class ThoughtStore: ObservableObject {
     @Published private(set) var history: [ThoughtHistoryEntry] = []
     @Published private(set) var historyCurrentID: UUID?
     @Published var continuationDraft = ""
+    @Published var humanReplyDraft = ""
     @Published private(set) var analytics: ThoughtAnalyticsSnapshot?
     @Published private(set) var isLoadingAnalytics = false
     let externalBackupManager: ExternalBackupManager?
@@ -60,6 +61,7 @@ final class ThoughtStore: ObservableObject {
     private var aiPersonaRepository: (any AIPersonaRepository)?
     private var mentionRepository: (any ThoughtMentionRepository)?
     private var aiReplyRepository: (any AIThoughtReplyRepository)?
+    private var humanReplyRepository: (any HumanThoughtReplyRepository)?
     private let summaryClient: any ReviewSummaryClient
     private var isPosting = false
 
@@ -84,6 +86,7 @@ final class ThoughtStore: ObservableObject {
             aiPersonaRepository = repository as? any AIPersonaRepository
             mentionRepository = repository as? any ThoughtMentionRepository
             aiReplyRepository = repository as? any AIThoughtReplyRepository
+            humanReplyRepository = repository as? any HumanThoughtReplyRepository
             exporter = ThoughtExporter(repository: repository)
             thoughts = timeline.thoughts
             if let personaRepository { defaultHumanPersona = try personaRepository.fetchDefaultHumanPersona() }
@@ -176,12 +179,15 @@ final class ThoughtStore: ObservableObject {
         } catch { aiPostError = error.localizedDescription }
     }
 
-    func prepareAIReply(to thought: Thought) {
+    func prepareAIReply(to thought: Thought, userRequest: String) {
         guard thought.deletedAt == nil, let persona = mentionedPersonasByThoughtID[thought.id],
-              personas.contains(where: { $0.id == persona.id }), let configuration = aiConfigurations[persona.id] else {
+              personas.contains(where: { $0.id == persona.id }), let configuration = aiConfigurations[persona.id], let aiReplyRepository else {
             aiReplyError = "返信先または有効なAI Personaを確認できません。"; return
         }
-        do { aiReplyPreview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: thought, targetAuthorName: personasByThoughtID[thought.id]?.displayName); aiReplyError = nil }
+        do {
+            let context = try aiReplyRepository.loadAIReplyContext(targetThoughtID: thought.id, maximumEntries: AIThoughtReplyPrompt.maximumContextEntries)
+            aiReplyPreview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: thought, userRequest: userRequest, context: context); aiReplyError = nil
+        }
         catch { aiReplyError = error.localizedDescription }
     }
 
@@ -196,7 +202,8 @@ final class ThoughtStore: ObservableObject {
             timeline = try ThoughtTimeline(repository: thoughtRepository); thoughts = timeline?.thoughts ?? []
             refreshTags(for: thoughts.map(\.id)); refreshAuthors(for: thoughts.map(\.id)); refreshMentions(for: thoughts.map(\.id)); refreshReplyRelations(for: thoughts.map(\.id)); aiReplyPreview = nil
             loadAIReplies(to: preview.targetThought.id)
-        } catch { aiReplyError = error.localizedDescription }
+        } catch ReviewSummaryError.stalePreview { aiReplyError = "確認後に会話内容が変更されたため送信しませんでした。もう一度内容を確認してください。" }
+        catch { aiReplyError = error.localizedDescription }
     }
 
     func loadAIReplies(to thoughtID: UUID) {
@@ -320,6 +327,21 @@ final class ThoughtStore: ObservableObject {
 
     func updateContinuationDraft(_ value: String) {
         continuationDraft = ThoughtDraft.limited(value)
+    }
+
+    func updateHumanReplyDraft(_ value: String) { humanReplyDraft = ThoughtDraft.limited(value) }
+    var canPostHumanReply: Bool { ThoughtDraft.validBody(from: humanReplyDraft) != nil }
+
+    @discardableResult func postHumanReply(to target: Thought) -> Thought? {
+        guard let humanReplyRepository, let thoughtRepository else { errorMessage = "返信を保存できませんでした。"; return nil }
+        let targetAuthor = personasByThoughtID[target.id]
+        let mentionID = targetAuthor?.kind == .ai && targetAuthor?.deletedAt == nil ? targetAuthor?.id : nil
+        do {
+            guard let reply = try humanReplyRepository.createHumanReply(body: humanReplyDraft, targetThoughtID: target.id, mentionedPersonaID: mentionID, now: Date(), thoughtID: UUID(), relationID: UUID()) else { return nil }
+            timeline = try ThoughtTimeline(repository: thoughtRepository); thoughts = timeline?.thoughts ?? []; humanReplyDraft = ""
+            refreshAuthors(for: thoughts.map(\.id)); refreshMentions(for: thoughts.map(\.id)); refreshReplyRelations(for: thoughts.map(\.id)); loadAIReplies(to: target.id)
+            return reply
+        } catch { errorMessage = "返信を保存できませんでした。入力内容は残しています。"; return nil }
     }
 
     func loadHistory(for thoughtID: UUID) {

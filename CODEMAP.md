@@ -29,7 +29,7 @@ Search: `@main|TimelineView|ThoughtStore|confirmationDialog`
 
 ## Thought Domain
 
-- `ThoughtCore/Thought.swift` — 原文、Persona、AI Persona設定、AI投稿／AI返信preview・生成use case、メンションmodelとrepository境界。
+- `ThoughtCore/Thought.swift` — 原文、Persona、AI Persona設定、AI投稿／AI返信preview・生成use case、typed Reply Contextと取得repository境界、メンションmodel。
 - `ThoughtCore/ThoughtDraft.swift` — 140文字、trim、validation。
 - `ThoughtCore/ThoughtTimeline.swift` — 投稿、降順表示、soft delete use case。
 - `ThoughtCore/ThoughtRelation.swift` — Relationモデル、repository／原子的Continuation境界、History取得use case。

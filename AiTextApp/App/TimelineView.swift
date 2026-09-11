@@ -627,6 +627,7 @@ private struct ThoughtDetailView: View {
     @State private var showsComposer = false
     @State private var showsTagEditor = false
     @State private var showsAIReply = false
+    @State private var showsHumanReplyComposer = false
     @FocusState private var composerIsFocused: Bool
 
     init(store: ThoughtStore, initialThoughtID: UUID) {
@@ -671,11 +672,15 @@ private struct ThoughtDetailView: View {
                                 .disabled(store.isGeneratingAIReply || !store.personas.contains(where: { $0.id == store.mentionedPersonasByThoughtID[currentThought.id]?.id }))
                                 .accessibilityIdentifier("requestAIReplyButton")
                         }
+                        Button("返信を書く") { showsHumanReplyComposer.toggle() }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("writeReplyButton")
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
 
                 if showsComposer { continuationComposer(parent: currentThought) }
+                    if showsHumanReplyComposer { humanReplyComposer(target: currentThought) }
                     if let replies = store.aiRepliesByTargetID[currentThought.id], !replies.isEmpty {
                         Divider(); Text("AI Reply").font(.headline).padding(.horizontal, 16).padding(.top, 18)
                         ForEach(replies) { reply in
@@ -876,21 +881,31 @@ private struct AIReplyRequestView: View {
     @ObservedObject var store: ThoughtStore
     let thought: Thought
     @Environment(\.dismiss) private var dismiss
+    @State private var userRequest = "このThoughtに返信してください"
     var body: some View {
         NavigationStack {
             List {
                 if let persona = store.mentionedPersonasByThoughtID[thought.id] {
                     Section("返信するAI") { HStack { PersonaIcon(persona: persona, size: 40); VStack(alignment: .leading) { Text(persona.displayName).font(.headline); Text(store.aiConfigurations[persona.id]?.role ?? "").font(.caption).foregroundStyle(.secondary) } } }
                     Section("対象Thought") { Text(thought.body) }
+                    Section("依頼") { TextField("AIへの今回の依頼", text: $userRequest, axis: .vertical).lineLimit(2...5) }
                     if let configuration = store.aiConfigurations[persona.id] { Section("指示") { Text(configuration.instructions) } }
                 }
                 Section { Text("確認を押すまでAI通信は行いません。").font(.footnote).foregroundStyle(.secondary) }
                 if let error = store.aiReplyError { Section { Text(error).foregroundStyle(.red) } }
             }
             .navigationTitle("AIに返信を依頼")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("確認") { store.prepareAIReply(to: thought) } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("確認") { store.prepareAIReply(to: thought, userRequest: userRequest) }.disabled(userRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } }
             .sheet(item: $store.aiReplyPreview) { AIReplyPreviewView(store: store, preview: $0, parentDismiss: dismiss) }
         }
+    }
+
+    private func humanReplyComposer(target: Thought) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("返信を書く").font(.headline)
+            TextEditor(text: Binding(get: { store.humanReplyDraft }, set: store.updateHumanReplyDraft)).frame(minHeight: 80).padding(8).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)).accessibilityIdentifier("humanReplyComposer")
+            HStack { Text("\(store.humanReplyDraft.count) / \(ThoughtDraft.characterLimit)").font(.caption.monospacedDigit()); Spacer(); Button("返信") { if let reply = store.postHumanReply(to: target) { currentThoughtID = reply.id; showsHumanReplyComposer = false; store.loadHistory(for: reply.id); store.loadAIReplies(to: reply.id) } }.buttonStyle(.borderedProminent).disabled(!store.canPostHumanReply).accessibilityIdentifier("postHumanReplyButton") }
+        }.padding(.horizontal, 16).padding(.bottom, 16)
     }
 }
 
@@ -904,6 +919,15 @@ private struct AIReplyPreviewView: View {
             List {
                 Section("返信するAI") { Text(preview.persona.displayName); LabeledContent("役割", value: preview.configuration.role) }
                 Section("対象Thought") { Text(preview.targetThought.body) }
+                Section("依頼") { Text(preview.userRequest) }
+                Section("会話文脈") {
+                    ForEach(preview.context.entries, id: \.thought.id) { entry in
+                        HStack(alignment: .top, spacing: 10) {
+                            PersonaIcon(persona: entry.author, size: 32)
+                            VStack(alignment: .leading, spacing: 4) { Text(entry.author.displayName).font(.subheadline.weight(.semibold)); Text(entry.author.kind == .human ? "Human" : "AI").font(.caption2).foregroundStyle(.secondary); Text(entry.thought.body) }
+                        }
+                    }
+                }
                 Section("最終payload") { Text(preview.request.prompt).font(.caption).textSelection(.enabled) }
                 Section("生成元") { LabeledContent("Provider", value: ReviewSummaryAIConfiguration.providerName); LabeledContent("Model", value: ReviewSummaryAIConfiguration.modelName) }
                 if let error = store.aiReplyError { Section { Text(error).foregroundStyle(.red) } }

@@ -44,6 +44,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `Persona` / `PersonaRepository` / `AuthoredThoughtRepository`: 人間／AIに共通する投稿者モデル、複数Personaの管理、任意Persona IDとThoughtを同一transactionで保存する境界。固定IDの人間Personaは無効化できない。
 - `AIPersonaConfiguration` / `GenerateAIPost`: Personaごとの役割・指示、ユーザー依頼からimmutableな送信前previewを作り、明示確定後の応答だけをAI名義で投稿する。140文字を超える応答や空応答は保存しない。
 - `AIThoughtReplyPrompt` / `GenerateAIThoughtReply`: メンション対象AIと対象Thoughtだけからimmutableな返信previewを作り、成功応答をAI名義Thought、`repliesTo` Relation、reply生成来歴として同一transactionで保存する。
+- `AIReplyContextRepository`: 対象から`repliesTo`だけを逆向きに辿り、削除済み本文を除いた直近最大5件を投稿者付き・古い順で返す。PreviewはThought・Relation・Personaを固定し、生成直前の再取得結果と異なる場合は通信前に中止する。
 - `ThoughtMention` / `ThoughtMentionRepository`: Thought本文の文字列解析ではなく、ThoughtとAI Persona IDの単一メンション関連をatomic保存・一括取得する。メンション作成自体はAI clientを呼ばない。
 - `ThoughtRepository`: create、Timeline query、literal部分一致検索、日付範囲query、ID取得、全件取得、soft deleteの保存境界。
 - `ThoughtTag` / `ThoughtTagRepository`: Thought原文から独立したタグ、正規化、付与・解除transaction、Thought別／全タグ／タグ別Thought queryの境界。

@@ -1294,8 +1294,10 @@ struct PersonaTests {
         let persona = Persona(displayName: "ノア", kind: .ai)
         let configuration = AIPersonaConfiguration(personaID: persona.id, role: "思考整理", instructions: "否定せず別視点を返す")
         let target = Thought(body: "最近、開発ツールを作りすぎている気がする")
-        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target, targetAuthorName: "自分")
+        let context = AIReplyContext(entries: [AIReplyContextEntry(thought: target, author: Persona(displayName: "自分", kind: .human))], targetThoughtID: target.id, relations: [])
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target, userRequest: "意見をください", context: context)
         #expect(preview.request.prompt.contains("ノア")); #expect(preview.request.prompt.contains(configuration.role)); #expect(preview.request.prompt.contains(configuration.instructions)); #expect(preview.request.prompt.contains(target.body)); #expect(preview.request.prompt.contains("140文字以内"))
+        #expect(preview.request.prompt.contains("意見をください")); #expect(preview.request.prompt.contains("[Human: 自分]")); #expect(preview.request.prompt.contains("返信対象:"))
     }
 
     @Test func replyRejectsEmptyOverlongInactiveAndDeletedInputs() async throws {
@@ -1305,13 +1307,15 @@ struct PersonaTests {
         try repository.createAIPersona(persona, configuration: configuration)
         let target = Thought(body: "考えを整理したい")
         try repository.create(target)
-        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target)
+        let context = try repository.loadAIReplyContext(targetThoughtID: target.id, maximumEntries: 5)
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target, userRequest: "返信して", context: context)
         await #expect(throws: AIPostError.emptyResponse) { try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "  \n"), repository: repository)(preview: preview) }
         await #expect(throws: AIPostError.responseTooLong) { try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: String(repeating: "あ", count: 141)), repository: repository)(preview: preview) }
         var inactive = persona; inactive.deletedAt = Date()
-        #expect(throws: AIPostError.inactivePersona) { try AIThoughtReplyPrompt.prepare(persona: inactive, configuration: configuration, targetThought: target) }
+        #expect(throws: AIPostError.inactivePersona) { try AIThoughtReplyPrompt.prepare(persona: inactive, configuration: configuration, targetThought: target, userRequest: "返信して", context: context) }
         var deleted = target; deleted.deletedAt = Date()
-        #expect(throws: AIPostError.invalidRequest) { try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: deleted) }
+        let deletedContext = AIReplyContext(entries: [AIReplyContextEntry(thought: deleted, author: Persona(displayName: "自分", kind: .human))], targetThoughtID: deleted.id, relations: [])
+        #expect(throws: AIPostError.invalidRequest) { try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: deleted, userRequest: "返信して", context: deletedContext) }
         #expect(try repository.fetchTimeline().count == 1)
     }
 
@@ -1323,7 +1327,7 @@ struct PersonaTests {
         try repository.createAIPersona(persona, configuration: configuration)
         let target = Thought(body: "この考えどう思う？")
         try repository.create(target, authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: persona.id)
-        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target)
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target, userRequest: "返信して", context: repository.loadAIReplyContext(targetThoughtID: target.id, maximumEntries: 5))
         let firstID = UUID(), secondID = UUID()
         _ = try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "一つ目の返信"), repository: repository)(preview: preview, now: Date(timeIntervalSince1970: 10), thoughtID: firstID)
         _ = try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "二つ目の返信"), repository: repository)(preview: preview, now: Date(timeIntervalSince1970: 20), thoughtID: secondID)
@@ -1334,16 +1338,92 @@ struct PersonaTests {
         #expect(try repository.fetchContinuations(of: target.id).isEmpty)
     }
 
-    @Test func replySaveRollsBackWhenTargetWasDeletedOrPersonaBecameInactive() async throws {
+    @Test func replyGenerationStopsWhenTargetWasDeletedAfterPreview() async throws {
         let repository = MemoryThoughtRepository()
         let persona = Persona(displayName: "ノア", kind: .ai)
         let configuration = AIPersonaConfiguration(personaID: persona.id, role: "整理", instructions: "短く")
         try repository.createAIPersona(persona, configuration: configuration)
         let target = Thought(body: "対象"); try repository.create(target)
-        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target)
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target, userRequest: "返信して", context: repository.loadAIReplyContext(targetThoughtID: target.id, maximumEntries: 5))
         _ = try repository.softDelete(id: target.id, at: Date())
-        await #expect(throws: CocoaError.self) { try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "保存されない"), repository: repository)(preview: preview) }
+        await #expect(throws: ReviewSummaryError.stalePreview) { try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "保存されない"), repository: repository)(preview: preview) }
         #expect(try repository.fetchTimeline().isEmpty)
+    }
+
+    @Test func replyContextUsesOnlyReplyChainLatestFiveInOldestFirstOrder() throws {
+        let thoughts = (0..<7).map { Thought(body: "会話\($0)", createdAt: Date(timeIntervalSince1970: Double($0))) }
+        var relations = (1..<7).map { ThoughtRelation(sourceThoughtID: thoughts[$0].id, targetThoughtID: thoughts[$0 - 1].id, type: .repliesTo, createdAt: thoughts[$0].createdAt) }
+        relations.append(ThoughtRelation(sourceThoughtID: thoughts[6].id, targetThoughtID: thoughts[0].id, type: .continues))
+        let repository = MemoryThoughtRepository(records: thoughts, relations: relations)
+        let context = try repository.loadAIReplyContext(targetThoughtID: thoughts[6].id, maximumEntries: 5)
+        #expect(context.entries.map(\.thought.id) == Array(thoughts[2...6]).map(\.id))
+        #expect(context.entries.map(\.author.kind).allSatisfy { $0 == .human })
+        #expect(context.relations.allSatisfy { $0.type == .repliesTo })
+    }
+
+    @Test func replyContextSkipsDeletedThoughtAndStopsAtCycleWithoutDuplicates() throws {
+        var a = Thought(body: "A"), b = Thought(body: "B"), c = Thought(body: "C")
+        b.deletedAt = Date()
+        let relations = [
+            ThoughtRelation(sourceThoughtID: b.id, targetThoughtID: a.id, type: .repliesTo),
+            ThoughtRelation(sourceThoughtID: c.id, targetThoughtID: b.id, type: .repliesTo),
+            ThoughtRelation(sourceThoughtID: a.id, targetThoughtID: c.id, type: .repliesTo)
+        ]
+        let repository = MemoryThoughtRepository(records: [a, b, c], relations: relations)
+        let context = try repository.loadAIReplyContext(targetThoughtID: c.id, maximumEntries: 5)
+        #expect(context.entries.map(\.thought.id) == [a.id, c.id])
+        #expect(Set(context.entries.map(\.thought.id)).count == context.entries.count)
+    }
+
+    @Test func replyContextPreservesHumanAndInactiveAIAuthors() throws {
+        let repository = MemoryThoughtRepository()
+        let human = Thought(body: "Human"); try repository.create(human)
+        var ai = Persona(displayName: "Architect", kind: .ai)
+        try repository.createPersona(ai)
+        let aiThought = Thought(body: "AI"); try repository.create(aiThought, authorPersonaID: ai.id)
+        try repository.create(ThoughtRelation(sourceThoughtID: aiThought.id, targetThoughtID: human.id, type: .repliesTo))
+        ai.deletedAt = Date(); try repository.updatePersona(ai)
+        let context = try repository.loadAIReplyContext(targetThoughtID: aiThought.id, maximumEntries: 5)
+        #expect(context.entries.map(\.author.kind) == [.human, .ai])
+        #expect(context.entries.last?.author.displayName == "Architect")
+    }
+
+    @Test func changedReplyContextRejectsStalePreviewBeforeGeneration() async throws {
+        let repository = MemoryThoughtRepository()
+        let persona = Persona(displayName: "ノア", kind: .ai)
+        let configuration = AIPersonaConfiguration(personaID: persona.id, role: "整理", instructions: "短く")
+        try repository.createAIPersona(persona, configuration: configuration)
+        let parent = Thought(body: "親"), target = Thought(body: "対象")
+        try repository.create(parent); try repository.create(target)
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target, userRequest: "返信して", context: repository.loadAIReplyContext(targetThoughtID: target.id, maximumEntries: 5))
+        try repository.create(ThoughtRelation(sourceThoughtID: target.id, targetThoughtID: parent.id, type: .repliesTo))
+        await #expect(throws: ReviewSummaryError.stalePreview) { try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "呼ばれない"), repository: repository)(preview: preview) }
+        #expect(try repository.fetchTimeline().count == 2)
+    }
+
+    @Test func inactiveReplyPersonaStopsBeforeGeneration() async throws {
+        let repository = MemoryThoughtRepository()
+        let persona = Persona(displayName: "ノア", kind: .ai)
+        let actualConfiguration = AIPersonaConfiguration(personaID: persona.id, role: "整理", instructions: "短く")
+        try repository.createAIPersona(persona, configuration: actualConfiguration)
+        let target = Thought(body: "対象"); try repository.create(target)
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: actualConfiguration, targetThought: target, userRequest: "返信して", context: repository.loadAIReplyContext(targetThoughtID: target.id, maximumEntries: 5))
+        _ = try repository.deactivatePersona(id: persona.id, at: Date())
+        await #expect(throws: AIPostError.inactivePersona) { try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "呼ばれない"), repository: repository)(preview: preview) }
+        #expect(try repository.fetchTimeline().map(\.id) == [target.id])
+    }
+
+    @Test func humanReplyToAIContinuesReplyChainAndMentionsThatAI() throws {
+        let repository = MemoryThoughtRepository()
+        let ai = Persona(displayName: "Architect", kind: .ai); try repository.createPersona(ai)
+        let root = Thought(body: "Human"); try repository.create(root)
+        let aiReply = Thought(body: "AI"); try repository.create(aiReply, authorPersonaID: ai.id); try repository.create(ThoughtRelation(sourceThoughtID: aiReply.id, targetThoughtID: root.id, type: .repliesTo))
+        let humanReply = try repository.createHumanReply(body: "Human again", targetThoughtID: aiReply.id, mentionedPersonaID: ai.id, now: Date(), thoughtID: UUID(), relationID: UUID())!
+        let context = try repository.loadAIReplyContext(targetThoughtID: humanReply.id, maximumEntries: 5)
+        #expect(context.entries.map(\.thought.id) == [root.id, aiReply.id, humanReply.id])
+        #expect(context.entries.map(\.author.kind) == [.human, .ai, .human])
+        #expect(try repository.fetchMentionedPersonas(for: [humanReply.id])[humanReply.id]?.id == ai.id)
+        #expect(try repository.fetchContinuations(of: aiReply.id).isEmpty)
     }
 }
 

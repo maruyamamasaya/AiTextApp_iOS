@@ -25,7 +25,7 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
+public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
     public static let schemaVersion: Int32 = 9
 
     private let databaseURL: URL
@@ -275,6 +275,45 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         let replyID = sqlite3_column_text(statement, 8).flatMap { UUID(uuidString: String(cString: $0)) }
         return AIPostGeneration(thoughtID: t, personaID: p, userRequest: String(cString: req), provider: String(cString: provider), model: String(cString: model), promptVersion: Int(sqlite3_column_int(statement, 5)), generatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6)), kind: kind, replyTargetThoughtID: replyID)
     } }
+    public func fetchActiveAIReplyPersona(id: UUID) throws -> Persona? { try lock.withLock { let persona = try? queryPersona(id: id); guard persona?.kind == .ai, persona?.deletedAt == nil else { return nil }; return persona } }
+
+    public func loadAIReplyContext(targetThoughtID: UUID, maximumEntries: Int) throws -> AIReplyContext { try lock.withLock {
+        guard maximumEntries > 0, try queryByID(targetThoughtID) != nil else { throw SQLiteThoughtRepositoryError.invalidRecord }
+        var currentID: UUID? = targetThoughtID, visited = Set<UUID>(), newestFirst: [AIReplyContextEntry] = [], traversed: [ThoughtRelation] = []
+        while let id = currentID, visited.insert(id).inserted, newestFirst.count < maximumEntries {
+            if let thought = try queryByID(id), thought.deletedAt == nil {
+                let authorStatement = try prepare("SELECT p.id, p.display_name, p.kind, p.icon_data, p.icon_mime_type, p.created_at, p.updated_at, p.deleted_at FROM thought_authors a JOIN personas p ON p.id = a.persona_id WHERE a.thought_id = ? LIMIT 1")
+                defer { sqlite3_finalize(authorStatement) }; try bind(id.uuidString, to: 1, in: authorStatement)
+                guard sqlite3_step(authorStatement) == SQLITE_ROW else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                newestFirst.append(AIReplyContextEntry(thought: thought, author: try decodePersona(authorStatement)))
+            }
+            let relationStatement = try prepare("SELECT id, source_thought_id, target_thought_id, relation_type, created_at FROM thought_relations WHERE source_thought_id = ? AND relation_type = 'repliesTo' ORDER BY created_at ASC, id ASC LIMIT 1")
+            defer { sqlite3_finalize(relationStatement) }; try bind(id.uuidString, to: 1, in: relationStatement)
+            guard sqlite3_step(relationStatement) == SQLITE_ROW,
+                  let relationIDText = sqlite3_column_text(relationStatement, 0), let sourceText = sqlite3_column_text(relationStatement, 1), let targetText = sqlite3_column_text(relationStatement, 2),
+                  let relationID = UUID(uuidString: String(cString: relationIDText)), let sourceID = UUID(uuidString: String(cString: sourceText)), let parentID = UUID(uuidString: String(cString: targetText)) else { break }
+            traversed.append(ThoughtRelation(id: relationID, sourceThoughtID: sourceID, targetThoughtID: parentID, type: .repliesTo, createdAt: Date(timeIntervalSince1970: sqlite3_column_double(relationStatement, 4))))
+            currentID = parentID
+        }
+        return AIReplyContext(entries: Array(newestFirst.reversed()), targetThoughtID: targetThoughtID, relations: Array(traversed.reversed()))
+    } }
+    public func createHumanReply(body: String, targetThoughtID: UUID, mentionedPersonaID: UUID?, now: Date, thoughtID: UUID, relationID: UUID) throws -> Thought? {
+        guard let body = ThoughtDraft.validBody(from: body) else { return nil }
+        return try lock.withLock {
+            let thought = Thought(id: thoughtID, body: body, createdAt: now), relation = ThoughtRelation(id: relationID, sourceThoughtID: thoughtID, targetThoughtID: targetThoughtID, type: .repliesTo, createdAt: now)
+            try transaction {
+                guard let target = try queryByID(targetThoughtID), target.deletedAt == nil else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                try executeThoughtInsert(thought, conflictClause: ""); try executeThoughtAuthorInsert(thoughtID: thoughtID, personaID: Persona.defaultHumanID)
+                if let mentionedPersonaID {
+                    let statement = try prepare("INSERT INTO thought_mentions (thought_id, persona_id, created_at) SELECT ?, id, ? FROM personas WHERE id = ? AND kind = 'ai' AND deleted_at IS NULL")
+                    defer { sqlite3_finalize(statement) }; try bind(thoughtID.uuidString, to: 1, in: statement); try bind(now.timeIntervalSince1970, to: 2, in: statement); try bind(mentionedPersonaID.uuidString, to: 3, in: statement)
+                    guard sqlite3_step(statement) == SQLITE_DONE, sqlite3_changes(database) == 1 else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                }
+                try validate(relation); try executeRelationInsert(relation)
+            }
+            createRollingBackupIfPossible(); return thought
+        }
+    }
 
     public func fetchTimeline() throws -> [Thought] {
         try lock.withLock {

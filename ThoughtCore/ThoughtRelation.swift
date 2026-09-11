@@ -48,6 +48,10 @@ public protocol ThoughtContinuationRepository: Sendable {
     ) throws -> Thought?
 }
 
+public protocol HumanThoughtReplyRepository: Sendable {
+    func createHumanReply(body: String, targetThoughtID: UUID, mentionedPersonaID: UUID?, now: Date, thoughtID: UUID, relationID: UUID) throws -> Thought?
+}
+
 public extension ThoughtContinuationRepository {
     @discardableResult
     func createContinuation(
