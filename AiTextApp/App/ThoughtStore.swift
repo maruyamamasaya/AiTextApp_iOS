@@ -50,6 +50,15 @@ final class ThoughtStore: ObservableObject {
     @Published private(set) var aiUsageAnalytics: AIAPIUsageAnalytics?
     @Published private(set) var isLoadingAIUsageAnalytics = false
     @Published var aiUsageAnalyticsError: String?
+    @Published var knowledgeDraft: KnowledgeDraft?
+    @Published private(set) var isGeneratingKnowledgeDraft = false
+    @Published private(set) var isSavingKnowledgeDraft = false
+    @Published var knowledgeDraftError: String?
+    @Published var knowledgeDraftMessage: String?
+    @Published private(set) var knowledgeDrafts: [KnowledgeDraft] = []
+    @Published private(set) var knowledgeDocuments: [KnowledgeDocument] = []
+    @Published private(set) var knowledgeLifecycleEvents: [KnowledgeLifecycleEvent] = []
+    @Published private(set) var knowledgeQualityCandidates: [KnowledgeQualityCandidate] = []
     let externalBackupManager: ExternalBackupManager?
     let externalBrainManager: ExternalBrainManager
 
@@ -62,6 +71,8 @@ final class ThoughtStore: ObservableObject {
     private var analyticsRepository: (any ThoughtAnalyticsRepository)?
     private var aiUsageAnalyticsRepository: (any AIAPIUsageAnalyticsRepository)?
     private var aiUsageRepository: (any AIAPIUsageRepository)?
+    private var knowledgeDraftRepository: (any KnowledgeDraftRepository)?
+    private var knowledgeLifecycleRepository: (any KnowledgeLifecycleEventRepository)?
     private var dailySummaryRepository: (any DailySummaryRepository)?
     private var personaRepository: (any PersonaRepository)?
     private var aiPersonaRepository: (any AIPersonaRepository)?
@@ -92,6 +103,8 @@ final class ThoughtStore: ObservableObject {
             analyticsRepository = repository as? any ThoughtAnalyticsRepository
             aiUsageAnalyticsRepository = repository as? any AIAPIUsageAnalyticsRepository
             aiUsageRepository = repository as? any AIAPIUsageRepository
+            knowledgeDraftRepository = repository as? any KnowledgeDraftRepository
+            knowledgeLifecycleRepository = repository as? any KnowledgeLifecycleEventRepository
             dailySummaryRepository = repository as? any DailySummaryRepository
             personaRepository = repository as? any PersonaRepository
             aiPersonaRepository = repository as? any AIPersonaRepository
@@ -104,6 +117,7 @@ final class ThoughtStore: ObservableObject {
             if let personaRepository { personas = try personaRepository.fetchPersonas(includeInactive: false) }
             if let aiPersonaRepository { aiConfigurations = try aiPersonaRepository.fetchAIConfigurations() }
             dailySummaries = try dailySummaryRepository?.fetchDailySummaries(from: .distantPast, to: .distantFuture) ?? []
+            knowledgeDrafts = try knowledgeDraftRepository?.fetchKnowledgeDrafts() ?? []; knowledgeDocuments = try knowledgeDraftRepository?.fetchKnowledgeDocuments() ?? []
             if let sqliteRepository = repository as? SQLiteThoughtRepository {
                 backupManager = ExternalBackupManager(repository: sqliteRepository)
             }
@@ -174,7 +188,7 @@ final class ThoughtStore: ObservableObject {
 
     func prepareAIPost(persona: Persona, userRequest: String) {
         guard let configuration = aiConfigurations[persona.id] else { aiPostError = AIPostError.missingConfiguration.localizedDescription; return }
-        let externalBrain = externalBrainManager.retrieve(personaID: persona.id, query: userRequest)
+        let externalBrain = externalBrainManager.retrieve(personaID: persona.id, query: userRequest); trackKnowledgeRetrieval(externalBrain)
         do { aiPostPreview = try AIPostPrompt.prepare(persona: persona, configuration: configuration, userRequest: userRequest, externalBrain: externalBrain); aiPostError = nil }
         catch { aiPostError = error.localizedDescription }
     }
@@ -200,6 +214,7 @@ final class ThoughtStore: ObservableObject {
             let context = try aiReplyRepository.loadAIReplyContext(targetThoughtID: thought.id, maximumEntries: AIThoughtReplyPrompt.maximumContextEntries)
             let query = (context.entries.map(\.thought.body) + [userRequest]).joined(separator: " ")
             let externalBrain = externalBrainManager.retrieve(personaID: persona.id, query: query)
+            trackKnowledgeRetrieval(externalBrain)
             aiReplyPreview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: thought, userRequest: userRequest, context: context, externalBrain: externalBrain); aiReplyError = nil
         }
         catch { aiReplyError = error.localizedDescription }
@@ -342,6 +357,59 @@ final class ThoughtStore: ObservableObject {
     func updateContinuationDraft(_ value: String) {
         continuationDraft = ThoughtDraft.limited(value)
     }
+
+    func knowledgeDraftInput(for thought: Thought) -> KnowledgeDraftInput? {
+        guard let author = personasByThoughtID[thought.id], author.kind == .ai else { return nil }
+        var generation: AIPostGeneration?
+        if let aiReplyRepository { generation = try? aiReplyRepository.fetchAIPostGeneration(for: thought.id) }
+        let source: KnowledgeDraftSource = generation?.kind == .reply ? .aiReply : .personaPost
+        let context = generation.map { "Human request: \($0.userRequest)\nAI persona: \(author.displayName)" }
+        return KnowledgeDraftInput(source: source, sourceContent: "AI statement:\n\(thought.body)", context: context, provenance: .init(sourceID: thought.id.uuidString, personaID: author.id, conversationID: generation?.replyTargetThoughtID))
+    }
+
+    func knowledgeDraftInput(for summary: DailySummary) -> KnowledgeDraftInput {
+        let content = summary.content
+        let sections = [
+            "Overview:\n\(content.overview)",
+            "Themes:\n\(content.themes.joined(separator: "\n"))",
+            "Deep dives:\n\(content.deepDives.joined(separator: "\n"))",
+            "Carry overs:\n\(content.carryOvers.joined(separator: "\n"))",
+            "Recurring patterns (observations only):\n\(content.thoughtPatterns.joined(separator: "\n"))"
+        ]
+        return .init(source: .dailySummary, sourceContent: sections.joined(separator: "\n\n"), context: "Daily Summary generated at \(summary.createdAt.formatted())", provenance: .init(sourceID: summary.id.uuidString, dailySummaryDate: summary.dayStart))
+    }
+
+    func generateKnowledgeDraft(input: KnowledgeDraftInput, type: KnowledgeDraftType) async {
+        guard !isGeneratingKnowledgeDraft else { return }
+        isGeneratingKnowledgeDraft = true; knowledgeDraftError = nil; knowledgeDraftMessage = nil
+        defer { isGeneratingKnowledgeDraft = false }
+        let related = externalBrainManager.relatedKnowledge(query: input.sourceContent)
+        do { let value = try await GenerateKnowledgeDraft(client: summaryClient, usageRepository: aiUsageRepository)(input: input, type: type, related: related); try knowledgeDraftRepository?.saveKnowledgeDraft(value); knowledgeDraft = value; loadKnowledge() }
+        catch { knowledgeDraftError = error.localizedDescription }
+    }
+
+    func saveKnowledgeDraft(_ draft: KnowledgeDraft) async {
+        guard !isSavingKnowledgeDraft else { return }
+        isSavingKnowledgeDraft = true; knowledgeDraftError = nil; knowledgeDraftMessage = nil
+        defer { isSavingKnowledgeDraft = false }
+        do {
+            let path = try await externalBrainManager.saveDraft(draft)
+            var saved = draft; saved.savedPath = path; saved.syncStatus = .synced; saved.updatedAt = Date(); try knowledgeDraftRepository?.saveKnowledgeDraft(saved); knowledgeDraft = saved; loadKnowledge()
+            knowledgeDraftMessage = "保存しました\n\(path)"
+        } catch { var failed=draft; failed.syncStatus = .failed; failed.updatedAt=Date(); try? knowledgeDraftRepository?.saveKnowledgeDraft(failed); knowledgeDraft = failed; knowledgeDraftError = error.localizedDescription; loadKnowledge() }
+    }
+
+    func cancelKnowledgeDraft() { knowledgeDraft = nil; knowledgeDraftError = nil; knowledgeDraftMessage = nil }
+    func loadKnowledge(search: String = "") { do { knowledgeDrafts = search.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? (try knowledgeDraftRepository?.fetchKnowledgeDrafts() ?? []) : (try knowledgeDraftRepository?.searchKnowledgeDrafts(query:search) ?? []); knowledgeDocuments = try knowledgeDraftRepository?.fetchKnowledgeDocuments() ?? []; knowledgeLifecycleEvents = try knowledgeLifecycleRepository?.fetchKnowledgeLifecycleEvents() ?? []; knowledgeQualityCandidates = try knowledgeDraftRepository?.fetchKnowledgeQualityCandidates() ?? [] } catch { knowledgeDraftError = "Knowledgeを読み込めませんでした。" } }
+    func updateKnowledgeDraft(_ draft: KnowledgeDraft) { var value=draft; value.updatedAt=Date(); if value.savedPath != nil { value.syncStatus = .localOnly }; do { try knowledgeDraftRepository?.saveKnowledgeDraft(value); knowledgeDraft=value; loadKnowledge() } catch { knowledgeDraftError="Draftを保存できませんでした。" } }
+    func reviewKnowledgeDraft(_ draft: KnowledgeDraft, status: KnowledgeDraftReviewStatus) { do { let value=try KnowledgeDraftTransition.applying(status,to:draft); try knowledgeDraftRepository?.saveKnowledgeDraft(value); let event: KnowledgeLifecycleEventType?; switch status { case .approved: event = .approved; case .rejected: event = .rejected; default: event = nil }; if let event { try? knowledgeLifecycleRepository?.saveKnowledgeLifecycleEvent(.init(draftID:draft.id,type:event,source:draft.source)) }; knowledgeDraft=value; loadKnowledge() } catch { knowledgeDraftError=error.localizedDescription } }
+    func promoteKnowledgeDraft(_ draft: KnowledgeDraft) async { let path=KnowledgeDocumentPath.targetPath(date:Date(),title:draft.title); do { let sha=try await externalBrainManager.promote(draft,path:path); var promoted=try KnowledgeDraftTransition.applying(.promoted,to:draft); promoted.knowledgePath=path; promoted.knowledgeSHA=sha; promoted.syncStatus = .synced; let document=KnowledgeDocument(draftID:draft.id,title:draft.title,path:path,sha:sha,source:draft.source,tags:draft.tags,markdown:draft.markdown.replacingOccurrences(of:"status: draft",with:"status: active"),createdAt:promoted.promotedAt ?? Date(),updatedAt:promoted.promotedAt ?? Date()); try knowledgeDraftRepository?.savePromotedKnowledge(draft:promoted,document:document); try? knowledgeLifecycleRepository?.saveKnowledgeLifecycleEvent(.init(draftID:draft.id,type:.promoted,source:draft.source)); knowledgeDraft=promoted; knowledgeDraftMessage="Promoteしました\n\(path)"; loadKnowledge() } catch { var failed=draft; failed.syncStatus = .failed; failed.updatedAt=Date(); try? knowledgeDraftRepository?.saveKnowledgeDraft(failed); knowledgeDraft=failed; knowledgeDraftError=error.localizedDescription; loadKnowledge() } }
+    private func trackKnowledgeRetrieval(_ context:ExternalBrainContext?) { let paths=context?.chunks.map(\.documentPath) ?? []; guard !paths.isEmpty else{return}; try? knowledgeDraftRepository?.recordKnowledgeRetrieval(paths:paths,at:Date()) }
+    func analyzeKnowledgeQuality() { do { let candidates=KnowledgeQualityAnalyzer.analyze(try knowledgeDraftRepository?.fetchKnowledgeDocuments() ?? []); try knowledgeDraftRepository?.replaceKnowledgeQualityCandidates(candidates); loadKnowledge(); knowledgeDraftMessage="ローカル解析を完了しました。AI APIは使用していません。" } catch { knowledgeDraftError="Knowledge Qualityを解析できませんでした。" } }
+    func dismissQualityCandidate(_ candidate:KnowledgeQualityCandidate) { var value=candidate; value.status = .dismissed; value.resolvedAt=Date(); do { try knowledgeDraftRepository?.saveKnowledgeQualityCandidate(value); loadKnowledge() } catch { knowledgeDraftError="候補をDismissできませんでした。" } }
+    func createMergeDraft(_ candidate:KnowledgeQualityCandidate) { guard let relatedID=candidate.relatedKnowledgeID,let a=knowledgeDocuments.first(where:{$0.id==candidate.knowledgeID}),let b=knowledgeDocuments.first(where:{$0.id==relatedID}) else{return}; let body="# Merge Draft\n\n## \(a.title)\n\(MarkdownFrontMatterParser.parse(a.markdown).body)\n\n## \(b.title)\n\(MarkdownFrontMatterParser.parse(b.markdown).body)"; let draft=KnowledgeDraft(title:"Merge: \(a.title)",type:.knowledge,tags:Array(Set(a.tags+b.tags)).sorted(),source:.mergeDraft,body:body,provenance:.init(sourceKnowledgeIDs:[a.id,b.id],sourcePaths:[a.path,b.path],mergeReason:candidate.reason)); do { try knowledgeDraftRepository?.saveKnowledgeDraft(draft); var resolved=candidate; resolved.status = .resolved; resolved.resolvedAt=Date(); try knowledgeDraftRepository?.saveKnowledgeQualityCandidate(resolved); knowledgeDraft=draft; loadKnowledge(); knowledgeDraftMessage="Merge Draftを作成しました。元のKnowledgeは変更していません。" } catch { knowledgeDraftError="Merge Draftを作成できませんでした。" } }
+    func archiveKnowledge(_ document:KnowledgeDocument) { guard document.status == .active else{return}; var value=document; value.status = .archived; value.archivedAt=Date(); do { try knowledgeDraftRepository?.saveKnowledgeDocument(value); externalBrainManager.excludeFromRetrieval(path:value.path); loadKnowledge() } catch { knowledgeDraftError="Archiveできませんでした。" } }
+    func supersedeKnowledge(_ old:KnowledgeDocument,by new:KnowledgeDocument) { guard old.status == .active,new.status == .active,old.id != new.id else{return}; var value=old; value.status = .superseded; value.supersededByKnowledgeID=new.id; value.supersededAt=Date(); do { try knowledgeDraftRepository?.saveKnowledgeDocument(value); externalBrainManager.excludeFromRetrieval(path:value.path); loadKnowledge() } catch { knowledgeDraftError="Supersedeできませんでした。" } }
 
     func loadAIUsageAnalytics(period: AIAPIUsagePeriod, now: Date = Date(), calendar: Calendar = .current) {
         guard let aiUsageAnalyticsRepository else { aiUsageAnalyticsError = "AI使用状況を読み込めませんでした。"; return }

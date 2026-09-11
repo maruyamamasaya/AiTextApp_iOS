@@ -4,12 +4,14 @@ public enum AIAPIFeature: String, CaseIterable, Codable, Sendable {
     case personaPost
     case thoughtReply
     case dailySummary
+    case knowledgeDraft
 
     public var displayName: String {
         switch self {
         case .personaPost: "AI Persona Post"
         case .thoughtReply: "AI Reply"
         case .dailySummary: "Daily Summary"
+        case .knowledgeDraft: "Knowledge Draft"
         }
     }
 }
@@ -68,12 +70,14 @@ public struct AIAPIUsageContext: Equatable, Sendable {
     public let personaID: UUID?
     public let externalBrainUsed: Bool
     public let retrievedChunkCount: Int
+    public let sourceType: KnowledgeDraftSource?
 
-    public init(feature: AIAPIFeature, personaID: UUID? = nil, externalBrainUsed: Bool = false, retrievedChunkCount: Int = 0) {
+    public init(feature: AIAPIFeature, personaID: UUID? = nil, externalBrainUsed: Bool = false, retrievedChunkCount: Int = 0, sourceType: KnowledgeDraftSource? = nil) {
         self.feature = feature
         self.personaID = personaID
         self.externalBrainUsed = externalBrainUsed
         self.retrievedChunkCount = max(0, retrievedChunkCount)
+        self.sourceType = sourceType
     }
 }
 
@@ -95,14 +99,16 @@ public struct AIAPIUsageRecord: Identifiable, Equatable, Sendable {
     public let externalBrainUsed: Bool
     public let retrievedChunkCount: Int
     public let errorCategory: AIAPIErrorCategory?
+    public let sourceType: KnowledgeDraftSource?
 
-    public init(id: UUID = UUID(), startedAt: Date, finishedAt: Date? = nil, feature: AIAPIFeature, personaID: UUID? = nil, provider: String, model: String, status: AIAPICallStatus, inputCharacters: Int, outputCharacters: Int, inputTokens: Int? = nil, outputTokens: Int? = nil, totalTokens: Int? = nil, latencyMilliseconds: Int? = nil, externalBrainUsed: Bool = false, retrievedChunkCount: Int = 0, errorCategory: AIAPIErrorCategory? = nil) {
+    public init(id: UUID = UUID(), startedAt: Date, finishedAt: Date? = nil, feature: AIAPIFeature, personaID: UUID? = nil, provider: String, model: String, status: AIAPICallStatus, inputCharacters: Int, outputCharacters: Int, inputTokens: Int? = nil, outputTokens: Int? = nil, totalTokens: Int? = nil, latencyMilliseconds: Int? = nil, externalBrainUsed: Bool = false, retrievedChunkCount: Int = 0, errorCategory: AIAPIErrorCategory? = nil, sourceType: KnowledgeDraftSource? = nil) {
         self.id = id; self.startedAt = startedAt; self.finishedAt = finishedAt; self.feature = feature
         self.personaID = personaID; self.provider = provider; self.model = model; self.status = status
         self.inputCharacters = inputCharacters; self.outputCharacters = outputCharacters
         self.inputTokens = inputTokens; self.outputTokens = outputTokens; self.totalTokens = totalTokens
         self.latencyMilliseconds = latencyMilliseconds; self.externalBrainUsed = externalBrainUsed
         self.retrievedChunkCount = max(0, retrievedChunkCount); self.errorCategory = errorCategory
+        self.sourceType = sourceType
     }
 }
 
@@ -186,11 +192,11 @@ public struct AIAPIUsageRecorder: Sendable {
             responseMetadata = (response.provider, response.model, response.text.count)
             let value = try await finish(response)
             let finished = now()
-            save(.init(startedAt: started, finishedAt: finished, feature: context.feature, personaID: context.personaID, provider: response.provider, model: response.model, status: .success, inputCharacters: request.prompt.count, outputCharacters: response.text.count, inputTokens: response.tokenUsage?.inputTokens, outputTokens: response.tokenUsage?.outputTokens, totalTokens: response.tokenUsage?.totalTokens, latencyMilliseconds: milliseconds(started, finished), externalBrainUsed: context.externalBrainUsed, retrievedChunkCount: context.retrievedChunkCount))
+            save(.init(startedAt: started, finishedAt: finished, feature: context.feature, personaID: context.personaID, provider: response.provider, model: response.model, status: .success, inputCharacters: request.prompt.count, outputCharacters: response.text.count, inputTokens: response.tokenUsage?.inputTokens, outputTokens: response.tokenUsage?.outputTokens, totalTokens: response.tokenUsage?.totalTokens, latencyMilliseconds: milliseconds(started, finished), externalBrainUsed: context.externalBrainUsed, retrievedChunkCount: context.retrievedChunkCount, sourceType: context.sourceType))
             return value
         } catch {
             let finished = now(); let status: AIAPICallStatus = error is CancellationError ? .cancelled : .failed
-            save(.init(startedAt: started, finishedAt: finished, feature: context.feature, personaID: context.personaID, provider: responseMetadata?.0 ?? provider, model: responseMetadata?.1 ?? model, status: status, inputCharacters: request.prompt.count, outputCharacters: responseMetadata?.2 ?? 0, latencyMilliseconds: milliseconds(started, finished), externalBrainUsed: context.externalBrainUsed, retrievedChunkCount: context.retrievedChunkCount, errorCategory: status == .failed ? .classify(error) : nil))
+            save(.init(startedAt: started, finishedAt: finished, feature: context.feature, personaID: context.personaID, provider: responseMetadata?.0 ?? provider, model: responseMetadata?.1 ?? model, status: status, inputCharacters: request.prompt.count, outputCharacters: responseMetadata?.2 ?? 0, latencyMilliseconds: milliseconds(started, finished), externalBrainUsed: context.externalBrainUsed, retrievedChunkCount: context.retrievedChunkCount, errorCategory: status == .failed ? .classify(error) : nil, sourceType: context.sourceType))
             throw error
         }
     }

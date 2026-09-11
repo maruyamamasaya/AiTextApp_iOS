@@ -26,6 +26,24 @@ private func temporaryBrain() throws -> (URL, ExternalBrainCache) {
     return (url, try ExternalBrainCache(rootURL: url))
 }
 
+@Test func repositoryConfigurationRoundTripsWithoutSecretAndPathsUseDomainSourceOfTruth() throws {
+    let configuration = ExternalBrainRepositoryConfiguration(owner: "owner", repository: "wiki", branch: "release")
+    let data = try JSONEncoder().encode(configuration)
+    #expect(try JSONDecoder().decode(ExternalBrainRepositoryConfiguration.self, from: data) == configuration)
+    #expect(!String(decoding: data, as: UTF8.self).lowercased().contains("token"))
+    #expect(KnowledgeDraftPath.targetPath(date: Date(timeIntervalSince1970: 0), title: "Draft").hasPrefix(KnowledgeDraftPath.directory + "/"))
+    #expect(KnowledgeDocumentPath.targetPath(date: Date(timeIntervalSince1970: 0), title: "Knowledge").hasPrefix(KnowledgeDocumentPath.directory + "/"))
+}
+
+@Test func githubConnectionErrorsRemainActionable() {
+    #expect(GitHubConnectionIssue.classify(statusCode: 401, rateLimitRemaining: nil, scope: .authentication) == .invalidToken)
+    #expect(GitHubConnectionIssue.classify(statusCode: 404, rateLimitRemaining: nil, scope: .repository) == .repositoryNotFound)
+    #expect(GitHubConnectionIssue.classify(statusCode: 404, rateLimitRemaining: nil, scope: .branch) == .branchNotFound)
+    #expect(GitHubConnectionIssue.classify(statusCode: 403, rateLimitRemaining: 0, scope: .repository) == .rateLimited)
+    #expect(GitHubConnectionIssue.classify(statusCode: 403, rateLimitRemaining: 42, scope: .repository) == .accessDenied)
+    #expect(GitHubRepositoryCapabilities.failure(.branchNotFound, branch: "main").repositoryRead)
+}
+
 @Test func parsesAgentRoleRoutesRulesAndProjectPlaceholder() throws {
     let agent = try ExternalBrainAgentParser.parse("""
     ---
@@ -132,4 +150,92 @@ private func temporaryBrain() throws -> (URL, ExternalBrainCache) {
     #expect(preview.request.prompt.contains("projects/aitextapp/a.md"))
     #expect(preview.request.usageContext.externalBrainUsed)
     #expect(preview.request.usageContext.retrievedChunkCount == 1)
+}
+
+@Test func knowledgeDraftTypesFrontMatterSafeSlugAndPathBoundary() throws {
+    #expect(KnowledgeDraftType.allCases.map(\.rawValue) == ["decision", "knowledge", "memory", "project-note"])
+    let date = Date(timeIntervalSince1970: 1_757_548_800)
+    let draft = KnowledgeDraft(title: "AI Reply: ../ 設計", type: .decision, project: "aitextapp", tags: ["ai", "review"], source: .aiReply, createdAt: date, body: "# Decision Candidate\n明示承認する")
+    #expect(draft.targetPath.hasPrefix("drafts/")); #expect(!draft.targetPath.contains("..")); #expect(!draft.targetPath.contains(":")); #expect(draft.markdown.contains("status: draft")); #expect(draft.markdown.contains("source: ai-reply")); #expect(draft.markdown.contains("type: decision"))
+    try KnowledgeDraftPath.validate(draft.targetPath)
+    #expect(throws: ExternalBrainError.self) { try KnowledgeDraftPath.validate("../outside.md") }
+    #expect(throws: ExternalBrainError.self) { try KnowledgeDraftPath.validate("projects/a.md") }
+    #expect(throws: ExternalBrainError.self) { try KnowledgeDraftPath.validate("drafts/nested/a.md") }
+    #expect(throws: ExternalBrainError.self) { try KnowledgeDraftPath.validate("drafts/a:b.md") }
+}
+
+@Test func knowledgeDraftPromptKeepsProvenanceAndSafetyRules() throws {
+    for source in KnowledgeDraftSource.allCases {
+        let input = KnowledgeDraftInput(source: source, sourceContent: "Humanの明示内容とAIの提案", context: "Human requestとAI statementを区別")
+        let request = try KnowledgeDraftPrompt.request(input: input, type: .memory, project: "aitextapp", related: [])
+        #expect(request.prompt.contains("sourceに存在しない事実を追加しない")); #expect(request.prompt.contains("HumanとAIの発言を混同しない")); #expect(request.prompt.contains("Markdown見出しと本文だけ")); #expect(request.prompt.contains(source.rawValue)); #expect(request.usageContext?.feature == .knowledgeDraft); #expect(request.usageContext?.sourceType == source)
+    }
+}
+
+@Test func relatedKnowledgeUsesOnlyLocalFTSAndLimitsThree() async throws {
+    let (url, cache) = try temporaryBrain(); defer { try? FileManager.default.removeItem(at: url) }
+    var files: [String: (String, String)] = [:]
+    for index in 1...5 { files["knowledge/\(index).md"] = ("\(index)", "# Similar \(index)\ntransaction approval design") }
+    _ = try await cache.synchronize(remote: FakeExternalBrainRemote(files), configuration: .init(owner: "o", repository: "r"), token: "t")
+    let found = try cache.index.searchRelated(query: "transaction approval", maximum: 3)
+    #expect(found.count == 3)
+    #expect(try cache.index.searchRelated(query: "unmatchedterm", maximum: 3).isEmpty)
+}
+
+@Test func generatedKnowledgeDraftUsesAIOnceAndKeepsDraftStatus() async throws {
+    let input = KnowledgeDraftInput(source: .personaPost, sourceContent: "AI proposal", context: "Human request")
+    let draft = try await GenerateKnowledgeDraft(client: MockReviewSummaryClient(text: "```markdown\n# Proposal\nCandidate only\n```"))(input: input, type: .knowledge, now: Date(timeIntervalSince1970: 0))
+    #expect(draft.source == .personaPost); #expect(draft.body == "# Proposal\nCandidate only"); #expect(draft.markdown.contains("status: draft"))
+    #expect(ExternalBrainMarkdownChunker.chunks(path: draft.targetPath, markdown: draft.markdown).isEmpty)
+}
+
+@Test func knowledgeReviewAllowsOnlyExplicitTransitions() throws {
+    let original = KnowledgeDraft(title:"Rule",type:.decision,source:.aiReply,body:"# Rule\nHuman review")
+    let approved = try KnowledgeDraftTransition.applying(.approved,to:original,now:Date(timeIntervalSince1970:10)); #expect(approved.reviewStatus == .approved); #expect(approved.approvedAt != nil)
+    let promoted = try KnowledgeDraftTransition.applying(.promoted,to:approved,now:Date(timeIntervalSince1970:20)); #expect(promoted.reviewStatus == .promoted)
+    let rejected = try KnowledgeDraftTransition.applying(.rejected,to:original); #expect(try KnowledgeDraftTransition.applying(.approved,to:rejected).reviewStatus == .approved)
+    #expect(throws: KnowledgeDraftTransitionError.self) { try KnowledgeDraftTransition.applying(.promoted,to:original) }
+    let path=KnowledgeDocumentPath.targetPath(date:Date(),title:"Safe Knowledge"); try KnowledgeDocumentPath.validate(path)
+    #expect(throws: ExternalBrainError.self) { try KnowledgeDocumentPath.validate("knowledge/../secret.md") }
+}
+
+@Test func schemaV13PersistsReviewAndPromotedKnowledge() throws {
+    let directory=FileManager.default.temporaryDirectory.appendingPathComponent("knowledge-review-\(UUID().uuidString)"); defer { try? FileManager.default.removeItem(at:directory) }; try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+    let repository=try SQLiteThoughtRepository(databaseURL:directory.appendingPathComponent("db.sqlite3")); #expect(SQLiteThoughtRepository.schemaVersion == 13)
+    var draft=KnowledgeDraft(title:"Approved",type:.knowledge,tags:["swift"],source:.dailySummary,body:"# Knowledge\nStable",provenance:.init(sourceID:"summary",dailySummaryDate:Date(timeIntervalSince1970:0)))
+    try repository.saveKnowledgeDraft(draft); draft=try KnowledgeDraftTransition.applying(.approved,to:draft); try repository.saveKnowledgeDraft(draft); #expect(try repository.fetchKnowledgeDraft(id:draft.id)?.reviewStatus == .approved)
+    let sha="abc123",path=KnowledgeDocumentPath.targetPath(date:Date(),title:draft.title); var promoted=try KnowledgeDraftTransition.applying(.promoted,to:draft); promoted.knowledgePath=path; promoted.knowledgeSHA=sha
+    let document=KnowledgeDocument(draftID:draft.id,title:draft.title,path:path,sha:sha,source:draft.source,tags:draft.tags,markdown:draft.markdown.replacingOccurrences(of:"status: draft",with:"status: active"),createdAt:Date(),updatedAt:Date())
+    try repository.savePromotedKnowledge(draft:promoted,document:document); #expect(try repository.fetchKnowledgeDraft(id:draft.id)?.knowledgeSHA == sha); #expect(try repository.fetchKnowledgeDocuments().first?.path == path); #expect(try repository.searchKnowledgeDrafts(query:"Stable").count == 1)
+    try repository.saveKnowledgeLifecycleEvent(.init(draftID:draft.id,type:.promoted,source:draft.source)); #expect(try repository.fetchKnowledgeLifecycleEvents().first?.type == .promoted)
+}
+
+@Test func qualityAnalyzerFindsDuplicatesSimilarityAndStaleWithoutAI() {
+    let now=Date(),old=now.addingTimeInterval(-200*86_400)
+    let a=KnowledgeDocument(draftID:UUID(),title:"Approval Rule",path:"projects/aitextapp/knowledge/a.md",sha:"a",source:.aiReply,tags:["review","ai"],markdown:"# Rule\nHuman approval required",createdAt:old,updatedAt:old)
+    let b=KnowledgeDocument(draftID:UUID(),title:"approval rule",path:"projects/aitextapp/knowledge/b.md",sha:"b",source:.dailySummary,tags:["review","ai"],markdown:"# Rule\nHuman approval required",createdAt:now,updatedAt:now)
+    let unrelated=KnowledgeDocument(draftID:UUID(),title:"Cooking",path:"projects/aitextapp/knowledge/c.md",sha:"c",source:.manual,tags:["food"],markdown:"# Soup\nCarrot and onion",createdAt:now,updatedAt:now,lastRetrievedAt:now)
+    let values=KnowledgeQualityAnalyzer.analyze([a,b,unrelated],now:now)
+    #expect(values.contains{$0.type == .duplicate && $0.knowledgeID == a.id && $0.relatedKnowledgeID == b.id}); #expect(values.contains{$0.type == .stale && $0.knowledgeID == a.id}); #expect(!values.contains{$0.knowledgeID == unrelated.id})
+}
+
+@Test func dismissMergeArchiveSupersedeAndRetrievalUsagePreserveBodies() throws {
+    let directory=FileManager.default.temporaryDirectory.appendingPathComponent("quality-\(UUID().uuidString)"); defer { try? FileManager.default.removeItem(at:directory) }; try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true); let repository=try SQLiteThoughtRepository(databaseURL:directory.appendingPathComponent("db.sqlite3"))
+    func promoted(_ title:String)->(KnowledgeDraft,KnowledgeDocument) { var draft=KnowledgeDraft(title:title,type:.knowledge,source:.manual,body:"# \(title)\nbody"); draft.reviewStatus = .promoted; draft.promotedAt=Date(); let path=KnowledgeDocumentPath.targetPath(date:Date(),title:title),sha=UUID().uuidString; draft.knowledgePath=path; draft.knowledgeSHA=sha; return (draft,.init(draftID:draft.id,title:title,path:path,sha:sha,source:.manual,tags:[],markdown:draft.markdown.replacingOccurrences(of:"status: draft",with:"status: active"),createdAt:Date(),updatedAt:Date())) }
+    let (da,a)=promoted("Alpha"); let (db,b)=promoted("Beta"); try repository.saveKnowledgeDraft(da); try repository.savePromotedKnowledge(draft:da,document:a); try repository.saveKnowledgeDraft(db); try repository.savePromotedKnowledge(draft:db,document:b)
+    let original=a.markdown; try repository.recordKnowledgeRetrieval(paths:[a.path],at:Date()); var stored=try #require(repository.fetchKnowledgeDocuments().first{$0.id==a.id}); #expect(stored.retrievalCount==1); #expect(stored.lastRetrievedAt != nil)
+    stored.status = .archived; stored.archivedAt=Date(); try repository.saveKnowledgeDocument(stored); try repository.recordKnowledgeRetrieval(paths:[a.path],at:Date()); #expect(try repository.fetchKnowledgeDocuments().first{$0.id==a.id}?.retrievalCount == 1); #expect(try repository.fetchKnowledgeDocuments().first{$0.id==a.id}?.markdown == original)
+    var superseded=b; superseded.status = .superseded; superseded.supersededByKnowledgeID=a.id; superseded.supersededAt=Date(); try repository.saveKnowledgeDocument(superseded); #expect(try repository.fetchKnowledgeDocuments().first{$0.id==b.id}?.status == .superseded)
+    let candidate=KnowledgeQualityCandidate(knowledgeID:a.id,relatedKnowledgeID:b.id,type:.similar,score:0.6,reason:"similar"); try repository.replaceKnowledgeQualityCandidates([candidate]); var dismissed=candidate; dismissed.status = .dismissed; dismissed.resolvedAt=Date(); try repository.saveKnowledgeQualityCandidate(dismissed); #expect(try repository.fetchKnowledgeQualityCandidates().first?.status == .dismissed)
+    let merge=KnowledgeDraft(title:"Merge",type:.knowledge,source:.mergeDraft,body:"# Merge",provenance:.init(sourceKnowledgeIDs:[a.id,b.id],sourcePaths:[a.path,b.path],mergeReason:candidate.reason)); #expect(merge.provenance.sourceKnowledgeIDs == [a.id,b.id]); #expect(a.markdown == original)
+}
+
+@Test func promotedKnowledgeIsImmediatelyIndexedWhileDraftRemainsExcluded() throws {
+    let (url,cache)=try temporaryBrain(); defer { try? FileManager.default.removeItem(at:url) }
+    let draft=KnowledgeDraft(title:"Approval",type:.decision,source:.aiReply,body:"# Rule\nexplicit human approval")
+    #expect(ExternalBrainMarkdownChunker.chunks(path:draft.targetPath,markdown:draft.markdown).isEmpty)
+    let path=KnowledgeDocumentPath.targetPath(date:Date(),title:draft.title),markdown=draft.markdown.replacingOccurrences(of:"status: draft",with:"status: active")
+    try cache.storePromotedKnowledge(path:path,sha:"sha",markdown:markdown)
+    #expect(try cache.index.searchRelated(query:"explicit human approval",maximum:3).first?.documentPath == path)
+    try cache.index.delete(documentPath:path); #expect(try cache.index.searchRelated(query:"explicit human approval",maximum:3).isEmpty)
 }

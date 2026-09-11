@@ -148,6 +148,7 @@ struct DailySummaryCalendarView: View {
 private struct DailySummaryDetailView: View {
     @ObservedObject var store: ThoughtStore
     let day: Date
+    @State private var draftInput: KnowledgeDraftInput?
 
     var body: some View {
         List {
@@ -158,6 +159,7 @@ private struct DailySummaryDetailView: View {
             }
             if let summary = store.dailySummary {
                 DailySummarySections(summary: summary, store: store)
+                Section { Button("外部脳に残す") { draftInput = store.knowledgeDraftInput(for: summary) } }
             } else {
                 Section {
                     Button("この日をまとめる") { store.prepareDailySummary(for: day) }
@@ -174,6 +176,7 @@ private struct DailySummaryDetailView: View {
         .sheet(item: Binding(get: { store.dailySummaryPreview }, set: { if $0 == nil { store.cancelDailySummaryPreview() } })) { preview in
             DailySummaryPreviewView(store: store, preview: preview)
         }
+        .sheet(isPresented: Binding(get: { draftInput != nil }, set: { if !$0 { draftInput = nil } })) { if let input = draftInput { KnowledgeDraftFlowView(store: store, input: input) } }
     }
 
 }

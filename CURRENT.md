@@ -12,8 +12,13 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ## 実装済み
 
+- GitHub Repository Settings v1。Settings > External Brainからowner／repository／branchを既存UserDefaultsへ、PATを既存Keychainへ分離保存し、Token置換・確認付き削除、Repository変更時のローカルKnowledge保持警告を提供する。既存GitHub Contents clientのread-only接続確認でAuthentication／Repository／Branchとpush権限由来のDraft／Knowledge capability、分類済み接続エラー、rate limit残数を表示する。Draft／Knowledge pathはdomain定義をread-only表示し、schemaはv13のまま維持する。
+- Knowledge Quality & Consolidation v1。正式Knowledgeを手動ローカル解析し、正規化title／body一致、本文token類似度、tag重複からDuplicate／Similar候補を、180日未更新かつ未参照からStale候補を提示する。Quality画面でCompare、Dismiss、A/Bを並べたMerge Draft作成を行い、既存Review／Promoteへ戻す。明示操作だけでArchive／Supersedeし、対象pathを通常Retrieval indexから除外する。active KnowledgeのretrievalCount／lastRetrievedAtを記録し、単一のブラックボックスQuality Scoreは持たない。
+- Knowledge Review & Promote Pipeline v1。SQLiteへDraft／provenance／Review状態／GitHub同期状態を永続化し、一覧・FTS検索・状態filter・編集可能Review・Approve／Reject・確認付きPromoteを提供する。`approved`だけを`projects/aitextapp/knowledge/`へnew-file-onlyで昇格し、成功時だけKnowledgeDocument、path、SHA、promotedAtを保存してローカルExternal Brain FTSへ即時反映する。Review操作はAI APIを呼ばず、lifecycle analyticsへsource type付きで記録する。
+- Persona External Brain v2 / Knowledge Draft Pipeline。AI Reply／Persona Post／Daily Summaryから明示操作後だけAIでMarkdown Draftを生成し、decision／knowledge／memory／project-noteを選択できる。ローカルFTSで関連する既存資料を最大3件確認し、編集可能Previewで内容と安全な`drafts/`保存先をHuman Reviewした後、既存Keychain tokenでGitHubへnew-file-only保存する。AI生成とGitHub保存は別操作で、保存失敗時もDraftを保持する。保存した`status: draft`は通常RAG対象外で、正式Knowledgeへの昇格は後続の明示Review／Promote Pipelineだけが行う。Knowledge Draft生成はUsage Analyticsへ記録し、GitHub writeはAI Callへ数えない。
+
 - External Brain Routing v1。Persona別AGENT.mdのRetrieval RouteをAI Replyだけでなく独立Persona Postにも適用し、依頼文を検索queryとして最大5チャンクを取得する。送信前にroute／source／heading／excerpt／最終payloadを確認でき、Usage metadataへ使用有無とchunk数を記録する。Daily SummaryにはPersona routeを適用しない。
-- AI API Usage Analytics v1。AI API Callをschema v10の独立したローカルMetadataとして記録し、AI Reply／Daily Summary／Persona Postを共通Recorderへ統合する。Persona／Feature／Provider／Model別件数、成功率、Error、Latency、日別推移を集計し、External Brain使用有無・取得chunk数も保持する。token usageはproviderから取得できる場合だけ実測保存し、現状はnilのまま文字数を常時記録する。prompt／response／Thought／External Brain本文はUsage DBへ保存せず、Telemetry保存失敗は既存AI機能を失敗させない。
+- AI API Usage Analytics v1。AI API Callをschema v12内の独立したローカルMetadataとして記録し、AI Reply／Daily Summary／Persona Post／Knowledge Draftを共通Recorderへ統合する。Knowledge Draftはsource typeも保持する。Persona／Feature／Provider／Model別件数、成功率、Error、Latency、日別推移を集計し、External Brain使用有無・取得chunk数も保持する。token usageはproviderから取得できる場合だけ実測保存し、現状はnilのまま文字数を常時記録する。prompt／response／Thought／External Brain本文はUsage DBへ保存せず、Telemetry保存失敗は既存AI機能を失敗させない。
 - Persona External Brain v1。単一GitHub RepositoryとPersona別AGENT.md／Retrieval Routeを使い、MarkdownをApplication SupportへSHA差分同期してheading単位のSQLite FTS5 indexから最大5チャンクを取得する。AI Reply送信前Previewで資料と最終payloadを確認できる。GitHubはread-only、tokenはKeychain保存で、障害時はcacheまたはExternal Brainなしで返信を継続する。
 
 - Timelineトップ右上の歯車から開く設定画面。プロフィール／AI Persona、Markdown／JSON Export、外部バックアップを設定内へ集約し、トップの主要導線と分離する。
@@ -39,7 +44,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - UUIDと作成・更新・削除日時を持つThought原文モデル。
 - Application Support配下のSQLiteを正本にしたローカル保存、query順序、ソフトデリート。
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
-- `PRAGMA user_version`によるschema version管理（現在v10）。
+- `PRAGMA user_version`によるschema version管理（現在v13）。v11はKnowledge Draft生成元source type、v12はKnowledge Draft／Knowledge Document／Review eventとDraft FTS、v13はKnowledge status／supersede／archive／retrieval usage／quality candidateを追加する。
 - 画面下部に固定し、入力中だけ枠内右端に投稿ボタンを表示するコンパクトなComposer。
 - Lazy Timeline、自然な相対日時、メニュー内削除、Empty State。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。

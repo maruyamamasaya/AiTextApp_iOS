@@ -25,8 +25,8 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, AIAPIUsageRepository, AIAPIUsageAnalyticsRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 10
+public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, AIAPIUsageRepository, AIAPIUsageAnalyticsRepository, KnowledgeDraftRepository, KnowledgeLifecycleEventRepository, @unchecked Sendable {
+    public static let schemaVersion: Int32 = 13
 
     private let databaseURL: URL
     private let legacyJSONURL: URL
@@ -236,12 +236,12 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
 
     public func saveUsage(_ record: AIAPIUsageRecord) throws {
         try lock.withLock {
-            let statement = try prepare("INSERT INTO ai_api_usage (id, started_at, finished_at, feature, persona_id, provider, model, status, input_characters, output_characters, input_tokens, output_tokens, total_tokens, latency_milliseconds, external_brain_used, retrieved_chunk_count, error_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            let statement = try prepare("INSERT INTO ai_api_usage (id, started_at, finished_at, feature, persona_id, provider, model, status, input_characters, output_characters, input_tokens, output_tokens, total_tokens, latency_milliseconds, external_brain_used, retrieved_chunk_count, error_category, source_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             defer { sqlite3_finalize(statement) }
             try bind(record.id.uuidString, to: 1, in: statement); try bind(record.startedAt.timeIntervalSince1970, to: 2, in: statement); try bindOptional(record.finishedAt?.timeIntervalSince1970, to: 3, in: statement)
             try bind(record.feature.rawValue, to: 4, in: statement); try bindOptional(record.personaID?.uuidString, to: 5, in: statement); try bind(record.provider, to: 6, in: statement); try bind(record.model, to: 7, in: statement); try bind(record.status.rawValue, to: 8, in: statement)
             try bind(Int32(record.inputCharacters), to: 9, in: statement); try bind(Int32(record.outputCharacters), to: 10, in: statement); try bindOptional(record.inputTokens.map(Double.init), to: 11, in: statement); try bindOptional(record.outputTokens.map(Double.init), to: 12, in: statement); try bindOptional(record.totalTokens.map(Double.init), to: 13, in: statement); try bindOptional(record.latencyMilliseconds.map(Double.init), to: 14, in: statement)
-            try bind(record.externalBrainUsed ? Int32(1) : Int32(0), to: 15, in: statement); try bind(Int32(record.retrievedChunkCount), to: 16, in: statement); try bindOptional(record.errorCategory?.rawValue, to: 17, in: statement)
+            try bind(record.externalBrainUsed ? Int32(1) : Int32(0), to: 15, in: statement); try bind(Int32(record.retrievedChunkCount), to: 16, in: statement); try bindOptional(record.errorCategory?.rawValue, to: 17, in: statement); try bindOptional(record.sourceType?.rawValue, to: 18, in: statement)
             try stepDone(statement)
         }
     }
@@ -249,7 +249,7 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
     public func fetchUsage(from start: Date?, to end: Date?) throws -> [AIAPIUsageRecord] {
         try lock.withLock {
             var clauses: [String] = []; if start != nil { clauses.append("started_at >= ?") }; if end != nil { clauses.append("started_at < ?") }
-            let sql = "SELECT id, started_at, finished_at, feature, persona_id, provider, model, status, input_characters, output_characters, input_tokens, output_tokens, total_tokens, latency_milliseconds, external_brain_used, retrieved_chunk_count, error_category FROM ai_api_usage" + (clauses.isEmpty ? "" : " WHERE " + clauses.joined(separator: " AND ")) + " ORDER BY started_at ASC, id ASC"
+            let sql = "SELECT id, started_at, finished_at, feature, persona_id, provider, model, status, input_characters, output_characters, input_tokens, output_tokens, total_tokens, latency_milliseconds, external_brain_used, retrieved_chunk_count, error_category, source_type FROM ai_api_usage" + (clauses.isEmpty ? "" : " WHERE " + clauses.joined(separator: " AND ")) + " ORDER BY started_at ASC, id ASC"
             let statement = try prepare(sql); defer { sqlite3_finalize(statement) }
             var index: Int32 = 1; if let start { try bind(start.timeIntervalSince1970, to: index, in: statement); index += 1 }; if let end { try bind(end.timeIntervalSince1970, to: index, in: statement) }
             var values: [AIAPIUsageRecord] = []; var result = sqlite3_step(statement)
@@ -258,12 +258,50 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 func optionalInt(_ column: Int32) -> Int? { sqlite3_column_type(statement, column) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, column)) }
                 let personaID = sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : UUID(uuidString: String(cString: sqlite3_column_text(statement, 4)))
                 let category = sqlite3_column_type(statement, 16) == SQLITE_NULL ? nil : AIAPIErrorCategory(rawValue: String(cString: sqlite3_column_text(statement, 16)))
-                values.append(.init(id: id, startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)), finishedAt: sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)), feature: feature, personaID: personaID, provider: String(cString: providerText), model: String(cString: modelText), status: status, inputCharacters: Int(sqlite3_column_int64(statement, 8)), outputCharacters: Int(sqlite3_column_int64(statement, 9)), inputTokens: optionalInt(10), outputTokens: optionalInt(11), totalTokens: optionalInt(12), latencyMilliseconds: optionalInt(13), externalBrainUsed: sqlite3_column_int(statement, 14) != 0, retrievedChunkCount: Int(sqlite3_column_int64(statement, 15)), errorCategory: category))
+                let sourceType = sqlite3_column_type(statement, 17) == SQLITE_NULL ? nil : KnowledgeDraftSource(rawValue: String(cString: sqlite3_column_text(statement, 17)))
+                values.append(.init(id: id, startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)), finishedAt: sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)), feature: feature, personaID: personaID, provider: String(cString: providerText), model: String(cString: modelText), status: status, inputCharacters: Int(sqlite3_column_int64(statement, 8)), outputCharacters: Int(sqlite3_column_int64(statement, 9)), inputTokens: optionalInt(10), outputTokens: optionalInt(11), totalTokens: optionalInt(12), latencyMilliseconds: optionalInt(13), externalBrainUsed: sqlite3_column_int(statement, 14) != 0, retrievedChunkCount: Int(sqlite3_column_int64(statement, 15)), errorCategory: category, sourceType: sourceType))
                 result = sqlite3_step(statement)
             }
             guard result == SQLITE_DONE else { throw lastError() }; return values
         }
     }
+
+    public func saveKnowledgeDraft(_ draft: KnowledgeDraft) throws { try lock.withLock { try saveKnowledgeDraftUnlocked(draft) } }
+    private func saveKnowledgeDraftUnlocked(_ draft: KnowledgeDraft) throws {
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let tags = String(data: try encoder.encode(draft.tags), encoding: .utf8)!, related = String(data: try encoder.encode(draft.relatedDocuments), encoding: .utf8)!, provenance = String(data: try encoder.encode(draft.provenance), encoding: .utf8)!
+        let s = try prepare("INSERT OR REPLACE INTO knowledge_drafts(id,title,body,draft_type,project,tags_json,source_type,provenance_json,review_status,sync_status,github_path,created_at,updated_at,approved_at,promoted_at,rejected_at,knowledge_path,knowledge_sha,related_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        defer { sqlite3_finalize(s) }
+        let strings: [String?] = [draft.id.uuidString,draft.title,draft.body,draft.type.rawValue,draft.project,tags,draft.source.rawValue,provenance,draft.reviewStatus.rawValue,draft.syncStatus.rawValue,draft.savedPath]
+        for (offset,value) in strings.enumerated() { try bindOptional(value, to: Int32(offset + 1), in: s) }
+        try bind(draft.createdAt.timeIntervalSince1970, to: 12, in: s); try bind(draft.updatedAt.timeIntervalSince1970, to: 13, in: s); try bindOptional(draft.approvedAt?.timeIntervalSince1970, to: 14, in: s); try bindOptional(draft.promotedAt?.timeIntervalSince1970, to: 15, in: s); try bindOptional(draft.rejectedAt?.timeIntervalSince1970, to: 16, in: s); try bindOptional(draft.knowledgePath, to: 17, in: s); try bindOptional(draft.knowledgeSHA, to: 18, in: s); try bind(related, to: 19, in: s); try stepDone(s)
+        let delete = try prepare("DELETE FROM knowledge_drafts_fts WHERE id = ?"); defer { sqlite3_finalize(delete) }; try bind(draft.id.uuidString,to:1,in:delete); try stepDone(delete)
+        let index = try prepare("INSERT INTO knowledge_drafts_fts(id,title,body,tags,source_type) VALUES(?,?,?,?,?)"); defer { sqlite3_finalize(index) }; try bind(draft.id.uuidString,to:1,in:index); try bind(draft.title,to:2,in:index); try bind(draft.body,to:3,in:index); try bind(draft.tags.joined(separator:" "),to:4,in:index); try bind(draft.source.rawValue,to:5,in:index); try stepDone(index)
+    }
+    public func fetchKnowledgeDrafts() throws -> [KnowledgeDraft] { try lock.withLock { try queryKnowledgeDrafts("SELECT id,title,body,draft_type,project,tags_json,source_type,provenance_json,review_status,sync_status,github_path,created_at,updated_at,approved_at,promoted_at,rejected_at,knowledge_path,knowledge_sha,related_json FROM knowledge_drafts ORDER BY updated_at DESC,id DESC") } }
+    public func fetchKnowledgeDraft(id: UUID) throws -> KnowledgeDraft? { try lock.withLock { try queryKnowledgeDrafts("SELECT id,title,body,draft_type,project,tags_json,source_type,provenance_json,review_status,sync_status,github_path,created_at,updated_at,approved_at,promoted_at,rejected_at,knowledge_path,knowledge_sha,related_json FROM knowledge_drafts WHERE id = ?", bind: { try self.bind(id.uuidString, to: 1, in: $0) }).first } }
+    public func searchKnowledgeDrafts(query: String) throws -> [KnowledgeDraft] { try lock.withLock {
+        let terms = query.split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { $0.count >= 3 }.prefix(12); guard !terms.isEmpty else { return [] }; let match = terms.map { "\"\($0.replacingOccurrences(of:"\"",with:"\"\""))\"" }.joined(separator:" OR ")
+        return try queryKnowledgeDrafts("SELECT d.id,d.title,d.body,d.draft_type,d.project,d.tags_json,d.source_type,d.provenance_json,d.review_status,d.sync_status,d.github_path,d.created_at,d.updated_at,d.approved_at,d.promoted_at,d.rejected_at,d.knowledge_path,d.knowledge_sha,d.related_json FROM knowledge_drafts_fts f JOIN knowledge_drafts d ON d.id=f.id WHERE knowledge_drafts_fts MATCH ? ORDER BY bm25(knowledge_drafts_fts),d.updated_at DESC", bind:{ try self.bind(match,to:1,in:$0) })
+    } }
+    public func savePromotedKnowledge(draft: KnowledgeDraft, document: KnowledgeDocument) throws { try lock.withLock { try transaction {
+        guard draft.reviewStatus == .promoted, draft.knowledgePath == document.path, draft.knowledgeSHA == document.sha else { throw SQLiteThoughtRepositoryError.invalidRecord }
+        try saveKnowledgeDraftUnlocked(draft)
+        let encoder = JSONEncoder(); let tags = String(data: try encoder.encode(document.tags), encoding: .utf8)!
+        let s = try prepare("INSERT INTO knowledge_documents(id,draft_id,title,path,sha,source_type,tags_json,markdown,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+        defer { sqlite3_finalize(s) }; for (offset,value) in [document.id.uuidString,document.draftID.uuidString,document.title,document.path,document.sha,document.source.rawValue,tags,document.markdown].enumerated() { try bind(value, to: Int32(offset + 1), in: s) }; try bind(document.createdAt.timeIntervalSince1970, to: 9, in: s); try bind(document.updatedAt.timeIntervalSince1970, to: 10, in: s); try stepDone(s)
+    } } }
+    public func fetchKnowledgeDocuments() throws -> [KnowledgeDocument] { try lock.withLock {
+        let s = try prepare("SELECT id,draft_id,title,path,sha,source_type,tags_json,markdown,created_at,updated_at,status,superseded_by_knowledge_id,superseded_at,archived_at,retrieval_count,last_retrieved_at FROM knowledge_documents ORDER BY updated_at DESC,id DESC"); defer { sqlite3_finalize(s) }; var values: [KnowledgeDocument] = []; var result = sqlite3_step(s); let decoder = JSONDecoder()
+        while result == SQLITE_ROW { guard let id = UUID(uuidString: text(s,0)), let draftID = UUID(uuidString: text(s,1)), let source = KnowledgeDraftSource(rawValue: text(s,5)), let data = text(s,6).data(using:.utf8),let status=KnowledgeDocumentStatus(rawValue:text(s,10)) else { throw SQLiteThoughtRepositoryError.invalidRecord }; values.append(.init(id:id,draftID:draftID,title:text(s,2),path:text(s,3),sha:text(s,4),source:source,tags:try decoder.decode([String].self,from:data),markdown:text(s,7),createdAt:Date(timeIntervalSince1970:sqlite3_column_double(s,8)),updatedAt:Date(timeIntervalSince1970:sqlite3_column_double(s,9)),status:status,supersededByKnowledgeID:optionalText(s,11).flatMap { UUID(uuidString:$0) },supersededAt:optionalDate(s,12),archivedAt:optionalDate(s,13),retrievalCount:Int(sqlite3_column_int64(s,14)),lastRetrievedAt:optionalDate(s,15))); result = sqlite3_step(s) }; guard result == SQLITE_DONE else { throw lastError() }; return values
+    } }
+    public func saveKnowledgeDocument(_ document: KnowledgeDocument) throws { try lock.withLock { let s=try prepare("UPDATE knowledge_documents SET status=?,superseded_by_knowledge_id=?,superseded_at=?,archived_at=?,retrieval_count=?,last_retrieved_at=? WHERE id=?"); defer { sqlite3_finalize(s) }; try bind(document.status.rawValue,to:1,in:s); try bindOptional(document.supersededByKnowledgeID?.uuidString,to:2,in:s); try bindOptional(document.supersededAt?.timeIntervalSince1970,to:3,in:s); try bindOptional(document.archivedAt?.timeIntervalSince1970,to:4,in:s); try bind(Int32(document.retrievalCount),to:5,in:s); try bindOptional(document.lastRetrievedAt?.timeIntervalSince1970,to:6,in:s); try bind(document.id.uuidString,to:7,in:s); try stepDone(s); guard sqlite3_changes(database)==1 else { throw SQLiteThoughtRepositoryError.invalidRecord } } }
+    public func recordKnowledgeRetrieval(paths:[String],at date:Date) throws { guard !paths.isEmpty else{return}; try lock.withLock { let s=try prepare("UPDATE knowledge_documents SET retrieval_count=retrieval_count+1,last_retrieved_at=? WHERE path=? AND status='active'"); defer { sqlite3_finalize(s) }; for path in Set(paths) { sqlite3_reset(s); sqlite3_clear_bindings(s); try bind(date.timeIntervalSince1970,to:1,in:s); try bind(path,to:2,in:s); try stepDone(s) } } }
+    public func replaceKnowledgeQualityCandidates(_ candidates:[KnowledgeQualityCandidate]) throws { try lock.withLock { try transaction { try execute("DELETE FROM knowledge_quality_candidates WHERE status = 'open'"); for candidate in candidates { let s=try prepare("INSERT INTO knowledge_quality_candidates(id,candidate_type,knowledge_id,related_knowledge_id,score,reason,status,created_at,resolved_at) SELECT ?,?,?,?,?,?,?,?,NULL WHERE NOT EXISTS(SELECT 1 FROM knowledge_quality_candidates WHERE status IN ('dismissed','resolved') AND candidate_type=? AND knowledge_id=? AND COALESCE(related_knowledge_id,'')=COALESCE(?,''))"); defer { sqlite3_finalize(s) }; try bind(candidate.id.uuidString,to:1,in:s); try bind(candidate.type.rawValue,to:2,in:s); try bind(candidate.knowledgeID.uuidString,to:3,in:s); try bindOptional(candidate.relatedKnowledgeID?.uuidString,to:4,in:s); try bind(candidate.score,to:5,in:s); try bind(candidate.reason,to:6,in:s); try bind(candidate.status.rawValue,to:7,in:s); try bind(candidate.createdAt.timeIntervalSince1970,to:8,in:s); try bind(candidate.type.rawValue,to:9,in:s); try bind(candidate.knowledgeID.uuidString,to:10,in:s); try bindOptional(candidate.relatedKnowledgeID?.uuidString,to:11,in:s); try stepDone(s) } } } }
+    public func fetchKnowledgeQualityCandidates() throws -> [KnowledgeQualityCandidate] { try lock.withLock { let s=try prepare("SELECT id,candidate_type,knowledge_id,related_knowledge_id,score,reason,status,created_at,resolved_at FROM knowledge_quality_candidates ORDER BY status ASC,score DESC,created_at DESC"); defer { sqlite3_finalize(s) }; var values:[KnowledgeQualityCandidate]=[]; var result=sqlite3_step(s); while result==SQLITE_ROW { guard let id=UUID(uuidString:text(s,0)),let type=KnowledgeQualityCandidateType(rawValue:text(s,1)),let knowledgeID=UUID(uuidString:text(s,2)),let status=KnowledgeQualityCandidateStatus(rawValue:text(s,6)) else { throw SQLiteThoughtRepositoryError.invalidRecord }; values.append(.init(id:id,knowledgeID:knowledgeID,relatedKnowledgeID:optionalText(s,3).flatMap { UUID(uuidString:$0) },type:type,score:sqlite3_column_double(s,4),reason:text(s,5),status:status,createdAt:Date(timeIntervalSince1970:sqlite3_column_double(s,7)),resolvedAt:optionalDate(s,8))); result=sqlite3_step(s) }; guard result==SQLITE_DONE else { throw lastError() }; return values } }
+    public func saveKnowledgeQualityCandidate(_ candidate:KnowledgeQualityCandidate) throws { try lock.withLock { let s=try prepare("UPDATE knowledge_quality_candidates SET status=?,resolved_at=? WHERE id=?"); defer { sqlite3_finalize(s) }; try bind(candidate.status.rawValue,to:1,in:s); try bindOptional(candidate.resolvedAt?.timeIntervalSince1970,to:2,in:s); try bind(candidate.id.uuidString,to:3,in:s); try stepDone(s); guard sqlite3_changes(database)==1 else { throw SQLiteThoughtRepositoryError.invalidRecord } } }
+    public func saveKnowledgeLifecycleEvent(_ event: KnowledgeLifecycleEvent) throws { try lock.withLock { let s = try prepare("INSERT INTO knowledge_lifecycle_events(id,draft_id,event_type,source_type,created_at) VALUES(?,?,?,?,?)"); defer { sqlite3_finalize(s) }; try bind(event.id.uuidString,to:1,in:s); try bind(event.draftID.uuidString,to:2,in:s); try bind(event.type.rawValue,to:3,in:s); try bind(event.source.rawValue,to:4,in:s); try bind(event.createdAt.timeIntervalSince1970,to:5,in:s); try stepDone(s) } }
+    public func fetchKnowledgeLifecycleEvents() throws -> [KnowledgeLifecycleEvent] { try lock.withLock { let s=try prepare("SELECT id,draft_id,event_type,source_type,created_at FROM knowledge_lifecycle_events ORDER BY created_at DESC,id DESC"); defer { sqlite3_finalize(s) }; var values:[KnowledgeLifecycleEvent]=[]; var result=sqlite3_step(s); while result == SQLITE_ROW { guard let id=UUID(uuidString:text(s,0)),let draftID=UUID(uuidString:text(s,1)),let type=KnowledgeLifecycleEventType(rawValue:text(s,2)),let source=KnowledgeDraftSource(rawValue:text(s,3)) else { throw SQLiteThoughtRepositoryError.invalidRecord }; values.append(.init(id:id,draftID:draftID,type:type,source:source,createdAt:Date(timeIntervalSince1970:sqlite3_column_double(s,4)))); result=sqlite3_step(s) }; guard result == SQLITE_DONE else { throw lastError() }; return values } }
 
     public func saveGeneratedReply(_ thought: Thought, authorPersonaID: UUID, targetThoughtID: UUID, generation: AIPostGeneration, relationID: UUID) throws {
         try lock.withLock {
@@ -1151,6 +1189,35 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 try execute("PRAGMA user_version = 10")
             }
         }
+        if version < 11 {
+            try transaction {
+                try execute("ALTER TABLE ai_api_usage ADD COLUMN source_type TEXT NULL")
+                try execute("PRAGMA user_version = 11")
+            }
+        }
+        if version < 12 {
+            try transaction {
+                try execute("CREATE TABLE knowledge_drafts(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,draft_type TEXT NOT NULL,project TEXT NOT NULL,tags_json TEXT NOT NULL,source_type TEXT NOT NULL,provenance_json TEXT NOT NULL,review_status TEXT NOT NULL,sync_status TEXT NOT NULL,github_path TEXT NULL,created_at REAL NOT NULL,updated_at REAL NOT NULL,approved_at REAL NULL,promoted_at REAL NULL,rejected_at REAL NULL,knowledge_path TEXT NULL,knowledge_sha TEXT NULL,related_json TEXT NOT NULL)")
+                try execute("CREATE INDEX knowledge_drafts_status_updated_idx ON knowledge_drafts(review_status,updated_at DESC)")
+                try execute("CREATE VIRTUAL TABLE knowledge_drafts_fts USING fts5(id UNINDEXED,title,body,tags,source_type,tokenize='trigram')")
+                try execute("CREATE TABLE knowledge_documents(id TEXT PRIMARY KEY NOT NULL,draft_id TEXT UNIQUE NOT NULL,title TEXT NOT NULL,path TEXT UNIQUE NOT NULL,sha TEXT NOT NULL,source_type TEXT NOT NULL,tags_json TEXT NOT NULL,markdown TEXT NOT NULL,created_at REAL NOT NULL,updated_at REAL NOT NULL,FOREIGN KEY(draft_id) REFERENCES knowledge_drafts(id))")
+                try execute("CREATE TABLE knowledge_lifecycle_events(id TEXT PRIMARY KEY NOT NULL,draft_id TEXT NOT NULL,event_type TEXT NOT NULL,source_type TEXT NOT NULL,created_at REAL NOT NULL)")
+                try execute("PRAGMA user_version = 12")
+            }
+        }
+        if version < 13 {
+            try transaction {
+                try execute("ALTER TABLE knowledge_documents ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+                try execute("ALTER TABLE knowledge_documents ADD COLUMN superseded_by_knowledge_id TEXT NULL")
+                try execute("ALTER TABLE knowledge_documents ADD COLUMN superseded_at REAL NULL")
+                try execute("ALTER TABLE knowledge_documents ADD COLUMN archived_at REAL NULL")
+                try execute("ALTER TABLE knowledge_documents ADD COLUMN retrieval_count INTEGER NOT NULL DEFAULT 0")
+                try execute("ALTER TABLE knowledge_documents ADD COLUMN last_retrieved_at REAL NULL")
+                try execute("CREATE TABLE knowledge_quality_candidates(id TEXT PRIMARY KEY NOT NULL,candidate_type TEXT NOT NULL,knowledge_id TEXT NOT NULL,related_knowledge_id TEXT NULL,score REAL NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL,created_at REAL NOT NULL,resolved_at REAL NULL)")
+                try execute("CREATE INDEX knowledge_quality_status_idx ON knowledge_quality_candidates(status,candidate_type,score DESC)")
+                try execute("PRAGMA user_version = 13")
+            }
+        }
     }
 
     private func migrateLegacyJSONIfNeeded() throws {
@@ -1385,6 +1452,21 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         guard sqlite3_step(statement) == SQLITE_ROW else { throw lastError() }
         return sqlite3_column_int(statement, 0)
     }
+
+    private func queryKnowledgeDrafts(_ sql: String, bind binder: (OpaquePointer) throws -> Void = { _ in }) throws -> [KnowledgeDraft] {
+        let s = try prepare(sql); defer { sqlite3_finalize(s) }; try binder(s); var values: [KnowledgeDraft] = []; var result = sqlite3_step(s); let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        while result == SQLITE_ROW {
+            guard let id = UUID(uuidString: text(s,0)), let type = KnowledgeDraftType(rawValue:text(s,3)), let source = KnowledgeDraftSource(rawValue:text(s,6)), let status = KnowledgeDraftReviewStatus(rawValue:text(s,8)), let sync = KnowledgeGitHubSyncStatus(rawValue:text(s,9)), let tagsData = text(s,5).data(using:.utf8), let provenanceData = text(s,7).data(using:.utf8), let relatedData = text(s,18).data(using:.utf8) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+            func date(_ column:Int32)->Date? { sqlite3_column_type(s,column) == SQLITE_NULL ? nil : Date(timeIntervalSince1970:sqlite3_column_double(s,column)) }
+            values.append(.init(id:id,title:text(s,1),type:type,project:text(s,4),tags:try decoder.decode([String].self,from:tagsData),source:source,createdAt:Date(timeIntervalSince1970:sqlite3_column_double(s,11)),updatedAt:Date(timeIntervalSince1970:sqlite3_column_double(s,12)),body:text(s,2),relatedDocuments:try decoder.decode([ExternalBrainRetrievedChunk].self,from:relatedData),savedPath:optionalText(s,10),reviewStatus:status,syncStatus:sync,provenance:try decoder.decode(KnowledgeDraftProvenance.self,from:provenanceData),approvedAt:date(13),promotedAt:date(14),rejectedAt:date(15),knowledgePath:optionalText(s,16),knowledgeSHA:optionalText(s,17)))
+            result = sqlite3_step(s)
+        }
+        guard result == SQLITE_DONE else { throw lastError() }; return values
+    }
+
+    private func text(_ statement: OpaquePointer, _ column: Int32) -> String { sqlite3_column_text(statement,column).map { String(cString:$0) } ?? "" }
+    private func optionalText(_ statement: OpaquePointer, _ column: Int32) -> String? { sqlite3_column_type(statement,column) == SQLITE_NULL ? nil : text(statement,column) }
+    private func optionalDate(_ statement: OpaquePointer, _ column: Int32) -> Date? { sqlite3_column_type(statement,column) == SQLITE_NULL ? nil : Date(timeIntervalSince1970:sqlite3_column_double(statement,column)) }
 
     private func transaction(_ work: () throws -> Void) throws {
         try execute("BEGIN IMMEDIATE")

@@ -24,11 +24,12 @@ struct AIAPIUsageTests {
         let fixture = try UsageFixture(); defer { fixture.remove() }
         let repository = try fixture.repository()
         let personaID = UUID(), start = Date(timeIntervalSince1970: 1_000), end = Date(timeIntervalSince1970: 1_001.25)
-        try repository.saveUsage(.init(startedAt: start, finishedAt: end, feature: .thoughtReply, personaID: personaID, provider: "provider", model: "model", status: .success, inputCharacters: 123, outputCharacters: 45, latencyMilliseconds: 1_250, externalBrainUsed: true, retrievedChunkCount: 3))
+        try repository.saveUsage(.init(startedAt: start, finishedAt: end, feature: .knowledgeDraft, personaID: personaID, provider: "provider", model: "model", status: .success, inputCharacters: 123, outputCharacters: 45, latencyMilliseconds: 1_250, externalBrainUsed: true, retrievedChunkCount: 3, sourceType: .aiReply))
         let value = try #require(repository.fetchUsage(from: nil, to: nil).first)
         #expect(value.personaID == personaID); #expect(value.inputCharacters == 123); #expect(value.outputCharacters == 45)
         #expect(value.inputTokens == nil); #expect(value.outputTokens == nil); #expect(value.totalTokens == nil)
         #expect(value.externalBrainUsed); #expect(value.retrievedChunkCount == 3); #expect(value.latencyMilliseconds == 1_250)
+        #expect(value.feature == .knowledgeDraft); #expect(value.sourceType == .aiReply)
     }
 
     @Test func recordsSuccessFailureCancellationAndRetryAsSeparateCalls() async throws {

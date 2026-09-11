@@ -20,6 +20,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
     -> PrepareDailySummary / GenerateDailySummary -> ReviewSummaryClient / DailySummaryRepository
     -> AIAPIUsageRecorder -> AIAPIUsageRepository（best-effort metadata）
     -> ExternalBrainManager -> GitHub read-only API -> Local Markdown Cache -> SQLite FTS5 -> AI Reply Preview
+    -> GenerateKnowledgeDraft -> editable Preview -> ExternalBrainDraftWriter -> GitHub drafts/ new-file-only
     -> ThoughtExporter -> ThoughtRepository
     -> ShareSheet (UIActivityViewController)
     -> ExternalBackupManager -> ExternalBackupService / RestoreCoordinator
@@ -52,6 +53,11 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `AIThoughtReplyPrompt` / `GenerateAIThoughtReply`: メンション対象AIと対象Thoughtだけからimmutableな返信previewを作り、成功応答をAI名義Thought、`repliesTo` Relation、reply生成来歴として同一transactionで保存する。
 - `ExternalBrainCache` / `ExternalBrainIndex` / `ExternalBrainRetriever`: 単一GitHub RepositoryのMarkdownをSHA差分同期し、front matterを解析してheading単位に分割した派生cacheをSQLite FTS5で検索する。PersonaのAGENT.mdからrouteとrulesを解決し、最大5件をAI Replyまたは独立Persona Postの参考資料としてimmutable previewへ固定する。Personaを持たないDaily Summaryにはrouteしない。
 - `ExternalBrainManager` / `GitHubExternalBrainRemote`: Repository設定とPersona別設定、同期状態を管理するapp層。GitHub tokenはKeychainへ保存し、GitHub APIはtree／contentsのGETだけを使う。
+- `KnowledgeDraft` / `GenerateKnowledgeDraft`: AI Reply、Persona Post、Daily Summaryを明示操作後に再利用可能なMarkdown候補へ変換する。ローカルFTSの関連候補は最大3件で追加AI Callを使わず、生成Usageだけを`Knowledge Draft`として記録する。
+- `KnowledgeDraftRepository` / `KnowledgeDocument`: Draftと正式Knowledgeを分離し、Review状態、provenance、GitHub metadataをschema v12へ保存する。Draft専用FTSはtitle／body／tags／sourceを検索し、正式KnowledgeはPromote後のread-only snapshotとして保持する。
+- `KnowledgeQualityAnalyzer` / `KnowledgeQualityCandidate`: active Knowledgeをローカル比較し、duplicate／similar／stale候補だけを生成する。candidateのopen／resolved／dismissedはKnowledge本文・状態と独立し、解析はAI APIを使わない。
+- Knowledge usage policy: AI Reply／Persona Post retrievalで取得された正式pathをSQLiteへbest-effort記録する。activeだけを集計し、Archive／Supersedeの明示操作時はローカルExternal Brain indexから除外する。
+- `ExternalBrainDraftWriter` / `GitHubExternalBrainDraftWriter`: read境界から分離したwrite専用境界。アプリ側で`drafts/YYYY-MM-DD-safe-slug.md`を生成し、GitHub Contents APIでshaなしの新規作成だけを許可する。同名、権限、network失敗時はPreviewのDraftを保持する。
 - `AIReplyContextRepository`: 対象から`repliesTo`だけを逆向きに辿り、削除済み本文を除いた直近最大5件を投稿者付き・古い順で返す。PreviewはThought・Relation・Personaを固定し、生成直前の再取得結果と異なる場合は通信前に中止する。
 - `ThoughtMention` / `ThoughtMentionRepository`: Thought本文の文字列解析ではなく、ThoughtとAI Persona IDの単一メンション関連をatomic保存・一括取得する。メンション作成自体はAI clientを呼ばない。
 - `ThoughtRepository`: create、Timeline query、literal部分一致検索、日付範囲query、ID取得、全件取得、soft deleteの保存境界。
@@ -61,7 +67,7 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `ThoughtRelationRepository`: Relation作成、source／target方向の1ステップ取得境界。
 - `ThoughtContinuationRepository`: 新規Thoughtと`continues` Relationを同一transactionで作成する境界。
 - `ThoughtHistory`: 現在Thoughtからrootを求め、Relation APIだけで分岐を安定順に取得するuse case。
-- `SQLiteThoughtRepository`: schema v10、Thought／Persona／Mention／Tag／Relation／AI生成情報／Daily Summary／AI Usage metadata query、旧JSON importと2世代backupを所有する正本実装。旧期間要約tableは既存データ互換のため維持する。
+- `SQLiteThoughtRepository`: schema v13、Thought／Persona／Mention／Tag／Relation／AI生成情報／Daily Summary／AI Usage metadata、Knowledge Review／Quality／usage metadataとDraft FTS query、旧JSON importと2世代backupを所有する正本実装。旧期間要約tableは既存データ互換のため維持する。
 - `ThoughtExporter`: Repositoryから未削除Thoughtを取得し、Markdown／JSONを生成。
 - `ShareSheet`: ExportファイルをiOS標準共有UIへ渡すUIKit bridge。
 - `ExternalBackupManager`: Filesフォルダpicker、security-scoped bookmark、バックアップ状態と確認UIのpresentation境界。
@@ -92,6 +98,8 @@ Daily SummaryはHumanの概要・テーマ・思考と、既存Humanタグ別、
 
 `Application Support/ExternalBrain/files`、`manifest.json`、`index.sqlite3`はGitHub Markdownを正本とする削除・再生成可能な派生データです。Thought DBと外部完全backupには含めません。
 
+Knowledge Draftは生成成功時にReview用SQLiteへ永続化し、編集可能Previewでも保持します。Humanが明示的に保存した場合だけGitHubの`drafts/`へ新規作成し、既存fileの更新・削除は行いません。`status: draft`により同期後も通常Retrieval indexから除外されます。正式KnowledgeへのPromote、Archive、Supersedeもそれぞれ独立した明示操作です。
+
 schema v9の`personas`と`thought_authors`は既存Thoughtを固定のデフォルト人間Personaへ移行し、新規Thought／Continuationの作成と投稿者関連を同一transactionで保存します。`ai_post_generations`は生成種別と返信先Thought IDも保持し、`thought_relations`はContinuationとAI返信を区別します。`thought_mentions`は投稿とAI Personaの関連を保存します。
 
 Widget Extensionは永続化層をリンクせず、固定表示とQuick Capture URLだけを持ちます。App Group、共有container、SQLite path変更はなく、既存appだけがApplication Support内の正本DBを読み書きします。
@@ -105,3 +113,6 @@ Widget Extensionは永続化層をリンクせず、固定表示とQuick Capture
 ## External Services / Authentication
 
 application composition rootはローカル`GoogleService-Info.plist`を検証し、DebugではApp Check Debug Provider、ReleaseではApp Attest Providerを設定してからFirebaseを初期化します。App Attest entitlementはRelease configurationだけに付与し、Personal Teamを使うDebug実機buildでは要求しません。Git管理外のルート`GoogleService-Info.plist`は存在する場合だけapp bundleへcopyし、未配置でもbuildと起動を継続します。モデルは`ReviewSummaryAIConfiguration`の`gemini-3.7-flash`、providerは`firebase-ai-logic`を正本とし、実応答の保存メタデータへ渡します。Firebase未設定、App Check、rate limit、network、その他APIをtyped errorへ分類します。APIキーとDebug tokenはコード／Gitへ含めません。Files／iCloud DriveアクセスにはiOS標準document pickerとsecurity-scoped bookmarkだけを使います。
+## GitHub Repository Settings
+
+External Brainのowner／repository／branchは`ExternalBrainManager`が既存UserDefaults keyへ保存し、Read、sync、Draft new-file-only保存、Promoteの全経路が同じ設定を参照する。PATは`ExternalBrainTokenStore`だけがKeychainへ保存し、UserDefaults、SQLite、Markdown、Usageへ渡さない。接続確認は既存`GitHubExternalBrainRemote`によるGETだけでAuthentication、Repository、Branchを検証し、repository permissionsのpush値からDraft／Knowledge capabilityを推定する。接続確認は設定保存とは独立し、失敗しても設定とローカルKnowledgeを保持する。

@@ -236,9 +236,15 @@ private struct SettingsView: View {
                 }
 
                 Section("AI") {
-                    NavigationLink { ExternalBrainSettingsView(manager: store.externalBrainManager) } label: {
-                        Label("External Brain", systemImage: "brain.head.profile")
+                    NavigationLink { ExternalBrainSettingsView(store: store) } label: {
+                        HStack {
+                            Label("External Brain", systemImage: "brain.head.profile")
+                            Spacer()
+                            Text(store.externalBrainManager.repository.isConfigured ? (store.externalBrainManager.connectionCapabilities?.issue == nil && store.externalBrainManager.connectionCapabilities != nil ? "Connected" : "Configured") : "Not configured")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
+                    NavigationLink { KnowledgeManagementView(store: store) } label: { Label("Knowledge Drafts", systemImage: "doc.text.magnifyingglass") }
                 }
 
                 Section("データ") {
@@ -634,6 +640,7 @@ private struct ThoughtDetailView: View {
     @State private var showsTagEditor = false
     @State private var showsAIReply = false
     @State private var showsHumanReplyComposer = false
+    @State private var knowledgeDraftInput: KnowledgeDraftInput?
     @FocusState private var composerIsFocused: Bool
 
     init(store: ThoughtStore, initialThoughtID: UUID) {
@@ -681,6 +688,9 @@ private struct ThoughtDetailView: View {
                         Button("返信を書く") { showsHumanReplyComposer.toggle() }
                             .buttonStyle(.bordered)
                             .accessibilityIdentifier("writeReplyButton")
+                        if let input = store.knowledgeDraftInput(for: currentThought) {
+                            Button("外部脳に残す") { knowledgeDraftInput = input }.buttonStyle(.bordered)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
@@ -690,7 +700,7 @@ private struct ThoughtDetailView: View {
                     if let replies = store.aiRepliesByTargetID[currentThought.id], !replies.isEmpty {
                         Divider(); Text("AI Reply").font(.headline).padding(.horizontal, 16).padding(.top, 18)
                         ForEach(replies) { reply in
-                            HStack(alignment: .top, spacing: 10) { PersonaIcon(persona: store.personasByThoughtID[reply.id] ?? store.defaultHumanPersona, size: 32); VStack(alignment: .leading) { Text(store.personasByThoughtID[reply.id]?.displayName ?? "AI").font(.subheadline.weight(.semibold)); Text(reply.body); Text(ThoughtDateText.string(for: reply.createdAt)).font(.caption).foregroundStyle(.secondary) } }.padding(16)
+                            HStack(alignment: .top, spacing: 10) { PersonaIcon(persona: store.personasByThoughtID[reply.id] ?? store.defaultHumanPersona, size: 32); VStack(alignment: .leading) { Text(store.personasByThoughtID[reply.id]?.displayName ?? "AI").font(.subheadline.weight(.semibold)); Text(reply.body); Text(ThoughtDateText.string(for: reply.createdAt)).font(.caption).foregroundStyle(.secondary); if let input = store.knowledgeDraftInput(for: reply) { Button("外部脳に残す") { knowledgeDraftInput = input }.buttonStyle(.bordered) } } }.padding(16)
                         }
                     }
                 }
@@ -725,6 +735,7 @@ private struct ThoughtDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { store.loadHistory(for: currentThoughtID); store.loadAIReplies(to: currentThoughtID) }
         .onChange(of: currentThoughtID) { store.loadAIReplies(to: $0) }
+        .sheet(isPresented: Binding(get: { knowledgeDraftInput != nil }, set: { if !$0 { knowledgeDraftInput = nil } })) { if let input = knowledgeDraftInput { KnowledgeDraftFlowView(store: store, input: input) } }
         .sheet(isPresented: $showsTagEditor) {
             if let currentThought {
                 ThoughtTagEditorView(store: store, thought: currentThought)
@@ -892,23 +903,59 @@ private struct ThoughtRow: View {
 }
 
 private struct ExternalBrainSettingsView: View {
+    @ObservedObject var store: ThoughtStore
     @ObservedObject var manager: ExternalBrainManager
     @State private var owner = ""
     @State private var repository = ""
     @State private var branch = "main"
     @State private var token = ""
+    @State private var showsToken = false
+    @State private var confirmsRepositoryChange = false
+    @State private var confirmsTokenRemoval = false
+    init(store: ThoughtStore) { self.store = store; self.manager = store.externalBrainManager }
+    private var editedConfiguration: ExternalBrainRepositoryConfiguration {
+        .init(owner: owner.trimmingCharacters(in: .whitespacesAndNewlines), repository: repository.trimmingCharacters(in: .whitespacesAndNewlines), branch: branch.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    private var hasLocalKnowledge: Bool { !store.knowledgeDrafts.isEmpty || !store.knowledgeDocuments.isEmpty }
 
     var body: some View {
         Form {
-            Section("Repository") {
+            Section("GitHub Repository") {
                 TextField("Owner", text: $owner).textInputAutocapitalization(.never).autocorrectionDisabled()
                 TextField("Repository", text: $repository).textInputAutocapitalization(.never).autocorrectionDisabled()
                 TextField("Branch", text: $branch).textInputAutocapitalization(.never).autocorrectionDisabled()
-                SecureField("GitHub fine-grained token", text: $token)
-                Button("設定を保存") {
-                    manager.repository = .init(owner: owner.trimmingCharacters(in: .whitespacesAndNewlines), repository: repository.trimmingCharacters(in: .whitespacesAndNewlines), branch: branch.trimmingCharacters(in: .whitespacesAndNewlines))
-                    if !token.isEmpty { _ = manager.saveToken(token); token = "" }
+                Button("Repository設定を保存") {
+                    if hasLocalKnowledge && editedConfiguration != manager.repository { confirmsRepositoryChange = true }
+                    else { manager.repository = editedConfiguration }
                 }
+            }
+            Section("Personal Access Token") {
+                HStack {
+                    Group {
+                        if showsToken { TextField("新しいGitHub token", text: $token) }
+                        else { SecureField(manager.hasToken ? "••••••••••••••" : "GitHub fine-grained token", text: $token) }
+                    }
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button(showsToken ? "Hide" : "Show") { showsToken.toggle() }.buttonStyle(.borderless)
+                }
+                LabeledContent("Status", value: manager.hasToken ? "Keychainに設定済み" : "未設定")
+                Button("Tokenを保存") { if manager.saveToken(token) { token = ""; showsToken = false } }.disabled(token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if manager.hasToken { Button("Remove Token", role: .destructive) { confirmsTokenRemoval = true } }
+            }
+            Section("GitHub Connection") {
+                Button(manager.isTestingConnection ? "確認中…" : "Test Connection") { Task { await manager.testConnection() } }.disabled(manager.isTestingConnection)
+                capability("Authentication", manager.connectionCapabilities?.authentication)
+                capability("Repository Read", manager.connectionCapabilities?.repositoryRead)
+                capability("Branch \(manager.repository.branch)", manager.connectionCapabilities?.branchRead)
+                capability("Write Drafts", manager.connectionCapabilities?.writeDrafts)
+                capability("Write Knowledge", manager.connectionCapabilities?.writeKnowledge)
+                if let issue = manager.connectionCapabilities?.issue { Text(issue.localizedDescription).font(.footnote).foregroundStyle(.red) }
+                if let remaining = manager.connectionCapabilities?.rateLimitRemaining { LabeledContent("Rate limit remaining", value: "\(remaining)") }
+                Text("接続確認はRepository・Branch・権限情報の読取りだけを行い、ファイルを書き込みません。").font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Paths") {
+                LabeledContent("Draft Path", value: manager.draftDirectory)
+                LabeledContent("Knowledge Path", value: manager.knowledgeDirectory)
             }
             Section("同期") {
                 if let date = manager.manifest.syncedAt { LabeledContent("最終同期", value: date.formatted(date: .abbreviated, time: .shortened)) }
@@ -917,10 +964,161 @@ private struct ExternalBrainSettingsView: View {
                 Button(manager.isSyncing ? "同期中…" : "今すぐ同期") { Task { await manager.synchronize() } }.disabled(manager.isSyncing)
                 if let message = manager.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
             }
-            Section { Text("GitHubは読み取り専用です。TokenはKeychainへ保存され、SQLite・Export・ログには含まれません。同期できない場合もAI ReplyはExternal Brainなしで続行します。").font(.footnote).foregroundStyle(.secondary) }
+            Section("Capabilities") {
+                LabeledContent("GitHub", value: manager.repository.isConfigured ? (manager.connectionCapabilities?.issue == nil && manager.connectionCapabilities != nil ? "Connected" : "Configured") : "Not configured")
+                LabeledContent("Repository", value: manager.repositoryDisplayName)
+                LabeledContent("Branch", value: manager.repository.branch)
+                LabeledContent("Drafts", value: manager.canWriteDrafts ? "Writable" : "設定または権限が必要")
+                LabeledContent("Knowledge", value: manager.canWriteKnowledge ? "Writable" : "設定または権限が必要")
+            }
+            Section { Text("TokenはKeychainへ保存され、SQLite・Markdown・Usage・ログには含まれません。Write DraftsにはGitHub Contentsのwrite権限が必要です。書き込み失敗はRead機能へ影響しません。").font(.footnote).foregroundStyle(.secondary) }
         }
         .navigationTitle("External Brain")
-        .onAppear { owner = manager.repository.owner; repository = manager.repository.repository; branch = manager.repository.branch }
+        .onAppear { owner = manager.repository.owner; repository = manager.repository.repository; branch = manager.repository.branch; store.loadKnowledge() }
+        .confirmationDialog("GitHub Repositoryを変更しますか？", isPresented: $confirmsRepositoryChange, titleVisibility: .visible) {
+            Button("変更する") { manager.repository = editedConfiguration }
+            Button("キャンセル", role: .cancel) {}
+        } message: { Text("既存のローカルKnowledgeとDraftは削除されません。今後のGitHub同期・保存先が変更されます。") }
+        .confirmationDialog("GitHub tokenを削除しますか？", isPresented: $confirmsTokenRemoval, titleVisibility: .visible) {
+            Button("削除", role: .destructive) { manager.removeToken() }
+            Button("キャンセル", role: .cancel) {}
+        }
+    }
+
+    @ViewBuilder private func capability(_ title: String, _ value: Bool?) -> some View {
+        LabeledContent(title, value: value.map { $0 ? "✓" : "×" } ?? "未確認")
+    }
+}
+
+struct KnowledgeDraftFlowView: View {
+    @ObservedObject var store: ThoughtStore
+    let input: KnowledgeDraftInput
+    @State private var type: KnowledgeDraftType = .knowledge
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Source") { LabeledContent("種類", value: input.source.displayName); Text(input.sourceContent).lineLimit(8) }
+                Section("Draft Type") { Picker("種類", selection: $type) { ForEach(KnowledgeDraftType.allCases, id: \.self) { Text($0.displayName).tag($0) } } }
+                Section { Text("生成を押すまでAI通信は行いません。生成後のPreview確認とGitHub保存は別操作です。").font(.footnote).foregroundStyle(.secondary) }
+                if let error = store.knowledgeDraftError { Section { Text(error).foregroundStyle(.red) } }
+            }
+            .navigationTitle("Knowledge Draft")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button(store.isGeneratingKnowledgeDraft ? "生成中…" : "Draft生成") { Task { await store.generateKnowledgeDraft(input: input, type: type) } }.disabled(store.isGeneratingKnowledgeDraft) }
+            }
+            .sheet(item: Binding(get: { store.knowledgeDraft }, set: { if $0 == nil { store.cancelKnowledgeDraft() } })) { KnowledgeDraftPreviewView(store: store, draft: $0) }
+        }
+    }
+}
+
+private struct KnowledgeDraftPreviewView: View {
+    @ObservedObject var store: ThoughtStore
+    @State private var draft: KnowledgeDraft
+    @State private var showsGitHubSettings = false
+    @Environment(\.dismiss) private var dismiss
+    init(store: ThoughtStore, draft: KnowledgeDraft) { self.store = store; _draft = State(initialValue: draft) }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Draft") {
+                    TextField("Title", text: $draft.title)
+                    Picker("Type", selection: $draft.type) { ForEach(KnowledgeDraftType.allCases, id: \.self) { Text($0.displayName).tag($0) } }
+                    TextField("Project", text: $draft.project)
+                    TextField("Tags（カンマ区切り）", text: Binding(get: { draft.tags.joined(separator: ", ") }, set: { draft.tags = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }))
+                    LabeledContent("Source", value: draft.source.displayName)
+                    LabeledContent("保存予定path", value: draft.targetPath)
+                }
+                Section("Markdown本文") { TextEditor(text: $draft.body).frame(minHeight: 260).font(.system(.caption, design: .monospaced)) }
+                Section("Markdown全文") { Text(draft.markdown).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                Section("関連する既存資料") {
+                    if draft.relatedDocuments.isEmpty { Text("なし").foregroundStyle(.secondary) }
+                    ForEach(Array(draft.relatedDocuments.enumerated()), id: \.offset) { item in VStack(alignment: .leading) { Text(item.element.documentPath).font(.subheadline.weight(.semibold)); Text(item.element.heading).font(.caption).foregroundStyle(.secondary) } }
+                }
+                if let message = store.knowledgeDraftMessage { Section { Text(message).foregroundStyle(.green) } }
+                if let error = store.knowledgeDraftError { Section { Text(error).foregroundStyle(.red) } }
+                if !store.externalBrainManager.canWriteDrafts {
+                    Section("GitHub") {
+                        Text("GitHub is not configured.").foregroundStyle(.secondary)
+                        Button("Open GitHub Settings") { showsGitHubSettings = true }
+                    }
+                }
+                if draft.savedPath == nil { Section { Text("保存の承認はGitHub drafts/への新規作成までです。確定知識への昇格ではありません。").font(.footnote).foregroundStyle(.secondary) } }
+            }
+            .navigationTitle("Draft Preview")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button(store.isSavingKnowledgeDraft ? "保存中…" : "GitHubへ保存") { Task { await store.saveKnowledgeDraft(draft); if let saved = store.knowledgeDraft { draft = saved } } }.disabled(store.isSavingKnowledgeDraft || draft.savedPath != nil || draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.project.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+            }
+            .sheet(isPresented: $showsGitHubSettings) { NavigationStack { ExternalBrainSettingsView(store: store) } }
+        }
+    }
+}
+
+private struct KnowledgeManagementView: View {
+    @ObservedObject var store: ThoughtStore
+    @State private var filter: KnowledgeDraftReviewStatus?
+    @State private var query = ""
+    private var drafts: [KnowledgeDraft] { store.knowledgeDrafts.filter { filter == nil || $0.reviewStatus == filter } }
+    var body: some View {
+        List {
+            Section { NavigationLink { KnowledgeQualityView(store:store) } label: { Label("Quality",systemImage:"checkmark.seal") } }
+            Section("Review Analytics") { ForEach([KnowledgeLifecycleEventType.approved,.rejected,.promoted],id:\.rawValue) { type in LabeledContent(type.rawValue,value:"\(store.knowledgeLifecycleEvents.filter { $0.type == type }.count)") } }
+            Section {
+                Picker("Status", selection:$filter) { Text("All").tag(Optional<KnowledgeDraftReviewStatus>.none); ForEach(KnowledgeDraftReviewStatus.allCases,id:\.self) { Text($0.rawValue.capitalized).tag(Optional($0)) } }
+                TextField("Draftを検索",text:$query).textInputAutocapitalization(.never).onSubmit { store.loadKnowledge(search:query) }
+                if !query.isEmpty { Button("検索をクリア") { query=""; store.loadKnowledge() } }
+            }
+            Section("Drafts") { if drafts.isEmpty { Text("Draftはありません").foregroundStyle(.secondary) }; ForEach(drafts) { draft in NavigationLink { KnowledgeDraftReviewView(store:store,draftID:draft.id) } label: { VStack(alignment:.leading,spacing:4) { Text(draft.title).font(.headline); Text("\(draft.type.displayName) · \(draft.source.displayName)").font(.caption); Text("\(draft.reviewStatus.rawValue) · \(draft.syncStatus.rawValue)").font(.caption2).foregroundStyle(.secondary); Text("作成 \(draft.createdAt.formatted())").font(.caption2).foregroundStyle(.secondary); Text("更新 \(draft.updatedAt.formatted())").font(.caption2).foregroundStyle(.secondary) } } } }
+            Section("Knowledge") { if store.knowledgeDocuments.isEmpty { Text("正式Knowledgeはありません").foregroundStyle(.secondary) }; ForEach(store.knowledgeDocuments) { document in NavigationLink { KnowledgeDocumentDetailView(store:store,documentID:document.id) } label: { VStack(alignment:.leading) { Text(document.title); Text("\(document.status.rawValue) · \(document.path)").font(.caption).foregroundStyle(.secondary) } } } }
+        }.navigationTitle("Knowledge").onAppear { store.loadKnowledge() }
+    }
+}
+
+private struct KnowledgeDocumentDetailView: View {
+    @ObservedObject var store:ThoughtStore; let documentID:UUID
+    private var document:KnowledgeDocument? { store.knowledgeDocuments.first{$0.id==documentID} }
+    var body: some View { List { if let document { Section("Metadata") { LabeledContent("Source",value:document.source.displayName); LabeledContent("Status",value:document.status.rawValue); LabeledContent("Path",value:document.path); LabeledContent("Tags",value:document.tags.joined(separator:", ")); LabeledContent("Updated",value:document.updatedAt.formatted()); LabeledContent("Used by AI",value:"\(document.retrievalCount) times"); LabeledContent("Last used",value:document.lastRetrievedAt?.formatted() ?? "未使用"); if let id=document.supersededByKnowledgeID { LabeledContent("Superseded by",value:id.uuidString) } }; Section("Markdown") { Text(document.markdown).font(.system(.caption,design:.monospaced)).textSelection(.enabled) }; if document.status == .active { Section { Button("Archive",role:.destructive) { store.archiveKnowledge(document) } } } } }.navigationTitle(document?.title ?? "Knowledge").onAppear { store.loadKnowledge() } }
+}
+
+private struct KnowledgeQualityView: View {
+    @ObservedObject var store:ThoughtStore
+    var body: some View { List {
+        Section { Button("Analyze Knowledge") { store.analyzeKnowledgeQuality() }; Text("ローカル解析のみ。Knowledge本文・状態を自動変更せず、AI APIも呼びません。").font(.footnote).foregroundStyle(.secondary) }
+        candidateSection("Duplicate Candidates",type:.duplicate)
+        candidateSection("Similar Knowledge",type:.similar)
+        candidateSection("Stale Candidates",type:.stale)
+        Section("Recently Used") { ForEach(store.knowledgeDocuments.filter{$0.lastRetrievedAt != nil}.sorted{$0.lastRetrievedAt! > $1.lastRetrievedAt!}.prefix(10)) { document in NavigationLink { KnowledgeDocumentDetailView(store:store,documentID:document.id) } label: { VStack(alignment:.leading) { Text(document.title); Text("\(document.retrievalCount) uses · \(document.lastRetrievedAt?.formatted() ?? "")").font(.caption).foregroundStyle(.secondary) } } } }
+        if let message=store.knowledgeDraftMessage { Section { Text(message).foregroundStyle(.secondary) } }
+    }.navigationTitle("Knowledge Quality").onAppear { store.loadKnowledge() } }
+    @ViewBuilder private func candidateSection(_ title:String,type:KnowledgeQualityCandidateType)->some View { Section(title) { let values=store.knowledgeQualityCandidates.filter{$0.type==type && $0.status == .open}; if values.isEmpty { Text("候補なし").foregroundStyle(.secondary) }; ForEach(values) { candidate in VStack(alignment:.leading,spacing:8) { if let first=store.knowledgeDocuments.first(where:{$0.id==candidate.knowledgeID}) { Text(first.title).font(.headline); Text("\(first.source.displayName) · \(first.updatedAt.formatted())").font(.caption) }; if let relatedID=candidate.relatedKnowledgeID,let second=store.knowledgeDocuments.first(where:{$0.id==relatedID}) { Text("↔ \(second.title)").font(.subheadline); Text("\(second.source.displayName) · \(second.updatedAt.formatted())").font(.caption); Text(candidate.score >= 0.75 ? "High similarity" : "Medium similarity").font(.caption.weight(.semibold)); NavigationLink("Compare") { KnowledgeCompareView(store:store,candidate:candidate) }; Button("Create Merge Draft") { store.createMergeDraft(candidate) } }; Text(candidate.reason).font(.caption).foregroundStyle(.secondary); Button("Dismiss") { store.dismissQualityCandidate(candidate) } } } } }
+}
+
+private struct KnowledgeCompareView: View {
+    @ObservedObject var store:ThoughtStore; let candidate:KnowledgeQualityCandidate
+    @State private var confirmsSupersede=false
+    private var first:KnowledgeDocument? { store.knowledgeDocuments.first{$0.id==candidate.knowledgeID} }; private var second:KnowledgeDocument? { guard let id=candidate.relatedKnowledgeID else{return nil}; return store.knowledgeDocuments.first{$0.id==id} }
+    var body: some View { List { if let first { comparison(first,label:"Knowledge A") }; if let second { comparison(second,label:"Knowledge B") }; if let first,let second,first.status == .active,second.status == .active { Section("Actions") { Button("AをBでSupersede",role:.destructive) { confirmsSupersede=true }; Button("Create Merge Draft") { store.createMergeDraft(candidate) } } } }.navigationTitle("Compare").confirmationDialog("Knowledge AをBでSupersedeしますか？",isPresented:$confirmsSupersede,titleVisibility:.visible) { Button("Supersede",role:.destructive) { if let first,let second { store.supersedeKnowledge(first,by:second) } }; Button("キャンセル",role:.cancel){} } }
+    @ViewBuilder private func comparison(_ document:KnowledgeDocument,label:String)->some View { Section(label) { Text(document.title).font(.headline); LabeledContent("Source",value:document.source.displayName); LabeledContent("Created",value:document.createdAt.formatted()); LabeledContent("Updated",value:document.updatedAt.formatted()); LabeledContent("Tags",value:document.tags.joined(separator:", ")); Text(document.markdown).font(.system(.caption,design:.monospaced)).textSelection(.enabled) } }
+}
+
+private struct KnowledgeDraftReviewView: View {
+    @ObservedObject var store: ThoughtStore
+    let draftID: UUID
+    @State private var edited: KnowledgeDraft?
+    @State private var confirmsPromotion=false
+    private var current: KnowledgeDraft? { edited ?? store.knowledgeDrafts.first { $0.id == draftID } }
+    var body: some View {
+        Form {
+            if var draft=current {
+                Section("Review") { TextField("Title",text:Binding(get:{ edited?.title ?? draft.title },set:{ edited = edited ?? draft; edited?.title=$0 })); Picker("Type",selection:Binding(get:{ edited?.type ?? draft.type },set:{ edited = edited ?? draft; edited?.type=$0 })) { ForEach(KnowledgeDraftType.allCases,id:\.self) { Text($0.displayName).tag($0) } }; TextField("Project",text:Binding(get:{ edited?.project ?? draft.project },set:{ edited = edited ?? draft; edited?.project=$0 })); TextField("Tags（カンマ区切り）",text:Binding(get:{ (edited?.tags ?? draft.tags).joined(separator:", ") },set:{ edited = edited ?? draft; edited?.tags=$0.split(separator:",").map { $0.trimmingCharacters(in:.whitespacesAndNewlines) }.filter { !$0.isEmpty } })); TextEditor(text:Binding(get:{ edited?.body ?? draft.body },set:{ edited = edited ?? draft; edited?.body=$0 })).frame(minHeight:240).disabled(draft.reviewStatus == .promoted); if edited != nil && draft.reviewStatus != .promoted { Button("編集を保存") { if let edited { store.updateKnowledgeDraft(edited); self.edited=nil } } } }
+                Section("Metadata") { LabeledContent("Source",value:draft.source.displayName); LabeledContent("Status",value:draft.reviewStatus.rawValue); LabeledContent("GitHub",value:draft.syncStatus.rawValue); LabeledContent("Draft path",value:draft.savedPath ?? "local"); if let path=draft.knowledgePath { LabeledContent("Knowledge path",value:path) }; LabeledContent("Created",value:draft.createdAt.formatted()); LabeledContent("Updated",value:draft.updatedAt.formatted()); if let id=draft.provenance.sourceID { LabeledContent("Source ID",value:id) }; if let persona=draft.provenance.personaID { LabeledContent("Persona ID",value:persona.uuidString) } }
+                Section("Related Knowledge") { if draft.relatedDocuments.isEmpty { Text("なし") }; ForEach(Array(draft.relatedDocuments.enumerated()),id:\.offset) { Text("\($0.element.documentPath) > \($0.element.heading)") } }
+                if draft.reviewStatus != .promoted { Section("Actions") { if draft.reviewStatus == .unreviewed || draft.reviewStatus == .rejected { Button("Approve") { store.reviewKnowledgeDraft(edited ?? draft,status:.approved); edited=nil } }; if draft.reviewStatus == .unreviewed || draft.reviewStatus == .approved { Button("Reject",role:.destructive) { store.reviewKnowledgeDraft(edited ?? draft,status:.rejected); edited=nil } }; if draft.reviewStatus == .approved { Button("Promote to Knowledge") { confirmsPromotion=true } } } }
+                if let message=store.knowledgeDraftMessage { Section { Text(message).foregroundStyle(.green) } }; if let error=store.knowledgeDraftError { Section { Text(error).foregroundStyle(.red) } }
+            }
+        }.navigationTitle("Draft Review").onAppear { store.loadKnowledge() }.confirmationDialog("正式Knowledgeへ昇格しますか？",isPresented:$confirmsPromotion,titleVisibility:.visible) { Button("Promote") { if let current { Task { await store.promoteKnowledgeDraft(current) } } }; Button("キャンセル",role:.cancel) {} } message: { if let current { Text("Title: \(current.title)\nDestination: \(KnowledgeDocumentPath.targetPath(date:Date(),title:current.title))\nSource: \(current.source.displayName)") } }
     }
 }
 
