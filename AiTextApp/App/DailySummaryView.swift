@@ -61,6 +61,17 @@ struct DailySummarySections: View {
 }
 
 struct DailySummaryCalendarView: View {
+    private enum GridCellID: Hashable {
+        case weekday(Int)
+        case leadingSpacer(Int)
+        case day(Date)
+    }
+
+    private struct GridCell<Value>: Identifiable {
+        let id: GridCellID
+        let value: Value
+    }
+
     @ObservedObject var store: ThoughtStore
     @State private var month = Calendar.current.dateInterval(of: .month, for: Date())!.start
     private let calendar = Calendar.current
@@ -79,9 +90,11 @@ struct DailySummaryCalendarView: View {
                 .padding(.horizontal)
 
                 LazyVGrid(columns: columns, spacing: 6) {
-                    ForEach(weekdaySymbols, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
-                    ForEach(Array(days.enumerated()), id: \.offset) { _, day in
-                        if let day {
+                    ForEach(weekdayCells) { cell in
+                        Text(cell.value).font(.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(dayCells) { cell in
+                        if let day = cell.value {
                             NavigationLink {
                                 DailySummaryDetailView(store: store, day: day)
                             } label: {
@@ -115,11 +128,24 @@ struct DailySummaryCalendarView: View {
         return Array(symbols[index...] + symbols[..<index])
     }
 
+    private var weekdayCells: [GridCell<String>] {
+        weekdaySymbols.enumerated().map { GridCell(id: .weekday($0.offset), value: $0.element) }
+    }
+
     private var days: [Date?] {
         guard let range = calendar.range(of: .day, in: .month, for: month),
               let first = calendar.date(from: calendar.dateComponents([.year, .month], from: month)) else { return [] }
         let leading = (calendar.component(.weekday, from: first) - calendar.firstWeekday + 7) % 7
         return Array(repeating: nil, count: leading) + range.compactMap { calendar.date(byAdding: .day, value: $0 - 1, to: first) }.map(Optional.some)
+    }
+
+    private var dayCells: [GridCell<Date?>] {
+        days.enumerated().map { index, day in
+            GridCell(
+                id: day.map { .day(calendar.startOfDay(for: $0)) } ?? .leadingSpacer(index),
+                value: day
+            )
+        }
     }
 
     private func dayCell(_ day: Date) -> some View {

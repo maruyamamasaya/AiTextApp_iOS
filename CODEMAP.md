@@ -62,7 +62,7 @@ Search: `ThoughtRepository|ThoughtRelationRepository|createContinuation|SQLiteTh
 
 - `ThoughtCore/AIAPIUsage.swift` — Usage metadata、Feature／Status／Error分類、記録・分析repository境界、共通Recorder、ローカル集計。
 - `ThoughtCore/SQLiteThoughtRepository.swift` — schema v14内の`ai_api_usage`保存・期間query、Knowledge lifecycle／Quality／retrieval usage保存。
-- `AiTextApp/App/AIAPIUsageAnalyticsView.swift` — 設定から開く期間別Dashboard。
+- `AiTextApp/App/AIAPIUsageAnalyticsView.swift` — 設定の「AI」セクションから開く期間別Dashboard。
 - `ThoughtCoreTests/AIAPIUsageTests.swift` — 記録、集計、privacy、failure isolation。
 
 ## Tests

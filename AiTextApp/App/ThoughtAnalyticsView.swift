@@ -142,6 +142,17 @@ struct ThoughtAnalyticsView: View {
 }
 
 private struct DailyActivityCalendar: View {
+    private enum GridCellID: Hashable {
+        case weekday(Int)
+        case leadingSpacer(Int)
+        case day(Date)
+    }
+
+    private struct GridCell<Value>: Identifiable {
+        let id: GridCellID
+        let value: Value
+    }
+
     let counts: [DailyThoughtCount]
     let calendar: Calendar
 
@@ -160,24 +171,36 @@ private struct DailyActivityCalendar: View {
         return (calendar.component(.weekday, from: firstDate) - calendar.firstWeekday + 7) % 7
     }
 
+    private var weekdayCells: [GridCell<String>] {
+        weekdaySymbols.enumerated().map { GridCell(id: .weekday($0.offset), value: $0.element) }
+    }
+
+    private var leadingSpacerCells: [GridCell<Int>] {
+        (0..<leadingEmptyDayCount).map { GridCell(id: .leadingSpacer($0), value: $0) }
+    }
+
+    private var dayCells: [GridCell<DailyThoughtCount>] {
+        counts.map { GridCell(id: .day(calendar.startOfDay(for: $0.date)), value: $0) }
+    }
+
     var body: some View {
         LazyVGrid(columns: columns, spacing: 5) {
-            ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
-                Text(symbol)
+            ForEach(weekdayCells) { cell in
+                Text(cell.value)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .accessibilityHidden(true)
             }
 
-            ForEach(0..<leadingEmptyDayCount, id: \.self) { _ in
+            ForEach(leadingSpacerCells) { _ in
                 Color.clear
                     .frame(minHeight: 46)
                     .accessibilityHidden(true)
             }
 
-            ForEach(Array(counts.enumerated()), id: \.offset) { index, item in
-                dayCell(item, isFirst: index == 0)
+            ForEach(dayCells) { cell in
+                dayCell(cell.value, isFirst: cell.id == dayCells.first?.id)
             }
         }
     }

@@ -236,6 +236,13 @@ private struct SettingsView: View {
                 }
 
                 Section("AI") {
+                    NavigationLink {
+                        AIAPIUsageAnalyticsView(store: store)
+                    } label: {
+                        Label("AI使用状況", systemImage: "waveform.path.ecg")
+                    }
+                    .accessibilityIdentifier("aiUsageAnalyticsButton")
+
                     NavigationLink { ExternalBrainSettingsView(store: store) } label: {
                         HStack {
                             Label("External Brain", systemImage: "brain.head.profile")
@@ -707,14 +714,6 @@ private struct ThoughtDetailView: View {
                     }
                 }
 
-                Section("分析") {
-                    NavigationLink {
-                        AIAPIUsageAnalyticsView(store: store)
-                    } label: {
-                        Label("AI使用状況", systemImage: "waveform.path.ecg")
-                    }
-                    .accessibilityIdentifier("aiUsageAnalyticsButton")
-                }
                 Divider()
                 Text("History")
                     .font(.headline)
