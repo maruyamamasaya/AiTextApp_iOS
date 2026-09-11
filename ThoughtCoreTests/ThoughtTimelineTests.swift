@@ -287,7 +287,7 @@ struct ThoughtTagTests {
         try fixture.writeV3Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 13)
+        #expect(SQLiteThoughtRepository.schemaVersion == 14)
         #expect(try repository.fetchByID(original.id) == original)
         guard case .added(let tag) = try repository.addTag(named: "移行後", to: original.id) else { return }
         #expect(try repository.fetchTags(for: original.id) == [tag])
@@ -427,7 +427,7 @@ struct ThoughtHistoryTests {
         try fixture.writeV1Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 13)
+        #expect(SQLiteThoughtRepository.schemaVersion == 14)
         #expect(try repository.fetchAll() == [original])
         #expect(try repository.fetchBySourceThoughtID(original.id).isEmpty)
     }
@@ -1076,7 +1076,7 @@ struct ExternalBackupTests {
         #expect(analytics.dailyCounts.first?.count == 1)
         #expect(analytics.dailyCounts.last?.count == 2)
         #expect(try repository.fetchAll() == before)
-        #expect(SQLiteThoughtRepository.schemaVersion == 13)
+        #expect(SQLiteThoughtRepository.schemaVersion == 14)
     }
 
     @Test func emptyLocalAnalyticsReturnsZeroFilledDistributions() throws {
@@ -1264,6 +1264,35 @@ struct PersonaTests {
         #expect(preview.request.prompt.contains("送信を押す") == false)
     }
 
+    @Test func repairsMissingColumnsInExistingV13DatabaseWithoutLosingAIPostData() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let persona = Persona(displayName: "既存AI", kind: .ai)
+        let configuration = AIPersonaConfiguration(personaID: persona.id, role: "記録", instructions: "短く")
+        let thoughtID = UUID()
+        do {
+            let repository = try fixture.repository()
+            try repository.createAIPersona(persona, configuration: configuration)
+            let preview = try AIPostPrompt.prepare(persona: persona, configuration: configuration, userRequest: "既存データ")
+            _ = try await GenerateAIPost(client: MockReviewSummaryClient(text: "保持されるAI投稿"), repository: repository)(preview: preview, now: Date(timeIntervalSince1970: 800), thoughtID: thoughtID)
+        }
+        try fixture.removeDefensivelyMigratedColumnsAndMarkV13()
+
+        do {
+            let repaired = try fixture.repository()
+            #expect(try fixture.tableColumns("ai_post_generations").isSuperset(of: ["thought_id", "persona_id", "user_request", "provider", "model", "prompt_version", "generated_at", "generation_kind", "reply_target_thought_id"]))
+            #expect(try fixture.tableColumns("ai_api_usage").contains("source_type"))
+            #expect(try fixture.tableColumns("knowledge_documents").isSuperset(of: ["status", "superseded_by_knowledge_id", "superseded_at", "archived_at", "retrieval_count", "last_retrieved_at"]))
+            let generation = try repaired.fetchAIPostGeneration(for: thoughtID)
+            #expect(generation?.kind == .standalone)
+            #expect(generation?.replyTargetThoughtID == nil)
+            #expect(try repaired.fetchByID(thoughtID)?.body == "保持されるAI投稿")
+            #expect(try fixture.sqliteUserVersion() == SQLiteThoughtRepository.schemaVersion)
+        }
+
+        let reopened = try fixture.repository()
+        #expect(try reopened.fetchAIPostGeneration(for: thoughtID)?.kind == .standalone)
+    }
+
     @Test func overlongAIResponseIsNeverPosted() async throws {
         let fixture = try Fixture(); defer { fixture.remove() }
         let repository = try fixture.repository()
@@ -1325,9 +1354,11 @@ struct PersonaTests {
         let persona = Persona(displayName: "ノア", kind: .ai)
         let configuration = AIPersonaConfiguration(personaID: persona.id, role: "整理", instructions: "短く")
         try repository.createAIPersona(persona, configuration: configuration)
-        let target = Thought(body: "この考えどう思う？")
+        let target = Thought(body: "この考えどう思う？", createdAt: Date(timeIntervalSince1970: 1_000))
         try repository.create(target, authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: persona.id)
-        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target, userRequest: "返信して", context: repository.loadAIReplyContext(targetThoughtID: target.id, maximumEntries: 5))
+        let context = try repository.loadAIReplyContext(targetThoughtID: target.id, maximumEntries: 5)
+        #expect(context.entries.last?.thought == target)
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target, userRequest: "返信して", context: context)
         let firstID = UUID(), secondID = UUID()
         _ = try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "一つ目の返信"), repository: repository)(preview: preview, now: Date(timeIntervalSince1970: 10), thoughtID: firstID)
         _ = try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "二つ目の返信"), repository: repository)(preview: preview, now: Date(timeIntervalSince1970: 20), thoughtID: secondID)
@@ -1492,6 +1523,77 @@ private struct Fixture {
         guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
             throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
         }
+    }
+
+    func removeDefensivelyMigratedColumnsAndMarkV13() throws {
+        var database: OpaquePointer?
+        guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
+            throw SQLiteThoughtRepositoryError.open("test setup")
+        }
+        defer { sqlite3_close(database) }
+        let sql = """
+            PRAGMA foreign_keys = OFF;
+            DROP INDEX IF EXISTS ai_post_generations_reply_target_idx;
+            ALTER TABLE ai_post_generations RENAME TO ai_post_generations_current;
+            CREATE TABLE ai_post_generations (
+                thought_id TEXT PRIMARY KEY NOT NULL REFERENCES thoughts(id),
+                persona_id TEXT NOT NULL REFERENCES personas(id),
+                user_request TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                prompt_version INTEGER NOT NULL,
+                generated_at REAL NOT NULL
+            );
+            INSERT INTO ai_post_generations (thought_id, persona_id, user_request, provider, model, prompt_version, generated_at)
+                SELECT thought_id, persona_id, user_request, provider, model, prompt_version, generated_at
+                FROM ai_post_generations_current;
+            DROP TABLE ai_post_generations_current;
+            CREATE INDEX ai_post_generations_persona_idx ON ai_post_generations(persona_id, generated_at DESC);
+            ALTER TABLE ai_api_usage DROP COLUMN source_type;
+            ALTER TABLE knowledge_documents DROP COLUMN status;
+            ALTER TABLE knowledge_documents DROP COLUMN superseded_by_knowledge_id;
+            ALTER TABLE knowledge_documents DROP COLUMN superseded_at;
+            ALTER TABLE knowledge_documents DROP COLUMN archived_at;
+            ALTER TABLE knowledge_documents DROP COLUMN retrieval_count;
+            ALTER TABLE knowledge_documents DROP COLUMN last_retrieved_at;
+            PRAGMA user_version = 13;
+            """
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
+        }
+    }
+
+    func tableColumns(_ table: String) throws -> Set<String> {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let database else {
+            throw SQLiteThoughtRepositoryError.open("test setup")
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA table_info(\(table))", -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
+        }
+        defer { sqlite3_finalize(statement) }
+        var columns = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let name = sqlite3_column_text(statement, 1) { columns.insert(String(cString: name)) }
+        }
+        return columns
+    }
+
+    func sqliteUserVersion() throws -> Int32 {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let database else {
+            throw SQLiteThoughtRepositoryError.open("test setup")
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw SQLiteThoughtRepositoryError.invalidRecord }
+        return sqlite3_column_int(statement, 0)
     }
 
     func remove() { try? FileManager.default.removeItem(at: directory) }

@@ -45,7 +45,7 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 ## Persistence
 
 - `ThoughtCore/ThoughtRepository.swift` — CRUD・本文検索・日付範囲repository境界、今日／昨日／直近日数／今週／今月／指定日のReview期間計算、テスト用メモリ実装。
-- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v13、Persona／投稿者／AI設定・生成来歴／メンション／AI返信Relation、Knowledge Review／Quality／usage、各種query、旧JSON migration／2世代backup。
+- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v14、Persona／投稿者／AI設定・生成来歴／メンション／AI返信Relation、Knowledge Review／Quality／usage、実カラム照合migration、各種query、旧JSON migration／2世代backup。
 - `ThoughtCore/ReviewSummary.swift` — AI要約model、immutable送信preview、通信／transport／保存protocol、中央provider／model設定、typed service error、対象準備／鮮度検証／生成・保存use case、Mock client。
 - `ThoughtCore/DailySummary.swift` — Human／AI・確定Humanタグ・AI Thought別タグ候補・時間帯・Relationを分離したv2 model、v1互換decode、prompt、stale対応preview、準備／生成use case。
 - `ThoughtCore/ReviewSummaryExporter.swift` — 旧期間要約の互換コード。現在のUIからは利用せず、既存データを壊さないため保持する。
@@ -61,7 +61,7 @@ Search: `ThoughtRepository|ThoughtRelationRepository|createContinuation|SQLiteTh
 ## AI API Usage Analytics v1
 
 - `ThoughtCore/AIAPIUsage.swift` — Usage metadata、Feature／Status／Error分類、記録・分析repository境界、共通Recorder、ローカル集計。
-- `ThoughtCore/SQLiteThoughtRepository.swift` — schema v13内の`ai_api_usage`保存・期間query、Knowledge lifecycle／Quality／retrieval usage保存。
+- `ThoughtCore/SQLiteThoughtRepository.swift` — schema v14内の`ai_api_usage`保存・期間query、Knowledge lifecycle／Quality／retrieval usage保存。
 - `AiTextApp/App/AIAPIUsageAnalyticsView.swift` — 設定から開く期間別Dashboard。
 - `ThoughtCoreTests/AIAPIUsageTests.swift` — 記録、集計、privacy、failure isolation。
 

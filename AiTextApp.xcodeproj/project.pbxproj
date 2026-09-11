@@ -40,7 +40,7 @@
 		D10000000000000000000003 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000003 /* FirebaseAppCheck */; };
 		A1D000000000000000000001 /* DailySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D000000000000000000001 /* DailySummary.swift */; };
 		A1D000000000000000000002 /* DailySummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D000000000000000000002 /* DailySummaryView.swift */; };
-		F10000000000000000000001 /* ExternalBrain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* ExternalBrain.swift */; };
+		F11000000000000000000001 /* ExternalBrain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* ExternalBrain.swift */; };
 		F10000000000000000000002 /* ExternalBrainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* ExternalBrainManager.swift */; };
 		G10000000000000000000001 /* AIAPIUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = G20000000000000000000001 /* AIAPIUsage.swift */; };
 		G10000000000000000000002 /* AIAPIUsageAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G20000000000000000000002 /* AIAPIUsageAnalyticsView.swift */; };
@@ -439,7 +439,7 @@
 				C10000000000000000000001 /* QuickCaptureRoute.swift in Sources */,
 				A1D000000000000000000001 /* DailySummary.swift in Sources */,
 				A1D000000000000000000002 /* DailySummaryView.swift in Sources */,
-				F10000000000000000000001 /* ExternalBrain.swift in Sources */,
+				F11000000000000000000001 /* ExternalBrain.swift in Sources */,
 				F10000000000000000000002 /* ExternalBrainManager.swift in Sources */,
 				G10000000000000000000001 /* AIAPIUsage.swift in Sources */,
 				G10000000000000000000002 /* AIAPIUsageAnalyticsView.swift in Sources */,

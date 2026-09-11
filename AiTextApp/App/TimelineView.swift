@@ -400,7 +400,9 @@ private struct ThoughtSearchView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(store.searchResults) { thought in
                             VStack(alignment: .leading, spacing: 8) {
-                                NavigationLink(value: thought.id) {
+                                NavigationLink {
+                                    ThoughtDetailView(store: store, initialThoughtID: thought.id)
+                                } label: {
                                     VStack(alignment: .leading, spacing: 8) {
                                     Text(thought.body)
                                         .font(.body)
@@ -695,7 +697,7 @@ private struct ThoughtDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
 
-                if showsComposer { continuationComposer(parent: currentThought) }
+                    if showsComposer { continuationComposer(parent: currentThought) }
                     if showsHumanReplyComposer { humanReplyComposer(target: currentThought) }
                     if let replies = store.aiRepliesByTargetID[currentThought.id], !replies.isEmpty {
                         Divider(); Text("AI Reply").font(.headline).padding(.horizontal, 16).padding(.top, 18)
@@ -831,6 +833,14 @@ private struct ThoughtDetailView: View {
         }
         .padding(.trailing, 8)
         .background(entry.id == currentThoughtID ? Color.accentColor.opacity(0.08) : Color.clear)
+    }
+
+    private func humanReplyComposer(target: Thought) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("返信を書く").font(.headline)
+            TextEditor(text: Binding(get: { store.humanReplyDraft }, set: store.updateHumanReplyDraft)).frame(minHeight: 80).padding(8).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)).accessibilityIdentifier("humanReplyComposer")
+            HStack { Text("\(store.humanReplyDraft.count) / \(ThoughtDraft.characterLimit)").font(.caption.monospacedDigit()); Spacer(); Button("返信") { if let reply = store.postHumanReply(to: target) { currentThoughtID = reply.id; showsHumanReplyComposer = false; store.loadHistory(for: reply.id); store.loadAIReplies(to: reply.id) } }.buttonStyle(.borderedProminent).disabled(!store.canPostHumanReply).accessibilityIdentifier("postHumanReplyButton") }
+        }.padding(.horizontal, 16).padding(.bottom, 16)
     }
 }
 
@@ -1143,14 +1153,6 @@ private struct AIReplyRequestView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("確認") { store.prepareAIReply(to: thought, userRequest: userRequest) }.disabled(userRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } }
             .sheet(item: $store.aiReplyPreview) { AIReplyPreviewView(store: store, preview: $0, parentDismiss: dismiss) }
         }
-    }
-
-    private func humanReplyComposer(target: Thought) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("返信を書く").font(.headline)
-            TextEditor(text: Binding(get: { store.humanReplyDraft }, set: store.updateHumanReplyDraft)).frame(minHeight: 80).padding(8).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)).accessibilityIdentifier("humanReplyComposer")
-            HStack { Text("\(store.humanReplyDraft.count) / \(ThoughtDraft.characterLimit)").font(.caption.monospacedDigit()); Spacer(); Button("返信") { if let reply = store.postHumanReply(to: target) { currentThoughtID = reply.id; showsHumanReplyComposer = false; store.loadHistory(for: reply.id); store.loadAIReplies(to: reply.id) } }.buttonStyle(.borderedProminent).disabled(!store.canPostHumanReply).accessibilityIdentifier("postHumanReplyButton") }
-        }.padding(.horizontal, 16).padding(.bottom, 16)
     }
 }
 

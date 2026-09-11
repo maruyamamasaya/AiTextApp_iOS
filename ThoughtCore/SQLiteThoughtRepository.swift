@@ -26,7 +26,7 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
 }
 
 public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, AIAPIUsageRepository, AIAPIUsageAnalyticsRepository, KnowledgeDraftRepository, KnowledgeLifecycleEventRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 13
+    public static let schemaVersion: Int32 = 14
 
     private let databaseURL: URL
     private let legacyJSONURL: URL
@@ -1145,7 +1145,7 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         if version < 7 {
             try transaction {
                 try execute("CREATE TABLE ai_persona_configurations (persona_id TEXT PRIMARY KEY NOT NULL REFERENCES personas(id), role TEXT NOT NULL, instructions TEXT NOT NULL, updated_at REAL NOT NULL, CHECK (length(role) > 0), CHECK (length(instructions) > 0))")
-                try execute("CREATE TABLE ai_post_generations (thought_id TEXT PRIMARY KEY NOT NULL REFERENCES thoughts(id), persona_id TEXT NOT NULL REFERENCES personas(id), user_request TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, prompt_version INTEGER NOT NULL, generated_at REAL NOT NULL)")
+                try execute("CREATE TABLE ai_post_generations (thought_id TEXT PRIMARY KEY NOT NULL REFERENCES thoughts(id), persona_id TEXT NOT NULL REFERENCES personas(id), user_request TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, prompt_version INTEGER NOT NULL, generated_at REAL NOT NULL, generation_kind TEXT NOT NULL DEFAULT 'standalone' CHECK (generation_kind IN ('standalone', 'reply')), reply_target_thought_id TEXT NULL REFERENCES thoughts(id))")
                 try execute("CREATE INDEX ai_post_generations_persona_idx ON ai_post_generations(persona_id, generated_at DESC)")
                 try execute("PRAGMA user_version = 7")
             }
@@ -1159,8 +1159,8 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         }
         if version < 9 {
             try transaction {
-                try execute("ALTER TABLE ai_post_generations ADD COLUMN generation_kind TEXT NOT NULL DEFAULT 'standalone' CHECK (generation_kind IN ('standalone', 'reply'))")
-                try execute("ALTER TABLE ai_post_generations ADD COLUMN reply_target_thought_id TEXT NULL REFERENCES thoughts(id)")
+                try addColumnIfMissing(table: "ai_post_generations", column: "generation_kind", definition: "TEXT NOT NULL DEFAULT 'standalone' CHECK (generation_kind IN ('standalone', 'reply'))")
+                try addColumnIfMissing(table: "ai_post_generations", column: "reply_target_thought_id", definition: "TEXT NULL REFERENCES thoughts(id)")
                 try execute("ALTER TABLE thought_relations RENAME TO thought_relations_v8")
                 try execute("""
                     CREATE TABLE thought_relations (
@@ -1177,7 +1177,7 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 try execute("DROP TABLE thought_relations_v8")
                 try execute("CREATE INDEX thought_relations_source_idx ON thought_relations(source_thought_id)")
                 try execute("CREATE INDEX thought_relations_target_idx ON thought_relations(target_thought_id)")
-                try execute("CREATE INDEX ai_post_generations_reply_target_idx ON ai_post_generations(reply_target_thought_id, generated_at ASC)")
+                try execute("CREATE INDEX IF NOT EXISTS ai_post_generations_reply_target_idx ON ai_post_generations(reply_target_thought_id, generated_at ASC)")
                 try execute("PRAGMA user_version = 9")
             }
         }
@@ -1191,7 +1191,7 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         }
         if version < 11 {
             try transaction {
-                try execute("ALTER TABLE ai_api_usage ADD COLUMN source_type TEXT NULL")
+                try addColumnIfMissing(table: "ai_api_usage", column: "source_type", definition: "TEXT NULL")
                 try execute("PRAGMA user_version = 11")
             }
         }
@@ -1207,17 +1207,55 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         }
         if version < 13 {
             try transaction {
-                try execute("ALTER TABLE knowledge_documents ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
-                try execute("ALTER TABLE knowledge_documents ADD COLUMN superseded_by_knowledge_id TEXT NULL")
-                try execute("ALTER TABLE knowledge_documents ADD COLUMN superseded_at REAL NULL")
-                try execute("ALTER TABLE knowledge_documents ADD COLUMN archived_at REAL NULL")
-                try execute("ALTER TABLE knowledge_documents ADD COLUMN retrieval_count INTEGER NOT NULL DEFAULT 0")
-                try execute("ALTER TABLE knowledge_documents ADD COLUMN last_retrieved_at REAL NULL")
+                try addColumnIfMissing(table: "knowledge_documents", column: "status", definition: "TEXT NOT NULL DEFAULT 'active'")
+                try addColumnIfMissing(table: "knowledge_documents", column: "superseded_by_knowledge_id", definition: "TEXT NULL")
+                try addColumnIfMissing(table: "knowledge_documents", column: "superseded_at", definition: "REAL NULL")
+                try addColumnIfMissing(table: "knowledge_documents", column: "archived_at", definition: "REAL NULL")
+                try addColumnIfMissing(table: "knowledge_documents", column: "retrieval_count", definition: "INTEGER NOT NULL DEFAULT 0")
+                try addColumnIfMissing(table: "knowledge_documents", column: "last_retrieved_at", definition: "REAL NULL")
                 try execute("CREATE TABLE knowledge_quality_candidates(id TEXT PRIMARY KEY NOT NULL,candidate_type TEXT NOT NULL,knowledge_id TEXT NOT NULL,related_knowledge_id TEXT NULL,score REAL NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL,created_at REAL NOT NULL,resolved_at REAL NULL)")
                 try execute("CREATE INDEX knowledge_quality_status_idx ON knowledge_quality_candidates(status,candidate_type,score DESC)")
                 try execute("PRAGMA user_version = 13")
             }
         }
+        let requiresColumnRepair = try
+            !tableColumns("ai_post_generations").isSuperset(of: ["generation_kind", "reply_target_thought_id"]) ||
+            !tableColumns("ai_api_usage").contains("source_type") ||
+            !tableColumns("knowledge_documents").isSuperset(of: ["status", "superseded_by_knowledge_id", "superseded_at", "archived_at", "retrieval_count", "last_retrieved_at"])
+        if version < 14 || requiresColumnRepair {
+            try transaction {
+                try addColumnIfMissing(table: "ai_post_generations", column: "generation_kind", definition: "TEXT NOT NULL DEFAULT 'standalone' CHECK (generation_kind IN ('standalone', 'reply'))")
+                try addColumnIfMissing(table: "ai_post_generations", column: "reply_target_thought_id", definition: "TEXT NULL REFERENCES thoughts(id)")
+                try addColumnIfMissing(table: "ai_api_usage", column: "source_type", definition: "TEXT NULL")
+                try addColumnIfMissing(table: "knowledge_documents", column: "status", definition: "TEXT NOT NULL DEFAULT 'active'")
+                try addColumnIfMissing(table: "knowledge_documents", column: "superseded_by_knowledge_id", definition: "TEXT NULL")
+                try addColumnIfMissing(table: "knowledge_documents", column: "superseded_at", definition: "REAL NULL")
+                try addColumnIfMissing(table: "knowledge_documents", column: "archived_at", definition: "REAL NULL")
+                try addColumnIfMissing(table: "knowledge_documents", column: "retrieval_count", definition: "INTEGER NOT NULL DEFAULT 0")
+                try addColumnIfMissing(table: "knowledge_documents", column: "last_retrieved_at", definition: "REAL NULL")
+                try execute("CREATE INDEX IF NOT EXISTS ai_post_generations_reply_target_idx ON ai_post_generations(reply_target_thought_id, generated_at ASC)")
+                try execute("PRAGMA user_version = 14")
+            }
+        }
+    }
+
+    private func addColumnIfMissing(table: String, column: String, definition: String) throws {
+        guard try !tableColumns(table).contains(column) else { return }
+        try execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition)")
+    }
+
+    private func tableColumns(_ table: String) throws -> Set<String> {
+        let statement = try prepare("PRAGMA table_info(\(table))")
+        defer { sqlite3_finalize(statement) }
+        var columns = Set<String>()
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            guard let name = sqlite3_column_text(statement, 1) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+            columns.insert(String(cString: name))
+            result = sqlite3_step(statement)
+        }
+        guard result == SQLITE_DONE else { throw lastError() }
+        return columns
     }
 
     private func migrateLegacyJSONIfNeeded() throws {
