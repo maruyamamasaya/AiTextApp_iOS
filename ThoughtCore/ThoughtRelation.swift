@@ -3,6 +3,7 @@ import Foundation
 public struct ThoughtRelation: Codable, Identifiable, Equatable, Sendable {
     public enum RelationType: String, Codable, Sendable {
         case continues
+        case repliesTo
     }
 
     public let id: UUID

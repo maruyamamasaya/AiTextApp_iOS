@@ -10,7 +10,7 @@ UI非依存のドメイン／永続化／ExportはSwift PackageとしてLinux/ma
 swift test
 ```
 
-入力境界（空、trim、140／141文字）と共通`ThoughtTimeline.post`、Unicode、SQLite順序、soft delete、再読込、本文検索、タグ、Personaのv8 migration・作成・更新・無効化・設定・任意投稿者関連・不正投稿者時rollback・AI投稿preview・140文字超過時非保存・メンションatomic保存、Review全期間・期間＋タグ、ローカル分析の件数／日別／曜日／時間帯境界／タグ／Continuation／read-only性、AI要約対象回帰、内部2世代backup、JSON migration、Export、Continuation、分岐History、AI要約、外部backup／Restoreを検証します。Firebase SDKと実通信はUnit Testに含めません。
+入力境界（空、trim、140／141文字）と共通`ThoughtTimeline.post`、Unicode、SQLite順序、soft delete、再読込、本文検索、タグ、Personaのv9 migration・作成・更新・無効化・設定・任意投稿者関連・不正投稿者時rollback・AI投稿preview・AI返信prompt／応答validation／Relation／生成来歴／複数返信／rollback・メンションatomic保存、Review全期間・期間＋タグ、ローカル分析、内部2世代backup、JSON migration、Export、Continuation、分岐History、AI要約、外部backup／Restoreを検証します。Firebase SDKと実通信はUnit Testに含めません。
 
 ## UI Test
 
@@ -23,7 +23,7 @@ xcodebuild -project AiTextApp.xcodeproj -scheme AiTextApp \
   -destination 'platform=iOS Simulator,name=iPhone SE (3rd generation)' test
 ```
 
-キーボード表示、140文字、複数件、Dynamic Type、Light/Dark mode、VoiceOver label、Share Sheet保存先に加え、AI要約の送信確認／loading／失敗／再試行／Mock表示／再要約、要約履歴の新しい順・最新表示・期間切替、Files／iCloud Drive picker、security-scoped bookmarkの再起動後再利用、保存先失効時表示、Restore後の再起動をSimulator／実機で手動確認します。
+キーボード表示、140文字、複数件、Dynamic Type、Light/Dark mode、VoiceOver label、Share Sheet保存先に加え、メンション付きThoughtのAI返信プレビュー／送信／生成中disable／Detail返信表示、AI要約の送信確認／loading／失敗／再試行／Mock表示／再要約、Files／iCloud Drive picker、Restore後の再起動をSimulator／実機で手動確認します。
 
 ## Build
 

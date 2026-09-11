@@ -90,6 +90,7 @@ public struct AIPersonaConfiguration: Equatable, Sendable {
 }
 
 public struct AIPostGeneration: Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable { case standalone, reply }
     public let thoughtID: UUID
     public let personaID: UUID
     public let userRequest: String
@@ -97,6 +98,12 @@ public struct AIPostGeneration: Equatable, Sendable {
     public let model: String
     public let promptVersion: Int
     public let generatedAt: Date
+    public let kind: Kind
+    public let replyTargetThoughtID: UUID?
+
+    public init(thoughtID: UUID, personaID: UUID, userRequest: String, provider: String, model: String, promptVersion: Int, generatedAt: Date, kind: Kind = .standalone, replyTargetThoughtID: UUID? = nil) {
+        self.thoughtID = thoughtID; self.personaID = personaID; self.userRequest = userRequest; self.provider = provider; self.model = model; self.promptVersion = promptVersion; self.generatedAt = generatedAt; self.kind = kind; self.replyTargetThoughtID = replyTargetThoughtID
+    }
 }
 
 public protocol AIPersonaRepository: Sendable {
@@ -104,6 +111,61 @@ public protocol AIPersonaRepository: Sendable {
     func saveAIConfiguration(_ configuration: AIPersonaConfiguration) throws
     func createAIPersona(_ persona: Persona, configuration: AIPersonaConfiguration) throws
     func saveGeneratedThought(_ thought: Thought, authorPersonaID: UUID, generation: AIPostGeneration) throws
+}
+
+public protocol AIThoughtReplyRepository: Sendable {
+    func saveGeneratedReply(_ thought: Thought, authorPersonaID: UUID, targetThoughtID: UUID, generation: AIPostGeneration, relationID: UUID) throws
+    func fetchAIReplies(to thoughtID: UUID) throws -> [Thought]
+    func fetchReplyTargets(for thoughtIDs: [UUID]) throws -> [UUID: UUID]
+    func fetchAIPostGeneration(for thoughtID: UUID) throws -> AIPostGeneration?
+}
+
+public struct AIThoughtReplyPreview: Identifiable, Equatable, Sendable {
+    public let id = UUID()
+    public let persona: Persona
+    public let configuration: AIPersonaConfiguration
+    public let targetThought: Thought
+    public let targetAuthorName: String?
+    public let request: ReviewSummaryRequest
+}
+
+public enum AIThoughtReplyPrompt {
+    public static let version = 1
+    public static func prepare(persona: Persona, configuration: AIPersonaConfiguration, targetThought: Thought, targetAuthorName: String? = nil) throws -> AIThoughtReplyPreview {
+        guard persona.kind == .ai, persona.deletedAt == nil else { throw AIPostError.inactivePersona }
+        guard targetThought.deletedAt == nil else { throw AIPostError.invalidRequest }
+        guard !targetThought.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AIPostError.invalidRequest }
+        guard !configuration.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !configuration.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AIPostError.missingConfiguration }
+        let author = targetAuthorName.map { "\n投稿者: \($0)" } ?? ""
+        let prompt = """
+        あなたはプライベートなThought Timelineへ参加するAI Personaです。
+        Persona名: \(persona.displayName)
+        役割: \(configuration.role)
+        指示: \(configuration.instructions)
+        返信対象:\(author)
+        「\(targetThought.body)」
+
+        このThoughtに対する返信を日本語140文字以内で返してください。前置き、引用符、Markdown、文字数説明は不要です。
+        """
+        return AIThoughtReplyPreview(persona: persona, configuration: configuration, targetThought: targetThought, targetAuthorName: targetAuthorName, request: ReviewSummaryRequest(prompt: prompt))
+    }
+}
+
+public struct GenerateAIThoughtReply: Sendable {
+    private let client: any ReviewSummaryClient
+    private let repository: any AIThoughtReplyRepository
+    public init(client: any ReviewSummaryClient, repository: any AIThoughtReplyRepository) { self.client = client; self.repository = repository }
+    public func callAsFunction(preview: AIThoughtReplyPreview, now: Date = Date(), thoughtID: UUID = UUID(), relationID: UUID = UUID()) async throws -> Thought {
+        let response = try await client.generateSummary(preview.request)
+        let body = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { throw AIPostError.emptyResponse }
+        guard body.count <= ThoughtDraft.characterLimit else { throw AIPostError.responseTooLong }
+        let thought = Thought(id: thoughtID, body: body, createdAt: now)
+        let generation = AIPostGeneration(thoughtID: thoughtID, personaID: preview.persona.id, userRequest: preview.targetThought.body, provider: response.provider, model: response.model, promptVersion: AIThoughtReplyPrompt.version, generatedAt: now, kind: .reply, replyTargetThoughtID: preview.targetThought.id)
+        try repository.saveGeneratedReply(thought, authorPersonaID: preview.persona.id, targetThoughtID: preview.targetThought.id, generation: generation, relationID: relationID)
+        return thought
+    }
 }
 
 public struct AIPostPreview: Identifiable, Equatable, Sendable {

@@ -287,7 +287,7 @@ struct ThoughtTagTests {
         try fixture.writeV3Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 8)
+        #expect(SQLiteThoughtRepository.schemaVersion == 9)
         #expect(try repository.fetchByID(original.id) == original)
         guard case .added(let tag) = try repository.addTag(named: "移行後", to: original.id) else { return }
         #expect(try repository.fetchTags(for: original.id) == [tag])
@@ -427,7 +427,7 @@ struct ThoughtHistoryTests {
         try fixture.writeV1Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 8)
+        #expect(SQLiteThoughtRepository.schemaVersion == 9)
         #expect(try repository.fetchAll() == [original])
         #expect(try repository.fetchBySourceThoughtID(original.id).isEmpty)
     }
@@ -1076,7 +1076,7 @@ struct ExternalBackupTests {
         #expect(analytics.dailyCounts.first?.count == 1)
         #expect(analytics.dailyCounts.last?.count == 2)
         #expect(try repository.fetchAll() == before)
-        #expect(SQLiteThoughtRepository.schemaVersion == 8)
+        #expect(SQLiteThoughtRepository.schemaVersion == 9)
     }
 
     @Test func emptyLocalAnalyticsReturnsZeroFilledDistributions() throws {
@@ -1288,6 +1288,62 @@ struct PersonaTests {
         let invalid = Thought(body: "無効なメンション")
         #expect(throws: SQLiteThoughtRepositoryError.self) { try repository.create(invalid, authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: UUID()) }
         #expect(try repository.fetchByID(invalid.id) == nil)
+    }
+
+    @Test func replyPromptContainsOnlyPersonaAndTargetContext() throws {
+        let persona = Persona(displayName: "ノア", kind: .ai)
+        let configuration = AIPersonaConfiguration(personaID: persona.id, role: "思考整理", instructions: "否定せず別視点を返す")
+        let target = Thought(body: "最近、開発ツールを作りすぎている気がする")
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target, targetAuthorName: "自分")
+        #expect(preview.request.prompt.contains("ノア")); #expect(preview.request.prompt.contains(configuration.role)); #expect(preview.request.prompt.contains(configuration.instructions)); #expect(preview.request.prompt.contains(target.body)); #expect(preview.request.prompt.contains("140文字以内"))
+    }
+
+    @Test func replyRejectsEmptyOverlongInactiveAndDeletedInputs() async throws {
+        let repository = MemoryThoughtRepository()
+        let persona = Persona(displayName: "ノア", kind: .ai)
+        let configuration = AIPersonaConfiguration(personaID: persona.id, role: "整理", instructions: "短く")
+        try repository.createAIPersona(persona, configuration: configuration)
+        let target = Thought(body: "考えを整理したい")
+        try repository.create(target)
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target)
+        await #expect(throws: AIPostError.emptyResponse) { try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "  \n"), repository: repository)(preview: preview) }
+        await #expect(throws: AIPostError.responseTooLong) { try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: String(repeating: "あ", count: 141)), repository: repository)(preview: preview) }
+        var inactive = persona; inactive.deletedAt = Date()
+        #expect(throws: AIPostError.inactivePersona) { try AIThoughtReplyPrompt.prepare(persona: inactive, configuration: configuration, targetThought: target) }
+        var deleted = target; deleted.deletedAt = Date()
+        #expect(throws: AIPostError.invalidRequest) { try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: deleted) }
+        #expect(try repository.fetchTimeline().count == 1)
+    }
+
+    @Test func generatedRepliesPersistRelationMetadataAndAllowMultipleReplies() async throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let persona = Persona(displayName: "ノア", kind: .ai)
+        let configuration = AIPersonaConfiguration(personaID: persona.id, role: "整理", instructions: "短く")
+        try repository.createAIPersona(persona, configuration: configuration)
+        let target = Thought(body: "この考えどう思う？")
+        try repository.create(target, authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: persona.id)
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target)
+        let firstID = UUID(), secondID = UUID()
+        _ = try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "一つ目の返信"), repository: repository)(preview: preview, now: Date(timeIntervalSince1970: 10), thoughtID: firstID)
+        _ = try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "二つ目の返信"), repository: repository)(preview: preview, now: Date(timeIntervalSince1970: 20), thoughtID: secondID)
+        #expect(try repository.fetchAIReplies(to: target.id).map(\.id) == [firstID, secondID])
+        #expect(try repository.fetchBySourceThoughtID(firstID).first?.type == .repliesTo)
+        let generation = try repository.fetchAIPostGeneration(for: firstID)
+        #expect(generation?.kind == .reply); #expect(generation?.replyTargetThoughtID == target.id); #expect(generation?.personaID == persona.id)
+        #expect(try repository.fetchContinuations(of: target.id).isEmpty)
+    }
+
+    @Test func replySaveRollsBackWhenTargetWasDeletedOrPersonaBecameInactive() async throws {
+        let repository = MemoryThoughtRepository()
+        let persona = Persona(displayName: "ノア", kind: .ai)
+        let configuration = AIPersonaConfiguration(personaID: persona.id, role: "整理", instructions: "短く")
+        try repository.createAIPersona(persona, configuration: configuration)
+        let target = Thought(body: "対象"); try repository.create(target)
+        let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target)
+        _ = try repository.softDelete(id: target.id, at: Date())
+        await #expect(throws: CocoaError.self) { try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "保存されない"), repository: repository)(preview: preview) }
+        #expect(try repository.fetchTimeline().isEmpty)
     }
 }
 

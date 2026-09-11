@@ -15,10 +15,11 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - Timelineトップ右上の歯車から開く設定画面。プロフィール／AI Persona、Markdown／JSON Export、外部バックアップを設定内へ集約し、トップの主要導線と分離する。
 - ローカルの単一人間Persona基盤。SQLite schema v6の`personas`／`thought_authors`で既存・新規Thoughtを固定のデフォルト人間へ紐づけ、表示名と512px以下へ正方形化したJPEGアイコンをSQLite内へ保存する。
 - Timelineの投稿者名・丸型アイコン表示と、写真選択／削除／表示名編集を行うプロフィール画面。未設定時は標準人物アイコンを表示し、プロフィール変更を既存Thoughtへ一括反映する。
-- 複数AI Personaの作成・編集・無効化UIと、投稿ごとの実Persona表示。AI Personaは現在まだ通信／自動投稿を行わず、任意Persona IDでThoughtを原子的に保存できるCore境界までを提供する。
+- 複数AI Personaの作成・編集・無効化UIと、投稿ごとの実Persona表示。任意Persona IDでThoughtを原子的に保存でき、通信はユーザーの明示操作時だけ行う。
 - AI Personaごとの役割・指示設定と、明示的な「投稿を依頼」導線。ユーザー依頼と最終payloadをプレビューし、確定後だけFirebase AI Logicを呼び、140文字以内の成功応答だけをAI Persona名義でTimelineへ保存する。
 - SQLite schema v7の`ai_persona_configurations`／`ai_post_generations`。AI設定と生成来歴をThought本文から分離し、Thought・投稿者・provider／model／prompt version／ユーザー依頼を同一transactionで保存する。自動投稿は行わない。
 - AI Personaへの単一メンションv1。Timeline Composer／Quick CaptureでactiveなAIを選択し、schema v8の`thought_mentions`へ本文と同じtransactionでPersona IDを保存する。Timelineは現在のPersona名を`@名前`で表示し、メンションだけではAI通信を開始しない。
+- メンション付きThoughtから明示的に依頼するAI返信v1。送信前にAI、対象Thought、役割、指示、最終payload、provider／modelを確認し、対象Thoughtだけを送る。成功した140文字以内の応答はAI名義Thought、`repliesTo` Relation、返信先を含む生成来歴としてschema v9へatomic保存する。同一Thoughtへの複数返信を許可し、Detailで返信一覧を確認できる。
 - 振り返り導線をDaily Summaryへ統一。TimelineのHistory Review入口と画面、旧期間AI要約UIを外し、既存の`review_summaries`はデータ互換のためSQLite内に保持する。
 - Timelineトップバーの独立タグ一覧ボタンを外し、Thoughtに付いたタグは`tag.fill`と名前を組み合わせて文脈内で識別しやすく表示する。
 
@@ -31,7 +32,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - UUIDと作成・更新・削除日時を持つThought原文モデル。
 - Application Support配下のSQLiteを正本にしたローカル保存、query順序、ソフトデリート。
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
-- `PRAGMA user_version`によるschema version管理（現在v5）。
+- `PRAGMA user_version`によるschema version管理（現在v9）。
 - 画面下部に固定し、入力中だけ枠内右端に投稿ボタンを表示するコンパクトなComposer。
 - Lazy Timeline、自然な相対日時、メニュー内削除、Empty State。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。

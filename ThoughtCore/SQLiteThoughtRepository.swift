@@ -25,8 +25,8 @@ public enum SQLiteThoughtRepositoryError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 8
+public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
+    public static let schemaVersion: Int32 = 9
 
     private let databaseURL: URL
     private let legacyJSONURL: URL
@@ -221,9 +221,11 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         try lock.withLock {
             try transaction {
                 let author = try queryPersona(id: authorPersonaID)
-                guard author.kind == .ai, author.deletedAt == nil else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                guard author.kind == .ai, author.deletedAt == nil,
+                      generation.thoughtID == thought.id, generation.personaID == authorPersonaID,
+                      generation.kind == .standalone, generation.replyTargetThoughtID == nil else { throw SQLiteThoughtRepositoryError.invalidRecord }
                 try executeThoughtInsert(thought, conflictClause: ""); try executeThoughtAuthorInsert(thoughtID: thought.id, personaID: authorPersonaID)
-                let statement = try prepare("INSERT INTO ai_post_generations (thought_id, persona_id, user_request, provider, model, prompt_version, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                let statement = try prepare("INSERT INTO ai_post_generations (thought_id, persona_id, user_request, provider, model, prompt_version, generated_at, generation_kind, reply_target_thought_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'standalone', NULL)")
                 defer { sqlite3_finalize(statement) }
                 try bind(generation.thoughtID.uuidString, to: 1, in: statement); try bind(generation.personaID.uuidString, to: 2, in: statement); try bind(generation.userRequest, to: 3, in: statement); try bind(generation.provider, to: 4, in: statement); try bind(generation.model, to: 5, in: statement); try bind(Int32(generation.promptVersion), to: 6, in: statement); try bind(generation.generatedAt.timeIntervalSince1970, to: 7, in: statement)
                 guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
@@ -231,6 +233,48 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
             createRollingBackupIfPossible()
         }
     }
+
+    public func saveGeneratedReply(_ thought: Thought, authorPersonaID: UUID, targetThoughtID: UUID, generation: AIPostGeneration, relationID: UUID) throws {
+        try lock.withLock {
+            try transaction {
+                let author = try queryPersona(id: authorPersonaID)
+                guard author.kind == .ai, author.deletedAt == nil, generation.kind == .reply,
+                      generation.thoughtID == thought.id, generation.personaID == authorPersonaID,
+                      generation.replyTargetThoughtID == targetThoughtID,
+                      let target = try query("SELECT id, body, created_at, updated_at, deleted_at FROM thoughts WHERE id = ? LIMIT 1", bind: { try self.bind(targetThoughtID.uuidString, to: 1, in: $0) }).first,
+                      target.deletedAt == nil else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                try executeThoughtInsert(thought, conflictClause: "")
+                try executeThoughtAuthorInsert(thoughtID: thought.id, personaID: authorPersonaID)
+                let relation = ThoughtRelation(id: relationID, sourceThoughtID: thought.id, targetThoughtID: targetThoughtID, type: .repliesTo, createdAt: thought.createdAt)
+                try validate(relation); try executeRelationInsert(relation)
+                let statement = try prepare("INSERT INTO ai_post_generations (thought_id, persona_id, user_request, provider, model, prompt_version, generated_at, generation_kind, reply_target_thought_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'reply', ?)")
+                defer { sqlite3_finalize(statement) }
+                try bind(thought.id.uuidString, to: 1, in: statement); try bind(authorPersonaID.uuidString, to: 2, in: statement); try bind(generation.userRequest, to: 3, in: statement); try bind(generation.provider, to: 4, in: statement); try bind(generation.model, to: 5, in: statement); try bind(Int32(generation.promptVersion), to: 6, in: statement); try bind(generation.generatedAt.timeIntervalSince1970, to: 7, in: statement); try bind(targetThoughtID.uuidString, to: 8, in: statement)
+                guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
+            }
+            createRollingBackupIfPossible()
+        }
+    }
+
+    public func fetchAIReplies(to thoughtID: UUID) throws -> [Thought] { try lock.withLock { try query("SELECT t.id, t.body, t.created_at, t.updated_at, t.deleted_at FROM thought_relations r JOIN thoughts t ON t.id = r.source_thought_id WHERE r.target_thought_id = ? AND r.relation_type = 'repliesTo' AND t.deleted_at IS NULL ORDER BY t.created_at ASC, t.id ASC", bind: { try self.bind(thoughtID.uuidString, to: 1, in: $0) }) } }
+    public func fetchReplyTargets(for thoughtIDs: [UUID]) throws -> [UUID: UUID] {
+        guard !thoughtIDs.isEmpty else { return [:] }
+        return try lock.withLock {
+            let placeholders = Array(repeating: "?", count: thoughtIDs.count).joined(separator: ",")
+            let statement = try prepare("SELECT source_thought_id, target_thought_id FROM thought_relations WHERE relation_type = 'repliesTo' AND source_thought_id IN (\(placeholders))")
+            defer { sqlite3_finalize(statement) }; for (offset, id) in thoughtIDs.enumerated() { try bind(id.uuidString, to: Int32(offset + 1), in: statement) }
+            var output: [UUID: UUID] = [:]; var result = sqlite3_step(statement)
+            while result == SQLITE_ROW { guard let s = sqlite3_column_text(statement, 0), let t = sqlite3_column_text(statement, 1), let source = UUID(uuidString: String(cString: s)), let target = UUID(uuidString: String(cString: t)) else { throw SQLiteThoughtRepositoryError.invalidRecord }; output[source] = target; result = sqlite3_step(statement) }
+            guard result == SQLITE_DONE else { throw lastError() }; return output
+        }
+    }
+    public func fetchAIPostGeneration(for thoughtID: UUID) throws -> AIPostGeneration? { try lock.withLock {
+        let statement = try prepare("SELECT thought_id, persona_id, user_request, provider, model, prompt_version, generated_at, generation_kind, reply_target_thought_id FROM ai_post_generations WHERE thought_id = ? LIMIT 1")
+        defer { sqlite3_finalize(statement) }; try bind(thoughtID.uuidString, to: 1, in: statement); guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        guard let tid = sqlite3_column_text(statement, 0), let pid = sqlite3_column_text(statement, 1), let req = sqlite3_column_text(statement, 2), let provider = sqlite3_column_text(statement, 3), let model = sqlite3_column_text(statement, 4), let kindText = sqlite3_column_text(statement, 7), let t = UUID(uuidString: String(cString: tid)), let p = UUID(uuidString: String(cString: pid)), let kind = AIPostGeneration.Kind(rawValue: String(cString: kindText)) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+        let replyID = sqlite3_column_text(statement, 8).flatMap { UUID(uuidString: String(cString: $0)) }
+        return AIPostGeneration(thoughtID: t, personaID: p, userRequest: String(cString: req), provider: String(cString: provider), model: String(cString: model), promptVersion: Int(sqlite3_column_int(statement, 5)), generatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6)), kind: kind, replyTargetThoughtID: replyID)
+    } }
 
     public func fetchTimeline() throws -> [Thought] {
         try lock.withLock {
@@ -1003,6 +1047,30 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 try execute("CREATE TABLE thought_mentions (thought_id TEXT PRIMARY KEY NOT NULL REFERENCES thoughts(id), persona_id TEXT NOT NULL REFERENCES personas(id), created_at REAL NOT NULL)")
                 try execute("CREATE INDEX thought_mentions_persona_idx ON thought_mentions(persona_id, created_at DESC)")
                 try execute("PRAGMA user_version = 8")
+            }
+        }
+        if version < 9 {
+            try transaction {
+                try execute("ALTER TABLE ai_post_generations ADD COLUMN generation_kind TEXT NOT NULL DEFAULT 'standalone' CHECK (generation_kind IN ('standalone', 'reply'))")
+                try execute("ALTER TABLE ai_post_generations ADD COLUMN reply_target_thought_id TEXT NULL REFERENCES thoughts(id)")
+                try execute("ALTER TABLE thought_relations RENAME TO thought_relations_v8")
+                try execute("""
+                    CREATE TABLE thought_relations (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        source_thought_id TEXT NOT NULL REFERENCES thoughts(id),
+                        target_thought_id TEXT NOT NULL REFERENCES thoughts(id),
+                        relation_type TEXT NOT NULL CHECK (relation_type IN ('continues', 'repliesTo')),
+                        created_at REAL NOT NULL,
+                        CHECK (source_thought_id <> target_thought_id),
+                        UNIQUE (source_thought_id, target_thought_id, relation_type)
+                    )
+                    """)
+                try execute("INSERT INTO thought_relations SELECT * FROM thought_relations_v8")
+                try execute("DROP TABLE thought_relations_v8")
+                try execute("CREATE INDEX thought_relations_source_idx ON thought_relations(source_thought_id)")
+                try execute("CREATE INDEX thought_relations_target_idx ON thought_relations(target_thought_id)")
+                try execute("CREATE INDEX ai_post_generations_reply_target_idx ON ai_post_generations(reply_target_thought_id, generated_at ASC)")
+                try execute("PRAGMA user_version = 9")
             }
         }
     }

@@ -19,6 +19,11 @@ final class ThoughtStore: ObservableObject {
     @Published var aiPostPreview: AIPostPreview?
     @Published private(set) var isGeneratingAIPost = false
     @Published var aiPostError: String?
+    @Published var aiReplyPreview: AIThoughtReplyPreview?
+    @Published private(set) var isGeneratingAIReply = false
+    @Published var aiReplyError: String?
+    @Published private(set) var aiRepliesByTargetID: [UUID: [Thought]] = [:]
+    @Published private(set) var replyTargetIDsByThoughtID: [UUID: UUID] = [:]
     @Published private(set) var dailySummaries: [DailySummary] = []
     @Published private(set) var dailySummary: DailySummary?
     @Published private(set) var dailySummaryPreview: DailySummaryPreview?
@@ -54,6 +59,7 @@ final class ThoughtStore: ObservableObject {
     private var personaRepository: (any PersonaRepository)?
     private var aiPersonaRepository: (any AIPersonaRepository)?
     private var mentionRepository: (any ThoughtMentionRepository)?
+    private var aiReplyRepository: (any AIThoughtReplyRepository)?
     private let summaryClient: any ReviewSummaryClient
     private var isPosting = false
 
@@ -77,6 +83,7 @@ final class ThoughtStore: ObservableObject {
             personaRepository = repository as? any PersonaRepository
             aiPersonaRepository = repository as? any AIPersonaRepository
             mentionRepository = repository as? any ThoughtMentionRepository
+            aiReplyRepository = repository as? any AIThoughtReplyRepository
             exporter = ThoughtExporter(repository: repository)
             thoughts = timeline.thoughts
             if let personaRepository { defaultHumanPersona = try personaRepository.fetchDefaultHumanPersona() }
@@ -93,6 +100,7 @@ final class ThoughtStore: ObservableObject {
         refreshTags(for: thoughts.map(\.id))
         refreshAuthors(for: thoughts.map(\.id))
         refreshMentions(for: thoughts.map(\.id))
+        refreshReplyRelations(for: thoughts.map(\.id))
         loadAllTags()
         if let startupError { errorMessage = startupError }
     }
@@ -140,7 +148,7 @@ final class ThoughtStore: ObservableObject {
 
     func deactivateAIPersona(_ persona: Persona) {
         guard persona.kind == .ai, let personaRepository else { return }
-        do { _ = try personaRepository.deactivatePersona(id: persona.id, at: Date()); loadPersonas() }
+        do { _ = try personaRepository.deactivatePersona(id: persona.id, at: Date()); loadPersonas(); refreshMentions(for: thoughts.map(\.id)) }
         catch { errorMessage = "AI Personaを無効化できませんでした。" }
     }
 
@@ -166,6 +174,40 @@ final class ThoughtStore: ObservableObject {
             timeline = try ThoughtTimeline(repository: thoughtRepository); thoughts = timeline?.thoughts ?? []
             refreshTags(for: thoughts.map(\.id)); refreshAuthors(for: thoughts.map(\.id)); aiPostPreview = nil
         } catch { aiPostError = error.localizedDescription }
+    }
+
+    func prepareAIReply(to thought: Thought) {
+        guard thought.deletedAt == nil, let persona = mentionedPersonasByThoughtID[thought.id],
+              personas.contains(where: { $0.id == persona.id }), let configuration = aiConfigurations[persona.id] else {
+            aiReplyError = "返信先または有効なAI Personaを確認できません。"; return
+        }
+        do { aiReplyPreview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: thought, targetAuthorName: personasByThoughtID[thought.id]?.displayName); aiReplyError = nil }
+        catch { aiReplyError = error.localizedDescription }
+    }
+
+    func cancelAIReplyPreview() { aiReplyPreview = nil }
+
+    func generateAIReply(from preview: AIThoughtReplyPreview) async {
+        guard let aiReplyRepository, let thoughtRepository else { aiReplyError = "AI返信の保存先を利用できません。"; return }
+        guard !isGeneratingAIReply else { return }
+        isGeneratingAIReply = true; aiReplyError = nil; defer { isGeneratingAIReply = false }
+        do {
+            _ = try await GenerateAIThoughtReply(client: summaryClient, repository: aiReplyRepository)(preview: preview)
+            timeline = try ThoughtTimeline(repository: thoughtRepository); thoughts = timeline?.thoughts ?? []
+            refreshTags(for: thoughts.map(\.id)); refreshAuthors(for: thoughts.map(\.id)); refreshMentions(for: thoughts.map(\.id)); refreshReplyRelations(for: thoughts.map(\.id)); aiReplyPreview = nil
+            loadAIReplies(to: preview.targetThought.id)
+        } catch { aiReplyError = error.localizedDescription }
+    }
+
+    func loadAIReplies(to thoughtID: UUID) {
+        guard let aiReplyRepository else { return }
+        do { let replies = try aiReplyRepository.fetchAIReplies(to: thoughtID); aiRepliesByTargetID[thoughtID] = replies; refreshAuthors(for: replies.map(\.id)) }
+        catch { aiReplyError = "AI返信を読み込めませんでした。" }
+    }
+
+    private func refreshReplyRelations(for ids: [UUID]) {
+        guard let aiReplyRepository else { return }
+        if let values = try? aiReplyRepository.fetchReplyTargets(for: ids) { replyTargetIDsByThoughtID.merge(values) { _, new in new } }
     }
 
     private func refreshAuthors(for ids: [UUID]) {
@@ -428,6 +470,7 @@ final class ThoughtStore: ObservableObject {
             refreshTags(for: thoughts.map(\.id))
             refreshAuthors(for: thoughts.map(\.id))
             refreshMentions(for: thoughts.map(\.id))
+            refreshReplyRelations(for: thoughts.map(\.id))
             return true
         } catch {
             errorMessage = "Thoughtを保存できませんでした。"

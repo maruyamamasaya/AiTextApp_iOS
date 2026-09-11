@@ -15,7 +15,7 @@ public protocol ThoughtRepository: Sendable {
 }
 
 /// A small repository useful for previews and domain tests. SQLite is the app's durable store.
-public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
+public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
     private var records: [Thought]
     private var relations: [ThoughtRelation]
     private var summaries: [ReviewSummary]
@@ -74,7 +74,25 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
     public func fetchAIConfigurations() throws -> [UUID: AIPersonaConfiguration] { lock.withLock { aiConfigurations } }
     public func saveAIConfiguration(_ configuration: AIPersonaConfiguration) throws { lock.withLock { aiConfigurations[configuration.personaID] = configuration } }
     public func createAIPersona(_ persona: Persona, configuration: AIPersonaConfiguration) throws { try lock.withLock { guard persona.kind == .ai, persona.id == configuration.personaID, personas[persona.id] == nil else { throw CocoaError(.fileWriteFileExists) }; personas[persona.id] = persona; aiConfigurations[persona.id] = configuration } }
-    public func saveGeneratedThought(_ thought: Thought, authorPersonaID: UUID, generation: AIPostGeneration) throws { try lock.withLock { guard personas[authorPersonaID]?.deletedAt == nil, aiConfigurations[authorPersonaID] != nil, generation.thoughtID == thought.id else { throw CocoaError(.fileNoSuchFile) }; records.append(thought); authorIDs[thought.id] = authorPersonaID; aiGenerations[thought.id] = generation } }
+    public func saveGeneratedThought(_ thought: Thought, authorPersonaID: UUID, generation: AIPostGeneration) throws { try lock.withLock { guard personas[authorPersonaID]?.deletedAt == nil, aiConfigurations[authorPersonaID] != nil, generation.thoughtID == thought.id, generation.personaID == authorPersonaID, generation.kind == .standalone, generation.replyTargetThoughtID == nil else { throw CocoaError(.fileNoSuchFile) }; records.append(thought); authorIDs[thought.id] = authorPersonaID; aiGenerations[thought.id] = generation } }
+    public func saveGeneratedReply(_ thought: Thought, authorPersonaID: UUID, targetThoughtID: UUID, generation: AIPostGeneration, relationID: UUID) throws { try lock.withLock {
+        guard personas[authorPersonaID]?.kind == .ai, personas[authorPersonaID]?.deletedAt == nil, aiConfigurations[authorPersonaID] != nil,
+              let target = records.first(where: { $0.id == targetThoughtID }), target.deletedAt == nil,
+              generation.thoughtID == thought.id, generation.personaID == authorPersonaID, generation.kind == .reply, generation.replyTargetThoughtID == targetThoughtID else { throw CocoaError(.fileNoSuchFile) }
+        let relation = ThoughtRelation(id: relationID, sourceThoughtID: thought.id, targetThoughtID: targetThoughtID, type: .repliesTo, createdAt: thought.createdAt)
+        try validate(relation, includingSource: thought.id)
+        records.append(thought); authorIDs[thought.id] = authorPersonaID; aiGenerations[thought.id] = generation; relations.append(relation)
+    } }
+    public func fetchAIReplies(to thoughtID: UUID) throws -> [Thought] { try lock.withLock {
+        let ids = Set(relations.filter { $0.type == .repliesTo && $0.targetThoughtID == thoughtID }.map(\.sourceThoughtID))
+        return records.filter { ids.contains($0.id) && $0.deletedAt == nil }.sorted { lhs, rhs in
+            lhs.createdAt == rhs.createdAt ? lhs.id.uuidString < rhs.id.uuidString : lhs.createdAt < rhs.createdAt
+        }
+    } }
+    public func fetchReplyTargets(for thoughtIDs: [UUID]) throws -> [UUID: UUID] { try lock.withLock {
+        let ids = Set(thoughtIDs); return Dictionary(uniqueKeysWithValues: relations.filter { $0.type == .repliesTo && ids.contains($0.sourceThoughtID) }.map { ($0.sourceThoughtID, $0.targetThoughtID) })
+    } }
+    public func fetchAIPostGeneration(for thoughtID: UUID) throws -> AIPostGeneration? { lock.withLock { aiGenerations[thoughtID] } }
 
     public func fetchTimeline() throws -> [Thought] {
         lock.withLock {

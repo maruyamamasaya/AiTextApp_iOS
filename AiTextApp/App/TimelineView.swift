@@ -7,6 +7,7 @@ struct TimelineView: View {
     @Binding var presentedRoute: AppRoute?
     @FocusState private var composerIsFocused: Bool
     @State private var showsSettings = false
+    @State private var replyTarget: Thought?
 
     var body: some View {
         NavigationStack {
@@ -16,9 +17,7 @@ struct TimelineView: View {
                         emptyState
                     } else {
                         ForEach(store.thoughts) { thought in
-                            ThoughtRow(thought: thought, persona: store.personasByThoughtID[thought.id] ?? store.defaultHumanPersona, mentionedPersona: store.mentionedPersonasByThoughtID[thought.id], tags: store.tagsByThoughtID[thought.id] ?? []) {
-                                store.requestDeletion(of: thought)
-                            }
+                            ThoughtRow(thought: thought, persona: store.personasByThoughtID[thought.id] ?? store.defaultHumanPersona, mentionedPersona: store.mentionedPersonasByThoughtID[thought.id], replyTargetID: store.replyTargetIDsByThoughtID[thought.id], tags: store.tagsByThoughtID[thought.id] ?? [], onRequestReply: { replyTarget = thought }, onDelete: { store.requestDeletion(of: thought) })
                             if thought.id != store.thoughts.last?.id {
                                 Divider().padding(.leading, 16)
                             }
@@ -90,6 +89,7 @@ struct TimelineView: View {
                 ShareSheet(url: artifact.url, onFailure: store.sharingFailed)
             }
             .sheet(isPresented: $showsSettings) { SettingsView(store: store) }
+            .sheet(item: $replyTarget) { thought in AIReplyRequestView(store: store, thought: thought) }
             .confirmationDialog(
                 "このThoughtを削除しますか？",
                 isPresented: deletionDialogIsPresented,
@@ -626,6 +626,7 @@ private struct ThoughtDetailView: View {
     @State private var currentThoughtID: UUID
     @State private var showsComposer = false
     @State private var showsTagEditor = false
+    @State private var showsAIReply = false
     @FocusState private var composerIsFocused: Bool
 
     init(store: ThoughtStore, initialThoughtID: UUID) {
@@ -664,11 +665,23 @@ private struct ThoughtDetailView: View {
                         .accessibilityLabel("このThoughtの続きを書く")
                         .accessibilityHint("\(currentThought.deletedAt == nil ? currentThought.body : "削除されたThought")の続きを作成します")
                         .accessibilityIdentifier("writeContinuationButton")
+                        if store.mentionedPersonasByThoughtID[currentThought.id] != nil {
+                            Button("AIに返信を依頼") { showsAIReply = true }
+                                .buttonStyle(.bordered)
+                                .disabled(store.isGeneratingAIReply || !store.personas.contains(where: { $0.id == store.mentionedPersonasByThoughtID[currentThought.id]?.id }))
+                                .accessibilityIdentifier("requestAIReplyButton")
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
 
-                    if showsComposer { continuationComposer(parent: currentThought) }
+                if showsComposer { continuationComposer(parent: currentThought) }
+                    if let replies = store.aiRepliesByTargetID[currentThought.id], !replies.isEmpty {
+                        Divider(); Text("AI Reply").font(.headline).padding(.horizontal, 16).padding(.top, 18)
+                        ForEach(replies) { reply in
+                            HStack(alignment: .top, spacing: 10) { PersonaIcon(persona: store.personasByThoughtID[reply.id] ?? store.defaultHumanPersona, size: 32); VStack(alignment: .leading) { Text(store.personasByThoughtID[reply.id]?.displayName ?? "AI").font(.subheadline.weight(.semibold)); Text(reply.body); Text(ThoughtDateText.string(for: reply.createdAt)).font(.caption).foregroundStyle(.secondary) } }.padding(16)
+                        }
+                    }
                 }
 
                 Divider()
@@ -691,12 +704,14 @@ private struct ThoughtDetailView: View {
         }
         .navigationTitle("Thought")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { store.loadHistory(for: currentThoughtID) }
+        .onAppear { store.loadHistory(for: currentThoughtID); store.loadAIReplies(to: currentThoughtID) }
+        .onChange(of: currentThoughtID) { store.loadAIReplies(to: $0) }
         .sheet(isPresented: $showsTagEditor) {
             if let currentThought {
                 ThoughtTagEditorView(store: store, thought: currentThought)
             }
         }
+        .sheet(isPresented: $showsAIReply) { if let currentThought { AIReplyRequestView(store: store, thought: currentThought) } }
     }
 
     private func continuationComposer(parent: Thought) -> some View {
@@ -793,7 +808,9 @@ private struct ThoughtRow: View {
     let thought: Thought
     let persona: Persona
     let mentionedPersona: Persona?
+    let replyTargetID: UUID?
     let tags: [ThoughtTag]
+    let onRequestReply: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -808,6 +825,7 @@ private struct ThoughtRow: View {
                     if persona.kind == .ai {
                         Text("AI").font(.caption2.weight(.bold)).foregroundStyle(.tint)
                     }
+                    if replyTargetID != nil { Text("返信").font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
                     Text(thought.body)
                         .font(.body)
                         .lineSpacing(4)
@@ -834,6 +852,7 @@ private struct ThoughtRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Menu {
+                if mentionedPersona?.deletedAt == nil { Button("AIに返信を依頼", action: onRequestReply) }
                 Button("削除", role: .destructive, action: onDelete)
             } label: {
                 Image(systemName: "ellipsis")
@@ -850,6 +869,48 @@ private struct ThoughtRow: View {
         .padding(.vertical, 14)
         .accessibilityElement(children: .contain)
         .contentShape(Rectangle())
+    }
+}
+
+private struct AIReplyRequestView: View {
+    @ObservedObject var store: ThoughtStore
+    let thought: Thought
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                if let persona = store.mentionedPersonasByThoughtID[thought.id] {
+                    Section("返信するAI") { HStack { PersonaIcon(persona: persona, size: 40); VStack(alignment: .leading) { Text(persona.displayName).font(.headline); Text(store.aiConfigurations[persona.id]?.role ?? "").font(.caption).foregroundStyle(.secondary) } } }
+                    Section("対象Thought") { Text(thought.body) }
+                    if let configuration = store.aiConfigurations[persona.id] { Section("指示") { Text(configuration.instructions) } }
+                }
+                Section { Text("確認を押すまでAI通信は行いません。").font(.footnote).foregroundStyle(.secondary) }
+                if let error = store.aiReplyError { Section { Text(error).foregroundStyle(.red) } }
+            }
+            .navigationTitle("AIに返信を依頼")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("確認") { store.prepareAIReply(to: thought) } } }
+            .sheet(item: $store.aiReplyPreview) { AIReplyPreviewView(store: store, preview: $0, parentDismiss: dismiss) }
+        }
+    }
+}
+
+private struct AIReplyPreviewView: View {
+    @ObservedObject var store: ThoughtStore
+    let preview: AIThoughtReplyPreview
+    let parentDismiss: DismissAction
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("返信するAI") { Text(preview.persona.displayName); LabeledContent("役割", value: preview.configuration.role) }
+                Section("対象Thought") { Text(preview.targetThought.body) }
+                Section("最終payload") { Text(preview.request.prompt).font(.caption).textSelection(.enabled) }
+                Section("生成元") { LabeledContent("Provider", value: ReviewSummaryAIConfiguration.providerName); LabeledContent("Model", value: ReviewSummaryAIConfiguration.modelName) }
+                if let error = store.aiReplyError { Section { Text(error).foregroundStyle(.red) } }
+            }
+            .navigationTitle("送信前プレビュー")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { store.cancelAIReplyPreview(); dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(store.isGeneratingAIReply ? "生成中…" : "送信") { Task { await store.generateAIReply(from: preview); if store.aiReplyError == nil { dismiss(); parentDismiss() } } }.disabled(store.isGeneratingAIReply) } }
+        }
     }
 }
 
