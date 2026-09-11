@@ -91,8 +91,16 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(postReply.isEnabled)
         postReply.tap()
 
+        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2), "返信後はTimelineへ戻る")
         XCTAssertTrue(app.staticTexts[reply].waitForExistence(timeout: 2))
         XCTAssertFalse(replyComposer.exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "replyContext_"))
+                .firstMatch
+                .waitForExistence(timeout: 2),
+            "Timelineの返信に返信先本文を表示する"
+        )
     }
 
     func testTimelineOpensLocalAnalyticsAndShowsSummary() {

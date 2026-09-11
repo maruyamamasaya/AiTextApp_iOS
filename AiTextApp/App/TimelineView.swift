@@ -17,7 +17,17 @@ struct TimelineView: View {
                         emptyState
                     } else {
                         ForEach(store.thoughts) { thought in
-                            ThoughtRow(thought: thought, persona: store.personasByThoughtID[thought.id] ?? store.defaultHumanPersona, mentionedPersona: store.mentionedPersonasByThoughtID[thought.id], replyTargetID: store.replyTargetIDsByThoughtID[thought.id], tags: store.tagsByThoughtID[thought.id] ?? [], onRequestReply: { replyTarget = thought }, onDelete: { store.requestDeletion(of: thought) })
+                            let replyTarget = store.replyTargetsByThoughtID[thought.id]
+                            ThoughtRow(
+                                thought: thought,
+                                persona: store.personasByThoughtID[thought.id] ?? store.defaultHumanPersona,
+                                mentionedPersona: store.mentionedPersonasByThoughtID[thought.id],
+                                replyTarget: replyTarget,
+                                replyTargetPersona: replyTarget.flatMap { store.personasByThoughtID[$0.id] },
+                                tags: store.tagsByThoughtID[thought.id] ?? [],
+                                onRequestReply: { self.replyTarget = thought },
+                                onDelete: { store.requestDeletion(of: thought) }
+                            )
                             if thought.id != store.thoughts.last?.id {
                                 Divider().padding(.leading, 16)
                             }
@@ -644,6 +654,7 @@ private struct ThoughtTagEditorView: View {
 private struct ThoughtDetailView: View {
     @ObservedObject var store: ThoughtStore
     let initialThoughtID: UUID
+    @Environment(\.dismiss) private var dismiss
     @State private var currentThoughtID: UUID
     @State private var showsComposer = false
     @State private var showsTagEditor = false
@@ -848,7 +859,21 @@ private struct ThoughtDetailView: View {
                 .padding(8)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 .accessibilityIdentifier("humanReplyComposer")
-            HStack { Text("\(store.humanReplyDraft.count) / \(ThoughtDraft.characterLimit)").font(.caption.monospacedDigit()); Spacer(); Button("返信") { if let reply = store.postHumanReply(to: target) { currentThoughtID = reply.id; showsHumanReplyComposer = false; store.loadHistory(for: reply.id); store.loadAIReplies(to: reply.id) } }.buttonStyle(.borderedProminent).disabled(!store.canPostHumanReply).accessibilityIdentifier("postHumanReplyButton") }
+            HStack {
+                Text("\(store.humanReplyDraft.count) / \(ThoughtDraft.characterLimit)")
+                    .font(.caption.monospacedDigit())
+                Spacer()
+                Button("返信") {
+                    if store.postHumanReply(to: target) != nil {
+                        showsHumanReplyComposer = false
+                        composerIsFocused = false
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!store.canPostHumanReply)
+                .accessibilityIdentifier("postHumanReplyButton")
+            }
         }.padding(.horizontal, 16).padding(.bottom, 16)
     }
 }
@@ -857,7 +882,8 @@ private struct ThoughtRow: View {
     let thought: Thought
     let persona: Persona
     let mentionedPersona: Persona?
-    let replyTargetID: UUID?
+    let replyTarget: Thought?
+    let replyTargetPersona: Persona?
     let tags: [ThoughtTag]
     let onRequestReply: () -> Void
     let onDelete: () -> Void
@@ -874,7 +900,25 @@ private struct ThoughtRow: View {
                     if persona.kind == .ai {
                         Text("AI").font(.caption2.weight(.bold)).foregroundStyle(.tint)
                     }
-                    if replyTargetID != nil { Text("返信").font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
+                    if let replyTarget {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("返信先 @\(replyTargetPersona?.displayName ?? "不明")")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tint)
+                            HStack(alignment: .top, spacing: 7) {
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.35))
+                                    .frame(width: 2)
+                                Text(replyTarget.deletedAt == nil ? replyTarget.body : "削除されたThought")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("replyContext_\(thought.id.uuidString)")
+                    }
                     Text(thought.body)
                         .font(.body)
                         .lineSpacing(4)
@@ -888,7 +932,7 @@ private struct ThoughtRow: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Thought、\(thought.body)")
+                .accessibilityLabel(timelineAccessibilityLabel)
                 .accessibilityHint("ダブルタップして詳細とHistoryを開きます")
                 .accessibilityIdentifier("timelineThought_\(thought.id.uuidString)")
                 TagStrip(tags: tags)
@@ -918,6 +962,12 @@ private struct ThoughtRow: View {
         .padding(.vertical, 14)
         .accessibilityElement(children: .contain)
         .contentShape(Rectangle())
+    }
+
+    private var timelineAccessibilityLabel: String {
+        guard let replyTarget else { return "Thought、\(thought.body)" }
+        let targetBody = replyTarget.deletedAt == nil ? replyTarget.body : "削除されたThought"
+        return "\(replyTargetPersona?.displayName ?? "不明")への返信、返信先、\(targetBody)、本文、\(thought.body)"
     }
 }
 

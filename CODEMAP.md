@@ -12,7 +12,7 @@
 - `AiTextApp/App/QuickCaptureView.swift` — 集中入力、local draft、自動focus、投稿・破棄確認UI。
 - `AiTextApp/App/ThoughtAnalyticsView.swift` — ローカル分析のサマリーと日別／曜日／時間帯／タグ／Continuation表示。
 - `AiTextApp/App/DailySummaryView.swift` — 月カレンダー、日別詳細、構造化Summary、送信前プレビュー。
-- `AiTextApp/App/TimelineView.swift` — Composer、Lazy Timeline、トップ右上の歯車から開く設定（プロフィール／Persona、Export、バックアップ）、Thought検索、本文に紐づくタグUI、Thought Detail、History、Continuation Composer、削除UI。独立したHistory Review／タグ一覧のトップバー導線は持たない。
+- `AiTextApp/App/TimelineView.swift` — Composer、Lazy Timeline、`repliesTo`に基づく返信先Persona／本文付きTimeline、トップ右上の歯車から開く設定（プロフィール／Persona、Export、バックアップ）、Thought検索、本文に紐づくタグUI、Thought Detail、History、Continuation Composer、削除UI。独立したHistory Review／タグ一覧のトップバー導線は持たない。
 - `AiTextApp/App/TimelineView.swift`内`ProfileEditorView`／`PersonaIcon` — デフォルト人間の表示名、写真選択・縮小、丸型アイコン表示。
 - `AiTextApp/App/TimelineView.swift`内`PersonaManagementView`／`AIPersonaEditorView` — 複数AI Personaの一覧、追加、編集、無効化。
 - `AiTextApp/App/TimelineView.swift`内`AIPostRequestView`／`AIPostPreviewView` — AIへの依頼入力、Persona External Brainのroute／source確認、最終payload確認、明示送信。

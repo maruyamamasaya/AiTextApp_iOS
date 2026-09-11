@@ -24,6 +24,7 @@ final class ThoughtStore: ObservableObject {
     @Published var aiReplyError: String?
     @Published private(set) var aiRepliesByTargetID: [UUID: [Thought]] = [:]
     @Published private(set) var replyTargetIDsByThoughtID: [UUID: UUID] = [:]
+    @Published private(set) var replyTargetsByThoughtID: [UUID: Thought] = [:]
     @Published private(set) var dailySummaries: [DailySummary] = []
     @Published private(set) var dailySummary: DailySummary?
     @Published private(set) var dailySummaryPreview: DailySummaryPreview?
@@ -242,8 +243,16 @@ final class ThoughtStore: ObservableObject {
     }
 
     private func refreshReplyRelations(for ids: [UUID]) {
-        guard let aiReplyRepository else { return }
-        if let values = try? aiReplyRepository.fetchReplyTargets(for: ids) { replyTargetIDsByThoughtID.merge(values) { _, new in new } }
+        guard let aiReplyRepository, let thoughtRepository else { return }
+        guard let values = try? aiReplyRepository.fetchReplyTargets(for: ids) else { return }
+        replyTargetIDsByThoughtID.merge(values) { _, new in new }
+        let targetIDs = Set(values.values)
+        refreshAuthors(for: Array(targetIDs))
+        for (replyID, targetID) in values {
+            if let target = try? thoughtRepository.fetchByID(targetID) {
+                replyTargetsByThoughtID[replyID] = target
+            }
+        }
     }
 
     private func refreshAuthors(for ids: [UUID]) {
