@@ -23,6 +23,8 @@ public enum AIAPICallStatus: String, Codable, Sendable {
 public enum AIAPIErrorCategory: String, Codable, Sendable {
     case network, timeout, rateLimit = "rate_limit", quota, appCheck = "app_check"
     case firebaseNotConfigured = "firebase_not_configured"
+    case openAIKeyMissing = "openai_key_missing"
+    case openAIAuthentication = "openai_authentication"
     case emptyResponse = "empty_response", invalidResponse = "invalid_response"
     case responseTooLong = "response_too_long", unknown
 
@@ -31,6 +33,8 @@ public enum AIAPIErrorCategory: String, Codable, Sendable {
         if let value = error as? ReviewSummaryServiceError {
             switch value {
             case .firebaseNotConfigured: return .firebaseNotConfigured
+            case .openAIKeyMissing: return .openAIKeyMissing
+            case .openAIAuthentication: return .openAIAuthentication
             case .appCheck: return .appCheck
             case .rateLimited: return .rateLimit
             case .network: return .network
@@ -196,7 +200,9 @@ public struct AIAPIUsageRecorder: Sendable {
             return value
         } catch {
             let finished = now(); let status: AIAPICallStatus = error is CancellationError ? .cancelled : .failed
-            save(.init(startedAt: started, finishedAt: finished, feature: context.feature, personaID: context.personaID, provider: responseMetadata?.0 ?? provider, model: responseMetadata?.1 ?? model, status: status, inputCharacters: request.prompt.count, outputCharacters: responseMetadata?.2 ?? 0, latencyMilliseconds: milliseconds(started, finished), externalBrainUsed: context.externalBrainUsed, retrievedChunkCount: context.retrievedChunkCount, errorCategory: status == .failed ? .classify(error) : nil, sourceType: context.sourceType))
+            let fallbackProvider = request.provider == .gemini ? provider : request.provider.rawValue
+            let fallbackModel = request.provider == .gemini ? model : request.provider.defaultModel
+            save(.init(startedAt: started, finishedAt: finished, feature: context.feature, personaID: context.personaID, provider: responseMetadata?.0 ?? fallbackProvider, model: responseMetadata?.1 ?? fallbackModel, status: status, inputCharacters: request.prompt.count, outputCharacters: responseMetadata?.2 ?? 0, latencyMilliseconds: milliseconds(started, finished), externalBrainUsed: context.externalBrainUsed, retrievedChunkCount: context.retrievedChunkCount, errorCategory: status == .failed ? .classify(error) : nil, sourceType: context.sourceType))
             throw error
         }
     }

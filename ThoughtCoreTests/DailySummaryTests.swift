@@ -20,8 +20,16 @@ struct DailySummaryTests {
         #expect(preview.interval.start == start)
         #expect(preview.interval.end == calendar.date(byAdding: .day, value: 1, to: start))
         #expect(preview.thoughts == [active])
+        #expect(preview.request.provider == .gemini)
         #expect(!preview.request.prompt.contains("削除済み"))
         #expect(!preview.request.prompt.contains("翌日"))
+    }
+
+    @Test func freezesSelectedProviderIntoPreview() throws {
+        let start = calendar.startOfDay(for: Date())
+        let repository = MemoryThoughtRepository(records: [Thought(body: "OpenAIでまとめる", createdAt: start.addingTimeInterval(60))])
+        let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar, provider: .openAI)
+        #expect(preview.request.provider == .openAI)
     }
 
     @Test func emptyDayCannotPrepare() {
@@ -74,7 +82,7 @@ struct DailySummaryTests {
         let reopenedPreview = try PrepareDailySummary(thoughts: reopened, tags: reopened, relations: reopened, authors: reopened)(day: start, calendar: calendar)
         #expect(reopenedPreview.thoughts == [thought])
         #expect(!reopenedPreview.request.prompt.contains(aiThought.body))
-        #expect(SQLiteThoughtRepository.schemaVersion == 18)
+        #expect(SQLiteThoughtRepository.schemaVersion == 19)
     }
 
     @Test func v1ContentDecodesWithV2FieldsDefaulted() throws {

@@ -2,7 +2,7 @@
 
 HumanとAI Personaは`Persona`（公開上は`Actor` alias）という単一モデルで扱い、不変UUIDを参照キー、変更可能な一意`handle`を表示用IDとする。Mentionは本文とは別にActor ID、投稿時handle snapshot、UTF-16範囲を保存し、Replyは既存の`thought_relations.repliesTo`で独立して表現する。
 
-この文書は将来構想ではなく、2026-09-07時点でリポジトリに存在する構成を記録します。
+この文書は将来構想ではなく、2026-09-12時点でリポジトリに存在する構成を記録します。
 
 ## System Overview
 
@@ -33,7 +33,7 @@ SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
 ## Technology Stack
 
 - Swift 5 language mode、SwiftUI、Combine、Foundation。
-- iPhone / iOS 16.0以降。Firebase Apple SDK（FirebaseCore／FirebaseAILogic／FirebaseAppCheck）はapp targetだけが依存し、ThoughtCoreはSDK非依存。
+- iPhone / iOS 16.0以降。Firebase Apple SDK（FirebaseCore／FirebaseAILogic／FirebaseAppCheck）はGemini用としてapp targetだけが依存し、ThoughtCoreはSDK非依存。
 - Xcode projectと、CoreのLinuxテストにも使うSwift Package。
 
 ## Main Components
@@ -52,7 +52,7 @@ SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
 - `DailySummaryCalendarView`: 月単位で要約済み／Thoughtあり未要約／Thoughtなしを表示し、日別詳細と明示生成の送信前プレビューへ遷移する。
 - `DailySummaryContent` / `PrepareDailySummary`: `fetchHumanThoughts(from:to:)`から期間内・未削除のHuman Thoughtだけを取得し、Humanタグ、共通時間帯、Human同士の日内Relationをtyped previewへ固定する。AI本文は取得・prompt化せず、新規v3応答の`aiInteractions`も保存前に空へ矯正する。v1／v2保存JSONは後方互換decodeし、将来のAI Summaryは別model／画面の責務とする。
 - `DailySummaryThoughtTagSuggestion`: AI応答のprompt連番をPreview内のHuman Thought IDへ検証付きで解決する提案モデル。生成時はTagを変更せず、Detailの明示的な追加操作だけが既存Tag repositoryを呼ぶ。
-- `ReviewSummaryClient`: MockとFirebase AI Logic clientを差し替える通信境界。通常起動はFirebase、UIテスト／CoreテストはMockを使用。
+- `ReviewSummaryClient`: Gemini用Firebase AI Logic clientとOpenAI用直接Responses API clientを`AIProvider`でrouteする通信境界。通常起動はprovider router、UIテスト／CoreテストはMockを使用する。Personaのproviderと、Daily Summary／Knowledge Draft用のUserDefaults既定providerは生成requestへ固定する。
 - `ReviewSummaryGeneratingTransport`: Firebase SDK importをapp layerへ閉じ込め、request変換、応答変換、空応答、typed errorを外部通信なしでテストする境界。
 - `ThoughtDetailView`: 選択Thoughtの投稿者・本文・タグと、`continues`／`repliesTo`を統合したConversation Treeを表示する。通常の「返信を書く」は全Conversationの最新leafへ接続し、選択した過去Thoughtへの返信は「この投稿から返信を分岐」で明示する。タグ、Knowledge Draft、削除は`…`へ分離する。
 - `ThoughtStore`: Timeline／本文検索／タグ／Continuation draftとHistory画面状態を各use caseへ接続。
@@ -77,7 +77,7 @@ SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
 - `ThoughtRelationRepository`: Relation作成、source／target方向の1ステップ取得境界。
 - `ThoughtContinuationRepository`: 新規Thoughtと`continues` Relationを同一transactionで作成する境界。
 - `LoadConversationThread`: 現在Thoughtから両Relationを遡ってrootを求め、全node／edge、選択地点までのcurrent path、leaf、最新leafを再構築する。`ThoughtHistory`は旧Continuation表示との互換用に保持する。
-- `SQLiteThoughtRepository`: schema v18、Thought／Persona／Mention／Tag／Relation／AI生成情報／Persona別Auto Reply／Daily Summary／AI Usage metadata、Knowledge Review／Quality／usage metadataとDraft FTS query、旧JSON importと2世代backupを所有する正本実装。version値だけでなく実table／column／Relation制約を照合し、安全に補修可能な不足列、旧Relation制約、旧`account_id`単独UNIQUE制約は非破壊で補修する。旧期間要約tableは既存データ互換のため維持する。
+- `SQLiteThoughtRepository`: schema v19、Thought／Persona／Mention／Tag／Relation／AI生成情報／Persona別Auto Reply・Provider／Daily Summary／AI Usage metadata、Knowledge Review／Quality／usage metadataとDraft FTS query、旧JSON importと2世代backupを所有する正本実装。version値だけでなく実table／column／Relation制約を照合し、安全に補修可能な不足列、旧Relation制約、旧`account_id`単独UNIQUE制約は非破壊で補修する。旧PersonaはGeminiへ移行する。旧期間要約tableは既存データ互換のため維持する。
 - `ThoughtExporter`: Repositoryから未削除Thoughtを取得し、Markdown／JSONを生成。
 - `ShareSheet`: ExportファイルをiOS標準共有UIへ渡すUIKit bridge。
 - `ExternalBackupManager`: Filesフォルダpicker、security-scoped bookmark、バックアップ状態と確認UIのpresentation境界。
@@ -120,7 +120,7 @@ Repository初期化はmigration後、バックアップ更新前に`PRAGMA quick
 
 ## External Services / Authentication
 
-application composition rootはローカル`GoogleService-Info.plist`を検証し、DebugではApp Check Debug Provider、ReleaseではApp Attest Providerを設定してからFirebaseを初期化します。App Attest entitlementはRelease configurationだけに付与し、Personal Teamを使うDebug実機buildでは要求しません。Git管理外のルート`GoogleService-Info.plist`は存在する場合だけapp bundleへcopyし、未配置でもbuildと起動を継続します。モデルは`ReviewSummaryAIConfiguration`の`gemini-3.7-flash`、providerは`firebase-ai-logic`を正本とし、実応答の保存メタデータへ渡します。Firebase未設定、App Check、rate limit、network、その他APIをtyped errorへ分類します。APIキーとDebug tokenはコード／Gitへ含めません。Files／iCloud DriveアクセスにはiOS標準document pickerとsecurity-scoped bookmarkだけを使います。
+application composition rootはローカル`GoogleService-Info.plist`を検証し、DebugではApp Check Debug Provider、ReleaseではApp Attest Providerを設定してからFirebaseを初期化します。App Attest entitlementはRelease configurationだけに付与し、Personal Teamを使うDebug実機buildでは要求しません。Git管理外のルート`GoogleService-Info.plist`は存在する場合だけapp bundleへcopyし、未配置でもbuildと起動を継続します。GeminiはFirebase AI Logicから`gemini-3.7-flash`を呼ぶ。OpenAIは個人所有端末限定の暫定運用として、Settingsで入力したAPI keyを`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`のKeychainへ保存し、Responses APIの`gpt-5.6-luna`を`store: false`で直接呼ぶ。キーはUserDefaults、SQLite、Export、backup、ログ、Gitへ含めない。ただしKeychainはサーバー側Secretと同等の防御境界ではないため、TestFlight／App Store／第三者配布を開始する前に直接通信を廃止し、認証・濫用防止を備えたバックエンドとSecret管理へ移行する。実応答のprovider／modelを保存メタデータへ渡し、Firebase未設定、OpenAI key未設定／認証失敗、App Check、rate limit、network、その他APIをtyped errorへ分類します。Files／iCloud DriveアクセスにはiOS標準document pickerとsecurity-scoped bookmarkだけを使います。
 ## GitHub Repository Settings
 
 External Brainのowner／repository／branchは`ExternalBrainManager`が既存UserDefaults keyへ保存し、Read、sync、Draft new-file-only保存、Promoteの全経路が同じ設定を参照する。PATは`ExternalBrainTokenStore`だけがKeychainへ保存し、UserDefaults、SQLite、Markdown、Usageへ渡さない。接続確認は既存`GitHubExternalBrainRemote`によるGETだけでAuthentication、Repository、Branchを検証し、repository permissionsのpush値からDraft／Knowledge capabilityを推定する。接続確認は設定保存とは独立し、失敗しても設定とローカルKnowledgeを保持する。

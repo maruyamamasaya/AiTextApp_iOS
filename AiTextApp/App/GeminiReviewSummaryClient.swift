@@ -54,12 +54,21 @@ struct FirebaseAILogicTransport: ReviewSummaryGeneratingTransport {
 enum ReviewSummaryClientFactory {
     static func makeProductionClient() -> any ReviewSummaryClient {
         #if canImport(FirebaseAILogic) && canImport(FirebaseAppCheck) && canImport(FirebaseCore)
+        let gemini: any ReviewSummaryClient
         if let error = FirebaseAIBootstrap.configureIfPossible() {
-            return UnavailableReviewSummaryClient(error: error)
+            gemini = UnavailableReviewSummaryClient(error: error)
+        } else {
+            gemini = FirebaseReviewSummaryClient(transport: FirebaseAILogicTransport())
         }
-        return FirebaseReviewSummaryClient(transport: FirebaseAILogicTransport())
+        return ProviderRoutingReviewSummaryClient(
+            gemini: gemini,
+            openAI: OpenAIReviewSummaryClientFactory.makeProductionClient()
+        )
         #else
-        return UnavailableReviewSummaryClient(error: .firebaseNotConfigured)
+        return ProviderRoutingReviewSummaryClient(
+            gemini: UnavailableReviewSummaryClient(error: .firebaseNotConfigured),
+            openAI: OpenAIReviewSummaryClientFactory.makeProductionClient()
+        )
         #endif
     }
 }

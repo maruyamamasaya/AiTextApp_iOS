@@ -163,7 +163,7 @@ public struct PrepareDailySummary: Sendable {
     public init(thoughts: any ThoughtRepository, tags: any ThoughtTagRepository, relations: any ThoughtRelationRepository, authors: any PersonaRepository) {
         self.thoughts = thoughts; self.tags = tags; self.relations = relations; self.authors = authors
     }
-    public func callAsFunction(day: Date, calendar: Calendar = .current) throws -> DailySummaryPreview {
+    public func callAsFunction(day: Date, calendar: Calendar = .current, provider: AIProvider = .gemini) throws -> DailySummaryPreview {
         let start = calendar.startOfDay(for: day)
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { throw ReviewSummaryError.noThoughts }
         let interval = DateInterval(start: start, end: end)
@@ -182,7 +182,7 @@ public struct PrepareDailySummary: Sendable {
         let existing = names.sorted()
         relationSnapshot = relationSnapshot.filter { recordIDs.contains($0.targetThoughtID) }.sorted { $0.id.uuidString < $1.id.uuidString }
         let continuationCount = relationSnapshot.filter { $0.type == .continues }.count
-        return DailySummaryPreview(interval: interval, thoughts: records, existingTags: existing, continuationCount: continuationCount, request: .init(prompt: try DailySummaryPrompt.make(inputs: inputs, relations: relationSnapshot, existingTags: existing, calendar: calendar), usageContext: .init(feature: .dailySummary)), inputs: inputs, relations: relationSnapshot)
+        return DailySummaryPreview(interval: interval, thoughts: records, existingTags: existing, continuationCount: continuationCount, request: .init(prompt: try DailySummaryPrompt.make(inputs: inputs, relations: relationSnapshot, existingTags: existing, calendar: calendar), usageContext: .init(feature: .dailySummary), provider: provider), inputs: inputs, relations: relationSnapshot)
     }
 }
 

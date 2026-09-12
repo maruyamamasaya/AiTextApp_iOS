@@ -40,7 +40,7 @@ public enum AIPersonaPersistenceError: Error, LocalizedError, Equatable {
 }
 
 public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, AIAPIUsageRepository, AIAPIUsageAnalyticsRepository, KnowledgeDraftRepository, KnowledgeLifecycleEventRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 18
+    public static let schemaVersion: Int32 = 19
     private static let localAccountID = "owner"
 
     private let databaseURL: URL
@@ -244,12 +244,12 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
 
     public func fetchAIConfigurations() throws -> [UUID: AIPersonaConfiguration] {
         try lock.withLock {
-            let statement = try prepare("SELECT persona_id, role, instructions, auto_reply_enabled, updated_at FROM ai_persona_configurations")
+            let statement = try prepare("SELECT persona_id, role, instructions, auto_reply_enabled, provider, updated_at FROM ai_persona_configurations")
             defer { sqlite3_finalize(statement) }
             var output: [UUID: AIPersonaConfiguration] = [:]; var result = sqlite3_step(statement)
             while result == SQLITE_ROW {
-                guard let idText = sqlite3_column_text(statement, 0), let roleText = sqlite3_column_text(statement, 1), let instructionsText = sqlite3_column_text(statement, 2), let id = UUID(uuidString: String(cString: idText)) else { throw SQLiteThoughtRepositoryError.invalidRecord }
-                output[id] = AIPersonaConfiguration(personaID: id, role: String(cString: roleText), instructions: String(cString: instructionsText), autoReplyEnabled: sqlite3_column_int(statement, 3) != 0, updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))); result = sqlite3_step(statement)
+                guard let idText = sqlite3_column_text(statement, 0), let roleText = sqlite3_column_text(statement, 1), let instructionsText = sqlite3_column_text(statement, 2), let providerText = sqlite3_column_text(statement, 4), let id = UUID(uuidString: String(cString: idText)), let provider = AIProvider(rawValue: String(cString: providerText)) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+                output[id] = AIPersonaConfiguration(personaID: id, role: String(cString: roleText), instructions: String(cString: instructionsText), autoReplyEnabled: sqlite3_column_int(statement, 3) != 0, provider: provider, updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5))); result = sqlite3_step(statement)
             }
             guard result == SQLITE_DONE else { throw lastError() }; return output
         }
@@ -1394,6 +1394,13 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
             }
         }
         try repairPersonaAccountSchemaIfNeeded()
+        let requiresProviderRepair = try !tableColumns("ai_persona_configurations").contains("provider")
+        if version < 19 || requiresProviderRepair {
+            try transaction {
+                try addColumnIfMissing(table: "ai_persona_configurations", column: "provider", definition: "TEXT NOT NULL DEFAULT 'firebase-ai-logic' CHECK (provider IN ('firebase-ai-logic', 'openai'))")
+                try execute("PRAGMA user_version = 19")
+            }
+        }
     }
 
     private func relationTableSupportsReplies() throws -> Bool {
@@ -1426,7 +1433,7 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
             "thought_mentions": ["thought_id", "persona_id", "handle_snapshot", "range_location", "range_length", "created_at"],
             "tags": ["id", "name", "normalized_name", "created_at"],
             "thought_tags": ["thought_id", "tag_id", "created_at"],
-            "ai_persona_configurations": ["persona_id", "role", "instructions", "auto_reply_enabled", "updated_at"],
+            "ai_persona_configurations": ["persona_id", "role", "instructions", "auto_reply_enabled", "provider", "updated_at"],
             "ai_post_generations": ["thought_id", "persona_id", "generation_kind", "reply_target_thought_id"],
             "daily_summaries": ["id", "day_start", "day_end", "content_json"],
             "ai_api_usage": ["id", "feature", "status", "source_type"],
@@ -1767,9 +1774,9 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
     }
 
     private func executeAIConfigurationUpsert(_ configuration: AIPersonaConfiguration) throws {
-        let statement = try prepare("INSERT INTO ai_persona_configurations (persona_id, role, instructions, auto_reply_enabled, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(persona_id) DO UPDATE SET role = excluded.role, instructions = excluded.instructions, auto_reply_enabled = excluded.auto_reply_enabled, updated_at = excluded.updated_at")
+        let statement = try prepare("INSERT INTO ai_persona_configurations (persona_id, role, instructions, auto_reply_enabled, provider, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(persona_id) DO UPDATE SET role = excluded.role, instructions = excluded.instructions, auto_reply_enabled = excluded.auto_reply_enabled, provider = excluded.provider, updated_at = excluded.updated_at")
         defer { sqlite3_finalize(statement) }
-        try bind(configuration.personaID.uuidString, to: 1, in: statement); try bind(configuration.role, to: 2, in: statement); try bind(configuration.instructions, to: 3, in: statement); try bind(configuration.autoReplyEnabled ? Int32(1) : Int32(0), to: 4, in: statement); try bind(configuration.updatedAt.timeIntervalSince1970, to: 5, in: statement)
+        try bind(configuration.personaID.uuidString, to: 1, in: statement); try bind(configuration.role, to: 2, in: statement); try bind(configuration.instructions, to: 3, in: statement); try bind(configuration.autoReplyEnabled ? Int32(1) : Int32(0), to: 4, in: statement); try bind(configuration.provider.rawValue, to: 5, in: statement); try bind(configuration.updatedAt.timeIntervalSince1970, to: 6, in: statement)
         guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError() }
     }
 

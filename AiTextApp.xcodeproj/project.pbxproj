@@ -40,6 +40,7 @@
 		F10000000000000000000002 /* ExternalBrainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* ExternalBrainManager.swift */; };
 		G10000000000000000000001 /* AIAPIUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = G20000000000000000000001 /* AIAPIUsage.swift */; };
 		G10000000000000000000002 /* AIAPIUsageAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G20000000000000000000002 /* AIAPIUsageAnalyticsView.swift */; };
+		H10000000000000000000001 /* OpenAIReviewSummaryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = H20000000000000000000001 /* OpenAIReviewSummaryClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +88,7 @@
 		F20000000000000000000002 /* ExternalBrainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalBrainManager.swift; sourceTree = "<group>"; };
 		G20000000000000000000001 /* AIAPIUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAPIUsage.swift; sourceTree = "<group>"; };
 		G20000000000000000000002 /* AIAPIUsageAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAPIUsageAnalyticsView.swift; sourceTree = "<group>"; };
+		H20000000000000000000001 /* OpenAIReviewSummaryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIReviewSummaryClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -143,6 +145,7 @@
 				A20000000000000000000018 /* ExternalBackupManager.swift */,
 				A20000000000000000000019 /* FolderPicker.swift */,
 				A20000000000000000000021 /* GeminiReviewSummaryClient.swift */,
+				H20000000000000000000001 /* OpenAIReviewSummaryClient.swift */,
 				B20000000000000000000027 /* ThoughtAnalyticsView.swift */,
 				F20000000000000000000010 /* AppTheme.swift */,
 				A2D000000000000000000002 /* DailySummaryView.swift */,
@@ -356,6 +359,7 @@
 				F10000000000000000000002 /* ExternalBrainManager.swift in Sources */,
 				G10000000000000000000001 /* AIAPIUsage.swift in Sources */,
 				G10000000000000000000002 /* AIAPIUsageAnalyticsView.swift in Sources */,
+				H10000000000000000000001 /* OpenAIReviewSummaryClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

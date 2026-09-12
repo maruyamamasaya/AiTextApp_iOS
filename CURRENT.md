@@ -1,6 +1,6 @@
 # Current Project Status
 
-最終照合日: 2026-09-11
+最終照合日: 2026-09-12
 
 ## Project
 
@@ -11,6 +11,8 @@
 Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-09にMac/Xcode 26.6でSwift Testing全60件、Firebase 12.18.0を含むDebug／Release Simulator build、Personal TeamのDebug実機向け署名buildを確認しました。XCUITest targetはcompile済みですが、Simulator serviceが起動時に停止するホスト環境障害のため実行確認は未完了です。
 
 ## 実装済み
+
+- Gemini／OpenAIのAI Provider切替。既存Personaと既定ProviderはGeminiを維持し、AI Personaごとの投稿・返信はPersona設定、Daily Summary／Knowledge DraftはSettingsの既定Providerで選択する。個人所有端末だけへXcodeから導入する暫定運用として、OpenAI API keyは`WhenUnlockedThisDeviceOnly`のKeychainへ保存し、Responses APIへ直接送る。schema v19でPersona設定にproviderを非破壊追加し、生成開始時のprovider／modelをrequestとUsageへ固定する。TestFlight／App Store／第三者配布へ進む前に、API keyを端末から除去してバックエンド＋Secret管理へ移行する。
 
 - Conversation中心のAI返信／投稿履歴。Human ThoughtでactiveなAI Personaを@メンションすると、元ThoughtとMentionを先に保存・表示してから各AIが自動返信する。生成中／失敗／再試行をTimelineとConversationへ表示し、失敗しても元Thoughtを保持する。AI返信は通常Thought＋author＋`repliesTo`＋生成metadataとして保存し、同一対象・同一AIの二重返信を拒否しつつ複数AI返信を許可する。
 - `continues`／`repliesTo`を統合する`LoadConversationThread`を追加し、root、nodes、edges、currentPath、leaves、最新leafをDBから再構築する。Thought DetailはConversation表示へ移行し、通常返信は選択Thoughtではなく最新leafへ、過去地点への返信は`…`内の「この投稿から返信を分岐」へ分離した。会話Primary Actionとタグ／Knowledge Draft／削除などの管理操作も分離した。
@@ -58,7 +60,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - UUIDと作成・更新・削除日時を持つThought原文モデル。
 - Application Support配下のSQLiteを正本にしたローカル保存、query順序、ソフトデリート。
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
-- `PRAGMA user_version`によるschema version管理（現在v18）。v14は実カラム補修、v15はReply Relation制約補修、v16はActor handle／Mention snapshot、v17はAI Persona Auto Reply、v18は旧`account_id`単独UNIQUE制約の非破壊補修を行う。
+- `PRAGMA user_version`によるschema version管理（現在v19）。v14は実カラム補修、v15はReply Relation制約補修、v16はActor handle／Mention snapshot、v17はAI Persona Auto Reply、v18は旧`account_id`単独UNIQUE制約の非破壊補修、v19はAI Persona providerを非破壊追加する。
 - Home右上の鉛筆アイコンから開き、入力へ自動focusする投稿Composer。投稿操作はNavigation bar右上に置き、空入力や140文字超過時は無効化する。
 - Lazy Timeline、自然な相対日時、メニュー内削除、Empty State。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。

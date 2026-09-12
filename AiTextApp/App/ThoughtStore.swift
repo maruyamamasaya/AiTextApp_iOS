@@ -45,6 +45,11 @@ final class ThoughtStore: ObservableObject {
     @Published var aiReplyPreviewPreference: AIReplyPreviewPreference {
         didSet { userDefaults.set(aiReplyPreviewPreference.rawValue, forKey: Self.aiReplyPreviewPreferenceKey) }
     }
+    @Published var defaultAIProvider: AIProvider {
+        didSet { userDefaults.set(defaultAIProvider.rawValue, forKey: Self.defaultAIProviderKey) }
+    }
+    @Published private(set) var hasOpenAIAPIKey = false
+    @Published var openAIAPIKeyMessage: String?
     @Published private(set) var aiRepliesByTargetID: [UUID: [Thought]] = [:]
     @Published private(set) var automaticRepliesByTargetID: [UUID: [UUID: AutomaticReplyState]] = [:]
     @Published private(set) var replyTargetIDsByThoughtID: [UUID: UUID] = [:]
@@ -109,6 +114,7 @@ final class ThoughtStore: ObservableObject {
     private var isPosting = false
     private let userDefaults: UserDefaults
     private static let aiReplyPreviewPreferenceKey = "ai.replyPreviewPreference"
+    private static let defaultAIProviderKey = "ai.defaultProvider"
 
     private func handlePostSuccess(_ thought: Thought, resetsNavigation: Bool = true) {
         postNavigationRequest = PostNavigationRequest(
@@ -131,6 +137,8 @@ final class ThoughtStore: ObservableObject {
     ) {
         self.userDefaults = userDefaults
         aiReplyPreviewPreference = AIReplyPreviewPreference(rawValue: userDefaults.string(forKey: Self.aiReplyPreviewPreferenceKey) ?? "") ?? .skip
+        defaultAIProvider = AIProvider(rawValue: userDefaults.string(forKey: Self.defaultAIProviderKey) ?? "") ?? .gemini
+        hasOpenAIAPIKey = !(OpenAIAPIKeyStore.load() ?? "").isEmpty
         self.summaryClient = summaryClient
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
         self.externalBrainManager = externalBrainManager ?? ExternalBrainManager(rootURL: support.appendingPathComponent("ExternalBrain", isDirectory: true))
@@ -176,6 +184,31 @@ final class ThoughtStore: ObservableObject {
         if let startupError { errorMessage = startupError }
     }
 
+    func saveOpenAIAPIKey(_ apiKey: String) -> Bool {
+        do {
+            try OpenAIAPIKeyStore.save(apiKey)
+            hasOpenAIAPIKey = true
+            openAIAPIKeyMessage = "OpenAI API keyをこの端末のKeychainへ保存しました。"
+            return true
+        } catch let error as ReviewSummaryServiceError {
+            openAIAPIKeyMessage = error.localizedDescription
+            return false
+        } catch {
+            openAIAPIKeyMessage = "OpenAI API keyを保存できませんでした。"
+            return false
+        }
+    }
+
+    func removeOpenAIAPIKey() {
+        do {
+            try OpenAIAPIKeyStore.remove()
+            hasOpenAIAPIKey = false
+            openAIAPIKeyMessage = "OpenAI API keyをKeychainから削除しました。"
+        } catch {
+            openAIAPIKeyMessage = "OpenAI API keyを削除できませんでした。"
+        }
+    }
+
     func updateDefaultHumanPersona(displayName: String, handle: String, iconData: Data?) -> Bool {
         guard let personaRepository else { errorMessage = "プロフィールを保存できませんでした。"; return false }
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -199,7 +232,7 @@ final class ThoughtStore: ObservableObject {
         }
     }
 
-    func createAIPersona(displayName: String, handle: String, iconData: Data?, role: String, instructions: String, autoReplyEnabled: Bool = true, externalBrainEnabled: Bool = false, agentPath: String = "", maxRetrievedChunks: Int = 5) -> Bool {
+    func createAIPersona(displayName: String, handle: String, iconData: Data?, role: String, instructions: String, autoReplyEnabled: Bool = true, provider: AIProvider = .gemini, externalBrainEnabled: Bool = false, agentPath: String = "", maxRetrievedChunks: Int = 5) -> Bool {
 #if DEBUG
         NSLog("[AIPersona][Store] createAIPersona started handle=%@", handle)
 #endif
@@ -216,7 +249,7 @@ final class ThoughtStore: ObservableObject {
         guard let normalizedHandle = ActorHandle.normalize(handle) else { errorMessage = "@IDは半角英数字と_の3〜30文字で入力してください。"; return false }
         let persona = Persona(displayName: name, handle: normalizedHandle, kind: .ai, iconData: iconData, iconMIMEType: iconData == nil ? nil : "image/jpeg")
         do {
-            try aiPersonaRepository.createAIPersona(persona, configuration: AIPersonaConfiguration(personaID: persona.id, role: role, instructions: instructions, autoReplyEnabled: autoReplyEnabled))
+            try aiPersonaRepository.createAIPersona(persona, configuration: AIPersonaConfiguration(personaID: persona.id, role: role, instructions: instructions, autoReplyEnabled: autoReplyEnabled, provider: provider))
             externalBrainManager.savePersona(.init(personaID: persona.id, enabled: externalBrainEnabled, agentPath: agentPath, maxRetrievedChunks: maxRetrievedChunks))
             do {
                 try reloadPersonasAfterAIPersonaSave()
@@ -240,14 +273,14 @@ final class ThoughtStore: ObservableObject {
         }
     }
 
-    func updateAIPersona(_ original: Persona, displayName: String, handle: String, iconData: Data?, role: String, instructions: String, autoReplyEnabled: Bool) -> Bool {
+    func updateAIPersona(_ original: Persona, displayName: String, handle: String, iconData: Data?, role: String, instructions: String, autoReplyEnabled: Bool, provider: AIProvider) -> Bool {
         guard original.kind == .ai, let personaRepository, let aiPersonaRepository else { return false }
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let role = role.trimmingCharacters(in: .whitespacesAndNewlines), instructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 40, !role.isEmpty, !instructions.isEmpty else { errorMessage = "表示名・役割・指示を入力してください。"; return false }
         guard let normalizedHandle = ActorHandle.normalize(handle) else { errorMessage = "@IDは半角英数字と_の3〜30文字で入力してください。"; return false }
         var persona = original; persona.displayName = name; persona.handle = normalizedHandle; persona.iconData = iconData; persona.iconMIMEType = iconData == nil ? nil : "image/jpeg"; persona.updatedAt = Date()
-        do { try personaRepository.updatePersona(persona); try aiPersonaRepository.saveAIConfiguration(AIPersonaConfiguration(personaID: persona.id, role: role, instructions: instructions, autoReplyEnabled: autoReplyEnabled)); loadPersonas(); loadAIConfigurations(); refreshAuthors(for: thoughts.map(\.id)); return true }
+        do { try personaRepository.updatePersona(persona); try aiPersonaRepository.saveAIConfiguration(AIPersonaConfiguration(personaID: persona.id, role: role, instructions: instructions, autoReplyEnabled: autoReplyEnabled, provider: provider)); loadPersonas(); loadAIConfigurations(); refreshAuthors(for: thoughts.map(\.id)); return true }
         catch { errorMessage = "AI Personaを保存できませんでした。"; return false }
     }
 
@@ -470,7 +503,7 @@ final class ThoughtStore: ObservableObject {
     func prepareDailySummary(for day: Date, calendar: Calendar = .current) {
         guard let thoughtRepository, let tagRepository, let relationRepository, let personaRepository else { dailySummaryError = "要約対象を読み込めませんでした。"; return }
         do {
-            dailySummaryPreview = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: day, calendar: calendar)
+            dailySummaryPreview = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: day, calendar: calendar, provider: defaultAIProvider)
             dailySummaryError = nil
         } catch ReviewSummaryError.noThoughts { dailySummaryPreview = nil; dailySummaryError = "Thoughtが0件の日は要約できません。" }
         catch { dailySummaryPreview = nil; dailySummaryError = "要約対象を準備できませんでした。" }
@@ -484,7 +517,7 @@ final class ThoughtStore: ObservableObject {
         defer { isGeneratingDailySummary = false }
         do {
             guard let tagRepository, let relationRepository, let personaRepository else { throw ReviewSummaryError.stalePreview }
-            let current = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: preview.interval.start)
+            let current = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: preview.interval.start, provider: preview.request.provider)
             guard current.inputs == preview.inputs && current.relations == preview.relations && current.existingTags == preview.existingTags && current.continuationCount == preview.continuationCount else { throw ReviewSummaryError.stalePreview }
             let value = try await GenerateDailySummary(client: summaryClient, repository: dailySummaryRepository, usageRepository: aiUsageRepository)(preview: preview)
             dailySummary = value
@@ -601,7 +634,7 @@ final class ThoughtStore: ObservableObject {
         isGeneratingKnowledgeDraft = true; knowledgeDraftError = nil; knowledgeDraftMessage = nil
         defer { isGeneratingKnowledgeDraft = false }
         let related = externalBrainManager.relatedKnowledge(query: input.sourceContent)
-        do { let value = try await GenerateKnowledgeDraft(client: summaryClient, usageRepository: aiUsageRepository)(input: input, type: type, related: related); try knowledgeDraftRepository?.saveKnowledgeDraft(value); knowledgeDraft = value; loadKnowledge() }
+        do { let value = try await GenerateKnowledgeDraft(client: summaryClient, usageRepository: aiUsageRepository)(input: input, type: type, related: related, provider: defaultAIProvider); try knowledgeDraftRepository?.saveKnowledgeDraft(value); knowledgeDraft = value; loadKnowledge() }
         catch { knowledgeDraftError = error.localizedDescription }
     }
 

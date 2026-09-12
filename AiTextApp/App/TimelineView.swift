@@ -419,6 +419,8 @@ private struct SettingsView: View {
     @ObservedObject var store: ThoughtStore
     @EnvironmentObject private var themeController: ThemeController
     @Environment(\.dismiss) private var dismiss
+    @State private var openAIAPIKey = ""
+    @State private var confirmsOpenAIAPIKeyRemoval = false
 
     var body: some View {
         NavigationStack {
@@ -437,6 +439,39 @@ private struct SettingsView: View {
                 }
 
                 Section("AI") {
+                    Picker("既定のAI Provider", selection: $store.defaultAIProvider) {
+                        ForEach(AIProvider.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
+                    }
+                    .accessibilityIdentifier("defaultAIProviderPicker")
+                    Text("Daily SummaryとKnowledge Draftに使用します。AIペルソナは、それぞれの編集画面でProviderを選べます。使用Model: \(store.defaultAIProvider.defaultModel)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    LabeledContent("OpenAI API key", value: store.hasOpenAIAPIKey ? "Keychainに設定済み" : "未設定")
+                    SecureField("新しいOpenAI API key", text: $openAIAPIKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .privacySensitive()
+                        .accessibilityIdentifier("openAIAPIKeyField")
+                    Button("OpenAI API keyを保存") {
+                        if store.saveOpenAIAPIKey(openAIAPIKey) { openAIAPIKey = "" }
+                    }
+                    .disabled(openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("saveOpenAIAPIKeyButton")
+                    if store.hasOpenAIAPIKey {
+                        Button("OpenAI API keyを削除", role: .destructive) {
+                            confirmsOpenAIAPIKeyRemoval = true
+                        }
+                    }
+                    if let message = store.openAIAPIKeyMessage {
+                        Text(message).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Text("自分の端末だけで使う暫定構成です。キーはこの端末限定のKeychainへ保存されますが、配布用アプリでは安全なバックエンドへ移行してください。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
                     Toggle(
                         "AI返信の確認クッション",
                         isOn: Binding(
@@ -513,6 +548,10 @@ private struct SettingsView: View {
             }
             .sheet(item: $store.exportArtifact) { artifact in
                 ShareSheet(url: artifact.url, onFailure: store.sharingFailed)
+            }
+            .confirmationDialog("OpenAI API keyを削除しますか？", isPresented: $confirmsOpenAIAPIKeyRemoval, titleVisibility: .visible) {
+                Button("削除", role: .destructive) { store.removeOpenAIAPIKey() }
+                Button("キャンセル", role: .cancel) {}
             }
         }
     }
@@ -1692,7 +1731,7 @@ private struct AIReplyPreviewView: View {
                     } else { Text("利用なし").foregroundStyle(.secondary) }
                 }
                 Section("最終payload") { Text(preview.request.prompt).font(.caption).textSelection(.enabled) }
-                Section("生成元") { LabeledContent("Provider", value: ReviewSummaryAIConfiguration.providerName); LabeledContent("Model", value: ReviewSummaryAIConfiguration.modelName) }
+                Section("生成元") { LabeledContent("Provider", value: preview.configuration.provider.displayName); LabeledContent("Model", value: preview.configuration.provider.defaultModel) }
                 if let draft = store.aiReplyDraft, draft.preview.id == preview.id {
                     Section("返信Preview") { Text(draft.body).font(.body); Text("投稿するまでTimelineには保存されません。").font(.footnote).foregroundStyle(.secondary) }
                 }
@@ -1771,7 +1810,8 @@ private struct ActorProfileView: View {
                             .font(.title3.weight(.semibold))
                     }
                     .padding(.vertical, 6)
-                    LabeledContent("使用Model", value: ReviewSummaryAIConfiguration.modelName)
+                    LabeledContent("Provider", value: configuration?.provider.displayName ?? "未設定")
+                    LabeledContent("使用Model", value: configuration?.provider.defaultModel ?? "未設定")
                     VStack(alignment: .leading, spacing: 6) {
                         Text("指示と個性").font(.caption).foregroundStyle(.secondary)
                         Text(configuration?.instructions ?? "指示と個性は未設定です")
@@ -1875,6 +1915,7 @@ private struct AIPersonaEditorView: View {
     @State private var role: String
     @State private var instructions: String
     @State private var autoReplyEnabled: Bool
+    @State private var provider: AIProvider
     @State private var brainEnabled: Bool
     @State private var agentPath: String
     @State private var maxChunks: Int
@@ -1889,6 +1930,7 @@ private struct AIPersonaEditorView: View {
         _role = State(initialValue: configuration?.role ?? "")
         _instructions = State(initialValue: configuration?.instructions ?? "")
         _autoReplyEnabled = State(initialValue: configuration?.autoReplyEnabled ?? true)
+        _provider = State(initialValue: configuration?.provider ?? .gemini)
         let brain = persona.map { store.externalBrainManager.configuration(for: $0.id) }
         _brainEnabled = State(initialValue: brain?.enabled ?? false)
         _agentPath = State(initialValue: brain?.agentPath ?? "")
@@ -1907,6 +1949,16 @@ private struct AIPersonaEditorView: View {
                 Section("@ID") { TextField("dev_ai", text: $handle).textInputAutocapitalization(.never).autocorrectionDisabled() }
                 Section("役割") { TextField("例：アイデアを広げる相棒", text: $role, axis: .vertical) }
                 Section("指示") { TextField("口調、視点、避けることなど", text: $instructions, axis: .vertical).lineLimit(3...8) }
+                Section("AI Provider") {
+                    Picker("Provider", selection: $provider) {
+                        ForEach(AIProvider.allCases) { value in
+                            Text(value.displayName).tag(value)
+                        }
+                    }
+                    LabeledContent("Model", value: provider.defaultModel)
+                    Text(provider == .gemini ? "Firebase AI LogicからGeminiを呼び出します。" : "この端末のKeychainに保存したAPI keyでOpenAIを直接呼び出します。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 Section("返信") {
                     Toggle("自動返信", isOn: $autoReplyEnabled)
                     Text(autoReplyEnabled ? "HumanのThoughtで@メンションされると自動で返信します。AI自身の投稿からは連鎖しません。" : "@メンションされても自動返信しません。")
@@ -1937,8 +1989,8 @@ private struct AIPersonaEditorView: View {
                         NSLog("[AIPersona][Editor] save button action fired mode=%@ handle=%@", persona == nil ? "create" : "update", handle)
 #endif
                         saveError = nil
-                        let saved = persona.map { store.updateAIPersona($0, displayName: displayName, handle: handle, iconData: iconData, role: role, instructions: instructions, autoReplyEnabled: autoReplyEnabled) }
-                            ?? store.createAIPersona(displayName: displayName, handle: handle, iconData: iconData, role: role, instructions: instructions, autoReplyEnabled: autoReplyEnabled, externalBrainEnabled: brainEnabled, agentPath: agentPath, maxRetrievedChunks: maxChunks)
+                        let saved = persona.map { store.updateAIPersona($0, displayName: displayName, handle: handle, iconData: iconData, role: role, instructions: instructions, autoReplyEnabled: autoReplyEnabled, provider: provider) }
+                            ?? store.createAIPersona(displayName: displayName, handle: handle, iconData: iconData, role: role, instructions: instructions, autoReplyEnabled: autoReplyEnabled, provider: provider, externalBrainEnabled: brainEnabled, agentPath: agentPath, maxRetrievedChunks: maxChunks)
                         if saved {
                             if let persona { store.externalBrainManager.savePersona(.init(personaID: persona.id, enabled: brainEnabled, agentPath: agentPath, maxRetrievedChunks: maxChunks)) }
                             dismiss()
@@ -2042,6 +2094,7 @@ private struct AIPostPreviewView: View {
                     } else { Text("利用なし").foregroundStyle(.secondary) }
                 }
                 Section("最終payload") { Text(preview.request.prompt).font(.caption).textSelection(.enabled) }
+                Section("生成元") { LabeledContent("Provider", value: preview.configuration.provider.displayName); LabeledContent("Model", value: preview.configuration.provider.defaultModel) }
                 if let error = store.aiPostError { Section { Text(error).foregroundStyle(.red) } }
             }
             .navigationTitle("送信前プレビュー")

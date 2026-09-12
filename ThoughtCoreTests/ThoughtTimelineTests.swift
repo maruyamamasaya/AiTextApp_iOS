@@ -287,7 +287,7 @@ struct ThoughtTagTests {
         try fixture.writeV3Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 18)
+        #expect(SQLiteThoughtRepository.schemaVersion == 19)
         #expect(try repository.fetchByID(original.id) == original)
         guard case .added(let tag) = try repository.addTag(named: "移行後", to: original.id) else { return }
         #expect(try repository.fetchTags(for: original.id) == [tag])
@@ -464,7 +464,7 @@ struct ThoughtHistoryTests {
         try fixture.writeV1Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 18)
+        #expect(SQLiteThoughtRepository.schemaVersion == 19)
         #expect(try repository.fetchAll() == [original])
         #expect(try repository.fetchBySourceThoughtID(original.id).isEmpty)
     }
@@ -752,6 +752,19 @@ struct ThoughtHistoryReviewTests {
         #expect(response.text == "Firebaseの要約")
         #expect(response.provider == ReviewSummaryAIConfiguration.providerName)
         #expect(response.model == ReviewSummaryAIConfiguration.modelName)
+    }
+
+    @Test func providerRouterUsesTheProviderFrozenIntoTheRequest() async throws {
+        let router = ProviderRoutingReviewSummaryClient(
+            gemini: MockReviewSummaryClient(response: .init(text: "Gemini", provider: AIProvider.gemini.rawValue, model: AIProvider.gemini.defaultModel)),
+            openAI: MockReviewSummaryClient(response: .init(text: "OpenAI", provider: AIProvider.openAI.rawValue, model: AIProvider.openAI.defaultModel))
+        )
+
+        let response = try await router.generateSummary(.init(prompt: "OpenAIで生成", provider: .openAI))
+
+        #expect(response.text == "OpenAI")
+        #expect(response.provider == AIProvider.openAI.rawValue)
+        #expect(response.model == ReviewSummaryAIConfiguration.openAIModelName)
     }
 
     @Test func firebaseClientRejectsEmptyResponsesAndPreservesTypedServiceErrors() async {
@@ -1113,7 +1126,7 @@ struct ExternalBackupTests {
         #expect(analytics.dailyCounts.first?.count == 1)
         #expect(analytics.dailyCounts.last?.count == 2)
         #expect(try repository.fetchAll() == before)
-        #expect(SQLiteThoughtRepository.schemaVersion == 18)
+        #expect(SQLiteThoughtRepository.schemaVersion == 19)
     }
 
     @Test func emptyLocalAnalyticsReturnsZeroFilledDistributions() throws {
@@ -1442,6 +1455,7 @@ struct PersonaTests {
             #expect(try fixture.tableColumns("ai_api_usage").isSuperset(of: ["id", "started_at", "finished_at", "feature", "persona_id", "provider", "model", "status", "input_characters", "output_characters", "input_tokens", "output_tokens", "total_tokens", "latency_milliseconds", "external_brain_used", "retrieved_chunk_count", "error_category", "source_type"]))
             #expect(try fixture.tableColumns("knowledge_documents").isSuperset(of: ["status", "superseded_by_knowledge_id", "superseded_at", "archived_at", "retrieval_count", "last_retrieved_at"]))
             #expect(try repaired.fetchAIConfigurations()[persona.id]?.autoReplyEnabled == true)
+            #expect(try repaired.fetchAIConfigurations()[persona.id]?.provider == .gemini)
             let generation = try repaired.fetchAIPostGeneration(for: thoughtID)
             #expect(generation?.kind == .standalone)
             #expect(generation?.replyTargetThoughtID == nil)
@@ -1497,6 +1511,27 @@ struct PersonaTests {
         let preview = try AIPostPrompt.prepare(persona: persona, configuration: configuration, userRequest: "投稿して")
         await #expect(throws: AIPostError.responseTooLong) { try await GenerateAIPost(client: MockReviewSummaryClient(text: String(repeating: "あ", count: 141)), repository: repository)(preview: preview) }
         #expect(try repository.fetchTimeline().isEmpty)
+    }
+
+    @Test func aiPersonaProviderPersistsAndFreezesIntoGenerationRequest() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let persona = Persona(displayName: "OpenAI Persona", kind: .ai)
+        let configuration = AIPersonaConfiguration(
+            personaID: persona.id,
+            role: "整理",
+            instructions: "簡潔に",
+            provider: .openAI
+        )
+        try repository.createAIPersona(persona, configuration: configuration)
+
+        let reopened = try fixture.repository()
+        let saved = try #require(reopened.fetchAIConfigurations()[persona.id])
+        let preview = try AIPostPrompt.prepare(persona: persona, configuration: saved, userRequest: "投稿して")
+
+        #expect(saved.provider == .openAI)
+        #expect(preview.request.provider == .openAI)
+        #expect(try fixture.sqliteUserVersion() == SQLiteThoughtRepository.schemaVersion)
     }
 
     @Test func mentionIsStoredAtomicallyByPersonaIDWithoutStartingAI() throws {
@@ -1785,6 +1820,7 @@ private struct Fixture {
             DROP TABLE ai_post_generations_current;
             CREATE INDEX ai_post_generations_persona_idx ON ai_post_generations(persona_id, generated_at DESC);
             DROP TABLE ai_api_usage;
+            ALTER TABLE ai_persona_configurations DROP COLUMN provider;
             ALTER TABLE knowledge_documents DROP COLUMN status;
             ALTER TABLE knowledge_documents DROP COLUMN superseded_by_knowledge_id;
             ALTER TABLE knowledge_documents DROP COLUMN superseded_at;

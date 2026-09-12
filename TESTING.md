@@ -56,6 +56,8 @@ Daily SummaryはThoughtがある日／ない日、要約済み状態、過去月
 
 XcodeでFirebase package resolveとapp targetのcompileを行った後、Debug Providerを登録したSimulator、App Attestを登録した実機の順で明示送信を確認します。成功時のSQLite provider／model、未設定plist、未登録Debug token、App Check拒否、offline、429／quota、その他API、空応答を確認します。Console設定や実APIを必要とする検証は通常のUnit Testへ組み込みません。
 
+OpenAI直接接続は個人所有実機だけで確認します。設定画面でAPI keyの未設定／保存済み／削除状態、Keychain保存後の再起動、401／403、429、offline、空応答を確認し、Gemini／OpenAIそれぞれでPersona Post、AI Reply、Daily Summary、Knowledge Draftのprovider／modelとUsageを確認します。API keyそのものをテストfixture、Screenshot attachment、ログへ含めません。TestFlight／App Store用archiveの検証前には、直接接続をバックエンド方式へ置き換えることを確認します。
+
 ## General Checks
 
 Windowsで実装済み・Mac未検証の蓄積と一括実施順は`MAC_VALIDATION.md`を参照します。

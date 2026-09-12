@@ -110,10 +110,11 @@ public struct AIPersonaConfiguration: Equatable, Sendable {
     public var role: String
     public var instructions: String
     public var autoReplyEnabled: Bool
+    public var provider: AIProvider
     public var updatedAt: Date
 
-    public init(personaID: UUID, role: String, instructions: String, autoReplyEnabled: Bool = true, updatedAt: Date = Date()) {
-        self.personaID = personaID; self.role = role; self.instructions = instructions; self.autoReplyEnabled = autoReplyEnabled; self.updatedAt = updatedAt
+    public init(personaID: UUID, role: String, instructions: String, autoReplyEnabled: Bool = true, provider: AIProvider = .gemini, updatedAt: Date = Date()) {
+        self.personaID = personaID; self.role = role; self.instructions = instructions; self.autoReplyEnabled = autoReplyEnabled; self.provider = provider; self.updatedAt = updatedAt
     }
 }
 
@@ -227,7 +228,7 @@ public enum AIThoughtReplyPrompt {
         --- Output Rules ---
         このThoughtに対する返信を日本語140文字以内で返してください。前置き、引用符、Markdown、文字数説明は不要です。
         """
-        return AIThoughtReplyPreview(persona: persona, configuration: configuration, targetThought: targetThought, userRequest: normalizedRequest, context: context, externalBrain: externalBrain, personaStatements: personaStatements, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .thoughtReply, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0)))
+        return AIThoughtReplyPreview(persona: persona, configuration: configuration, targetThought: targetThought, userRequest: normalizedRequest, context: context, externalBrain: externalBrain, personaStatements: personaStatements, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .thoughtReply, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0), provider: configuration.provider))
     }
 }
 
@@ -319,7 +320,7 @@ public enum AIPostPrompt {
 
         日本語で140文字以内の投稿本文だけを返してください。前置き、引用符、Markdown、文字数の説明は付けないでください。
         """
-        return AIPostPreview(persona: persona, configuration: configuration, userRequest: request, externalBrain: externalBrain, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .personaPost, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0)))
+        return AIPostPreview(persona: persona, configuration: configuration, userRequest: request, externalBrain: externalBrain, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .personaPost, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0), provider: configuration.provider))
     }
 }
 

@@ -45,10 +45,12 @@ public protocol ReviewSummaryRepository: Sendable {
 public struct ReviewSummaryRequest: Equatable, Sendable {
     public let prompt: String
     public let usageContext: AIAPIUsageContext?
+    public let provider: AIProvider
 
-    public init(prompt: String, usageContext: AIAPIUsageContext? = nil) {
+    public init(prompt: String, usageContext: AIAPIUsageContext? = nil, provider: AIProvider = .gemini) {
         self.prompt = prompt
         self.usageContext = usageContext
+        self.provider = provider
     }
 }
 
@@ -93,13 +95,36 @@ public protocol ReviewSummaryClient: Sendable {
     func generateSummary(_ request: ReviewSummaryRequest) async throws -> ReviewSummaryResponse
 }
 
+public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
+    case gemini = "firebase-ai-logic"
+    case openAI = "openai"
+
+    public var id: String { rawValue }
+    public var displayName: String {
+        switch self {
+        case .gemini: "Gemini"
+        case .openAI: "OpenAI"
+        }
+    }
+    public var defaultModel: String {
+        switch self {
+        case .gemini: ReviewSummaryAIConfiguration.geminiModelName
+        case .openAI: ReviewSummaryAIConfiguration.openAIModelName
+        }
+    }
+}
+
 public enum ReviewSummaryAIConfiguration {
-    public static let providerName = "firebase-ai-logic"
-    public static let modelName = "gemini-3.7-flash"
+    public static let providerName = AIProvider.gemini.rawValue
+    public static let modelName = geminiModelName
+    public static let geminiModelName = "gemini-3.7-flash"
+    public static let openAIModelName = "gpt-5.6-luna"
 }
 
 public enum ReviewSummaryServiceError: Error, LocalizedError, Equatable, Sendable {
     case firebaseNotConfigured
+    case openAIKeyMissing
+    case openAIAuthentication
     case appCheck
     case rateLimited
     case network
@@ -109,6 +134,10 @@ public enum ReviewSummaryServiceError: Error, LocalizedError, Equatable, Sendabl
         switch self {
         case .firebaseNotConfigured:
             "Firebaseが未設定です。GoogleService-Info.plistとFirebase設定を確認してください。"
+        case .openAIKeyMissing:
+            "OpenAI API keyが未設定です。設定画面からKeychainへ保存してください。"
+        case .openAIAuthentication:
+            "OpenAI API keyを認証できませんでした。キーを確認または再発行してください。"
         case .appCheck:
             "App Checkを確認できませんでした。設定またはDebug tokenを確認してください。"
         case .rateLimited:
@@ -139,6 +168,23 @@ public enum ReviewSummaryServiceError: Error, LocalizedError, Equatable, Sendabl
             return .firebaseNotConfigured
         }
         return .api
+    }
+}
+
+public struct ProviderRoutingReviewSummaryClient: ReviewSummaryClient {
+    private let gemini: any ReviewSummaryClient
+    private let openAI: any ReviewSummaryClient
+
+    public init(gemini: any ReviewSummaryClient, openAI: any ReviewSummaryClient) {
+        self.gemini = gemini
+        self.openAI = openAI
+    }
+
+    public func generateSummary(_ request: ReviewSummaryRequest) async throws -> ReviewSummaryResponse {
+        switch request.provider {
+        case .gemini: try await gemini.generateSummary(request)
+        case .openAI: try await openAI.generateSummary(request)
+        }
     }
 }
 
