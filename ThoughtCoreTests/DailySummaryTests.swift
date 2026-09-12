@@ -62,6 +62,39 @@ struct DailySummaryTests {
         #expect(try repository.fetchTags(for: thought.id).isEmpty)
     }
 
+    @Test func regenerationKeepsExistingSummaryOnFailureAndReplacesItOnlyOnSuccess() async throws {
+        let start = calendar.startOfDay(for: Date())
+        let thought = Thought(body: "昔の記録を振り返る", createdAt: start.addingTimeInterval(60))
+        let repository = MemoryThoughtRepository(records: [thought])
+        let preview = try PrepareDailySummary(
+            thoughts: repository,
+            tags: repository,
+            relations: repository,
+            authors: repository
+        )(day: start, calendar: calendar)
+        let firstJSON = #"{"overview":"旧Summary","themes":[],"existingTagCandidates":[],"newTagCandidates":[],"thoughtPatterns":[],"deepDives":[],"concerns":[],"thoughtFlow":"","continuationCandidates":[],"carryOvers":[]}"#
+        let first = try await GenerateDailySummary(
+            client: MockReviewSummaryClient(text: firstJSON),
+            repository: repository
+        )(preview: preview, now: start.addingTimeInterval(100))
+
+        await #expect(throws: ReviewSummaryServiceError.network) {
+            try await GenerateDailySummary(
+                client: MockReviewSummaryClient(error: ReviewSummaryServiceError.network),
+                repository: repository
+            )(preview: preview, now: start.addingTimeInterval(200))
+        }
+        #expect(try repository.fetchDailySummary(dayStart: start) == first)
+
+        let updatedJSON = #"{"overview":"再生成したSummary","themes":[],"existingTagCandidates":[],"newTagCandidates":[],"thoughtPatterns":[],"deepDives":[],"concerns":[],"thoughtFlow":"","continuationCandidates":[],"carryOvers":[]}"#
+        let updated = try await GenerateDailySummary(
+            client: MockReviewSummaryClient(text: updatedJSON),
+            repository: repository
+        )(preview: preview, now: start.addingTimeInterval(300))
+        #expect(try repository.fetchDailySummary(dayStart: start) == updated)
+        #expect(try repository.fetchDailySummaries(from: start, to: preview.interval.end) == [updated])
+    }
+
     @Test func sqliteDailySummarySurvivesReopen() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

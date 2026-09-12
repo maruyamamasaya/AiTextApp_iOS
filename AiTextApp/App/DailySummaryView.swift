@@ -3,6 +3,7 @@ import SwiftUI
 struct DailySummarySections: View {
     let summary: DailySummary
     @ObservedObject var store: ThoughtStore
+    var allowsTagChanges = true
     var body: some View {
         Section("概要") { Text(summary.content.overview) }
         valueSection("主なテーマ", summary.content.themes)
@@ -34,7 +35,7 @@ struct DailySummarySections: View {
                             Text(suggestion.reason).font(.caption).foregroundStyle(.secondary)
                             if isAttached(suggestion.tagName, to: thoughtID) {
                                 Text("追加済み").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            } else {
+                            } else if allowsTagChanges {
                                 Button("追加") { store.addTag(named: suggestion.tagName, to: thoughtID) }
                                     .buttonStyle(.bordered).accessibilityLabel("\(thought.body)に\(suggestion.tagName)タグを追加")
                             }
@@ -58,6 +59,82 @@ struct DailySummarySections: View {
     private func isAttached(_ name: String, to thoughtID: UUID) -> Bool {
         let normalized = ThoughtTag.normalize(name)
         return (store.tagsByThoughtID[thoughtID] ?? []).contains { $0.normalizedName == normalized }
+    }
+}
+
+struct SummaryLibraryView: View {
+    @ObservedObject var store: ThoughtStore
+
+    var body: some View {
+        Group {
+            if store.dailySummaries.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("まだサマリーはありません")
+                        .font(.headline)
+                    Text("作成したサマリーがここに新しい順で並びます。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+                .multilineTextAlignment(.center)
+                .accessibilityElement(children: .combine)
+            } else {
+                List(store.dailySummaries) { summary in
+                    NavigationLink {
+                        SummaryReadOnlyDetailView(store: store, summary: summary)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Label("デイリー", systemImage: "calendar")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tint)
+                                Spacer()
+                                Text("\(summary.thoughtCount)件")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(summary.dayStart.formatted(date: .long, time: .omitted))
+                                .font(.headline)
+                            Text(summary.content.overview)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .accessibilityIdentifier("summaryLibraryItem_\(summary.id.uuidString)")
+                }
+                .themedScrollableBackground()
+            }
+        }
+        .themedScreen(.expressive)
+        .navigationTitle("サマリー")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SummaryReadOnlyDetailView: View {
+    @ObservedObject var store: ThoughtStore
+    let summary: DailySummary
+
+    var body: some View {
+        List {
+            Section {
+                Label("デイリーサマリー", systemImage: "calendar")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            DailySummarySections(summary: summary, store: store, allowsTagChanges: false)
+        }
+        .themedScrollableBackground()
+        .themedScreen(.expressive)
+        .navigationTitle(summary.dayStart.formatted(date: .abbreviated, time: .omitted))
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { store.loadDailySummary(for: summary.dayStart) }
     }
 }
 
@@ -187,7 +264,16 @@ private struct DailySummaryDetailView: View {
             }
             if let summary = store.dailySummary {
                 DailySummarySections(summary: summary, store: store)
-                Section { Button("外部脳に残す") { draftInput = store.knowledgeDraftInput(for: summary) } }
+                Section("操作") {
+                    Button("この日を再生成") { store.prepareDailySummary(for: day) }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .disabled(store.dailySummaryDayThoughts.isEmpty || store.isGeneratingDailySummary)
+                        .accessibilityIdentifier("regenerateDailySummaryButton")
+                    Text("送信前プレビューで内容を確認します。新しい生成が成功した場合だけ、現在のSummaryを置き換えます。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button("外部脳に残す") { draftInput = store.knowledgeDraftInput(for: summary) }
+                }
             } else {
                 Section {
                     Button("この日をまとめる") { store.prepareDailySummary(for: day) }

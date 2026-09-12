@@ -7,8 +7,8 @@
 - `AiTextApp/App/AiTextApp.swift` — SwiftUIエントリーポイント、UIテスト用composition。
 - `AiTextApp/App/AppTheme.swift` — Primitive／Semantic／Theme／Effect token、4テーマ、UserDefaults永続化、Reduce Motion対応background、共通Surface、テーマ選択Preview。
 - `AiTextApp/App/ThoughtAnalyticsView.swift` — ローカル分析のサマリーと日別／曜日／時間帯／タグ／Continuation表示。
-- `AiTextApp/App/DailySummaryView.swift` — Human Thoughtだけを示す月カレンダー、日別件数／継続件数、構造化Summary、Human限定の送信前プレビュー。
-- `AiTextApp/App/TimelineView.swift` — `MainTabView`（Home／Mentions／Search／Insights／Profile）、各タブの独立`NavigationStack`、Home右上の投稿Composerと投稿者フィルター、Mention／Reply一覧、検索、分析ハブ、投稿一覧を持たない共通Actor Profile、Profile右上から開くSettings、Thought Detail、History、Continuation Composer、削除UI。
+- `AiTextApp/App/DailySummaryView.swift` — 生成済みサマリーの閲覧専用一覧／詳細、Human Thoughtだけを示す月カレンダー、日別件数／継続件数、構造化Summary、Human限定の送信前プレビュー、要約済み過去日の安全な再生成導線。
+- `AiTextApp/App/TimelineView.swift` — `MainTabView`（Home／Mentions／Search／Insights／Profile）、各タブの独立`NavigationStack`、Home右上の返信2件目以降を畳む切替・投稿Composer・投稿者フィルター、Mention／Reply一覧、検索、サマリー閲覧／生成を分けた分析ハブ、投稿一覧を持たない共通Actor Profile、Profile右上から開くSettings、Thought Detail、History、Continuation Composer、削除UI。
 - `AiTextApp/App/TimelineView.swift`内`ProfileEditorView`／`PersonaIcon` — デフォルト人間の表示名、写真選択・縮小、丸型アイコン表示。
 - `AiTextApp/App/TimelineView.swift`内`PersonaManagementView`／`AIPersonaEditorView` — 複数AI Personaの一覧、追加、編集、無効化。
 - `AiTextApp/App/TimelineView.swift`内`AIPersonaManagementView`／`ActorProfileView` — AI Persona一覧からプロフィールを開き、表示内容と設定を確認・編集する管理導線。

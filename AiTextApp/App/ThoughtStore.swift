@@ -526,6 +526,11 @@ final class ThoughtStore: ObservableObject {
             dailySummary = value
             dailySummaries.removeAll { $0.dayStart == value.dayStart }
             dailySummaries.append(value)
+            dailySummaries.sort {
+                $0.createdAt == $1.createdAt
+                    ? $0.id.uuidString > $1.id.uuidString
+                    : $0.createdAt > $1.createdAt
+            }
             dailySummaryPreview = nil
         } catch ReviewSummaryError.stalePreview { dailySummaryError = "確認後にThoughtが変更されたため送信しませんでした。" }
         catch let error as ReviewSummaryServiceError { dailySummaryError = error.localizedDescription }

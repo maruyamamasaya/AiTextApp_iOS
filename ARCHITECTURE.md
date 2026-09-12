@@ -100,7 +100,7 @@ Thought検索はtrim後の空文字をUI stateで初期状態として扱い、�
 
 タグは表示名を前後trimしてUnicode正規合成し、POSIX localeの小文字表現を`normalized_name`として一意化します。Thought Detailからの追加は、タグの`INSERT OR IGNORE`と`thought_tags`付与を同一transactionで行います。解除も中間行だけをtransaction内で削除し、Thought本文とタグmasterは変更しません。Timeline／本文検索は本文queryと分離したタグ取得を表示に合成し、タグ絞り込みは`ThoughtTagRepository`の独立queryを使います。
 
-Daily SummaryはHumanの概要・テーマ・思考、既存Humanタグ別、任意の時間帯InsightをThought原文と別に1日1件保存します。SQLiteはThought・投稿者Relation・PersonaをJOINしてHumanだけを一括取得し、AI本文をCoreへ渡しません。Preview後も同じHuman限定queryで本文・時刻・投稿者・タグ・Human同士の日内Relationを再取得し、一致したpayloadだけを明示送信します。prompt versionはv3で、既存`content_json`と保存済みv1／v2 Summaryを維持するためDB migrationはありません。
+Daily SummaryはHumanの概要・テーマ・思考、既存Humanタグ別、任意の時間帯InsightをThought原文と別に1日1件保存します。SQLiteはThought・投稿者Relation・PersonaをJOINしてHumanだけを一括取得し、AI本文をCoreへ渡しません。Preview後も同じHuman限定queryで本文・時刻・投稿者・タグ・Human同士の日内Relationを再取得し、一致したpayloadだけを明示送信します。未要約日と要約済みの過去日は同じPreview／生成境界を使い、再生成の通信・decode・保存前検証に失敗した場合は旧Summaryを保持し、成功時だけ`day_start`単位のupsertで置き換えます。prompt versionはv3で、既存`content_json`と保存済みv1／v2 Summaryを維持するためDB migrationはありません。
 
 ## Persistence
 

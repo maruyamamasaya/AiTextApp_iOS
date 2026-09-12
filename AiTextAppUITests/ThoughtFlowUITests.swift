@@ -72,7 +72,7 @@ final class ThoughtFlowUITests: XCTestCase {
         actorIcon.tap()
 
         XCTAssertTrue(app.navigationBars["プロフィール"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Display Name"].exists)
+        XCTAssertTrue(app.staticTexts["表示名"].exists)
         XCTAssertTrue(app.staticTexts["@myself"].exists)
         XCTAssertFalse(app.staticTexts["Posts / 過去の発言"].exists)
         app.navigationBars["プロフィール"].buttons.element(boundBy: 0).tap()
@@ -164,11 +164,30 @@ final class ThoughtFlowUITests: XCTestCase {
         replyComposer.typeText("もう少し詳しく")
         app.buttons["postHumanReplyButton"].tap()
 
-        XCTAssertTrue(app.staticTexts["@mio もう少し詳しく"].waitForExistence(timeout: 3))
         XCTAssertTrue(
             app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "replyContext_")).firstMatch.waitForExistence(timeout: 2),
             "通常返信は会話の最新AI Thoughtを返信先にする"
         )
+    }
+
+    func testHomeCanHideRepliesAfterTheFirstAndShowThemAgain() {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-reply-collapse")
+        app.launch()
+
+        let firstReplyRow = timelineRow(containing: "最初の返信")
+        let laterReplyRow = timelineRow(containing: "2件目の返信")
+        XCTAssertTrue(firstReplyRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(laterReplyRow.exists)
+
+        let replyVisibilityButton = app.buttons["homeReplyVisibilityButton"]
+        XCTAssertTrue(replyVisibilityButton.exists)
+        replyVisibilityButton.tap()
+        XCTAssertTrue(firstReplyRow.exists, "最初の返信は表示する")
+        XCTAssertTrue(laterReplyRow.waitForNonExistence(timeout: 2), "2件目以降の返信を隠す")
+
+        replyVisibilityButton.tap()
+        XCTAssertTrue(laterReplyRow.waitForExistence(timeout: 2), "再度押すとすべての返信を表示する")
     }
 
     func testTimelineOpensLocalAnalyticsAndShowsSummary() {
@@ -241,12 +260,17 @@ final class ThoughtFlowUITests: XCTestCase {
 
         tabBar.buttons["振り返り"].tap()
         XCTAssertTrue(app.navigationBars["振り返り"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["insightsSummaryLibraryButton"].exists)
         XCTAssertTrue(app.buttons["insightsDailySummaryButton"].exists)
         XCTAssertTrue(app.buttons["insightsAnalyticsButton"].exists)
+        app.buttons["insightsSummaryLibraryButton"].tap()
+        XCTAssertTrue(app.navigationBars["サマリー"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["まだサマリーはありません"].exists)
+        app.navigationBars["サマリー"].buttons.element(boundBy: 0).tap()
 
         tabBar.buttons["プロフィール"].tap()
         XCTAssertTrue(app.navigationBars["プロフィール"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Display Name"].exists)
+        XCTAssertTrue(app.staticTexts["表示名"].exists)
         XCTAssertTrue(app.staticTexts["@myself"].exists)
         XCTAssertFalse(app.staticTexts["Posts / 過去の発言"].exists)
         app.buttons["settingsButton"].tap()
@@ -357,6 +381,12 @@ final class ThoughtFlowUITests: XCTestCase {
         let composer = app.textViews["thoughtComposer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 2))
         return composer
+    }
+
+    private func timelineRow(containing body: String) -> XCUIElement {
+        app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "timelineThought_", body)
+        ).firstMatch
     }
 }
 

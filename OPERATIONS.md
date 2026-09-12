@@ -49,7 +49,7 @@ CI/CD、配布用bundle identifier、code signing、provisioning、TestFlight/Ap
 
 通常の持ち出しは画面右上のExportからMarkdown（人間向け）またはJSON（原文バックアップ／将来Import向け）を選び、標準Share SheetでFilesやAirDropへ保存します。Export失敗はSQLiteとComposerを変更しません。
 
-Daily Summaryはアプリ内の日別振り返りとしてSQLiteと外部完全バックアップに含まれます。旧History Reviewの期間要約Export導線は現在提供しません。
+Daily Summaryはアプリ内の日別振り返りとしてSQLiteと外部完全バックアップに含まれます。要約済みの過去日も「この日を再生成」から最新promptで更新できます。新しい生成が失敗した場合は旧Summaryを保持し、成功時だけ同日のSummaryを置き換えます。旧History Reviewの期間要約Export導線は現在提供しません。
 
 ### External Full Backup
 

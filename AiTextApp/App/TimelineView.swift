@@ -61,10 +61,16 @@ struct TimelineView: View {
     @State private var highlightedThoughtID: UUID?
     @State private var composerIsPresented = false
     @State private var selectedAuthorID: UUID?
+    @State private var hidesLaterReplies = false
 
     private var visibleThoughts: [Thought] {
-        guard let selectedAuthorID else { return store.thoughts }
-        return store.thoughts.filter { store.personasByThoughtID[$0.id]?.id == selectedAuthorID }
+        let authorFiltered = selectedAuthorID.map { authorID in
+            store.thoughts.filter { store.personasByThoughtID[$0.id]?.id == authorID }
+        } ?? store.thoughts
+        guard hidesLaterReplies else { return authorFiltered }
+        return authorFiltered.filter { thought in
+            thought.id == store.postNavigationRequest?.thoughtID || !isLaterReply(thought)
+        }
     }
 
     var body: some View {
@@ -134,6 +140,16 @@ struct TimelineView: View {
             .navigationTitle("思考メモ")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        hidesLaterReplies.toggle()
+                    } label: {
+                        Image(systemName: hidesLaterReplies ? "bubble.left" : "bubble.left.and.bubble.right")
+                    }
+                    .accessibilityLabel(hidesLaterReplies ? "返信をすべて表示" : "2件目以降の返信を隠す")
+                    .accessibilityValue(hidesLaterReplies ? "1件だけ表示" : "すべて表示")
+                    .accessibilityIdentifier("homeReplyVisibilityButton")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
@@ -244,6 +260,11 @@ struct TimelineView: View {
             get: { store.errorMessage != nil },
             set: { if !$0 { store.errorMessage = nil } }
         )
+    }
+
+    private func isLaterReply(_ thought: Thought) -> Bool {
+        guard let replyTargetID = store.replyTargetIDsByThoughtID[thought.id] else { return false }
+        return store.replyTargetIDsByThoughtID[replyTargetID] != nil
     }
 }
 
@@ -637,7 +658,15 @@ private struct InsightsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("振り返り") {
+                Section("サマリー") {
+                    NavigationLink {
+                        SummaryLibraryView(store: store)
+                    } label: {
+                        Label("サマリーを見る", systemImage: "doc.text.magnifyingglass")
+                    }
+                    .accessibilityIdentifier("insightsSummaryLibraryButton")
+                }
+                Section("作成") {
                     NavigationLink {
                         DailySummaryCalendarView(store: store)
                     } label: {
@@ -1727,8 +1756,9 @@ private struct AIReplyPreviewView: View {
                     if let brain = preview.externalBrain {
                         LabeledContent("使用Persona", value: preview.persona.displayName)
                         LabeledContent("AGENT.md", value: brain.agentPath)
+                        LabeledContent("取得資料", value: "\(brain.chunks.count)件")
                         VStack(alignment: .leading, spacing: 4) { Text("Retrieval Route").font(.caption).foregroundStyle(.secondary); ForEach(Array(brain.routes.enumerated()), id: \.offset) { Text("\($0.offset + 1). \($0.element)") } }
-                        if brain.chunks.isEmpty { Text("参照資料なし").foregroundStyle(.secondary) }
+                        if brain.chunks.isEmpty { Text("今回の検索語に一致する参照資料はありません。接続・同期の失敗を意味する表示ではありません。").foregroundStyle(.secondary) }
                         ForEach(Array(brain.chunks.enumerated()), id: \.offset) { item in
                             VStack(alignment: .leading, spacing: 4) { Text(item.element.documentPath).font(.subheadline.weight(.semibold)); Text(item.element.heading).font(.caption).foregroundStyle(.secondary); Text(item.element.excerpt).font(.caption).lineLimit(6) }
                         }
@@ -2093,8 +2123,9 @@ private struct AIPostPreviewView: View {
                 Section("External Brain") {
                     if let brain = preview.externalBrain {
                         LabeledContent("AGENT.md", value: brain.agentPath)
+                        LabeledContent("取得資料", value: "\(brain.chunks.count)件")
                         VStack(alignment: .leading, spacing: 4) { Text("選択Route").font(.caption).foregroundStyle(.secondary); ForEach(Array(brain.routes.enumerated()), id: \.offset) { Text("\($0.offset + 1). \($0.element)") } }
-                        if brain.chunks.isEmpty { Text("参照資料なし").foregroundStyle(.secondary) }
+                        if brain.chunks.isEmpty { Text("今回の検索語に一致する参照資料はありません。接続・同期の失敗を意味する表示ではありません。").foregroundStyle(.secondary) }
                         ForEach(Array(brain.chunks.enumerated()), id: \.offset) { item in
                             VStack(alignment: .leading, spacing: 4) { Text(item.element.documentPath).font(.subheadline.weight(.semibold)); Text(item.element.heading).font(.caption).foregroundStyle(.secondary); Text(item.element.excerpt).font(.caption).lineLimit(6) }
                         }
