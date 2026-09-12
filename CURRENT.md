@@ -18,35 +18,35 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - `continues`／`repliesTo`を統合する`LoadConversationThread`を追加し、root、nodes、edges、currentPath、leaves、最新leafをDBから再構築する。Thought DetailはConversation表示へ移行し、通常返信は選択Thoughtではなく最新leafへ、過去地点への返信は`…`内の「この投稿から返信を分岐」へ分離した。会話Primary Actionとタグ／Knowledge Draft／削除などの管理操作も分離した。
 
 - AI Persona追加を妨げていた旧`personas.account_id`単独UNIQUE制約をschema v18で非破壊補修する。旧実機DBはPersona tableをtransaction内で再構築し、Humanの`account_id`へ既存／新規AIを所属させる。Thought author、Mention、AI ConfigurationなどのPersona ID参照を維持し、handleの大文字小文字を無視した一意性は継続する。
-- ユーザー向け表示の日本語化。Home／Mentions／Search／Insights／Profileの5タブ、各画面タイトル、テーマ、AI使用状況、GitHub接続、外部ブレイン、ナレッジ下書きの主な表示を日本語に統一した。開発ドキュメントも日本語を基本とする。
-- 投稿後Navigation統一。Profile > Settings > AIの「AI返信の確認クッション」を任意でONにでき、初期値はOFF、選択は端末へ永続化する。OFFでは手動AI返信も生成からatomic投稿まで連続実行し、ONでは生成内容を確認してから投稿する。@メンションによるPersona AIの自動返信には承認を挟まない。生成・保存失敗時は画面と再試行導線を保持する。通常投稿、Human Reply、Continuation、AI Reply、Persona Postの成功は共通イベントでHome rootへ戻り、新規Thoughtを一時ハイライトする。
-- AI Persona管理とPersona Post依頼を分離。AI Personas一覧は各AIのプロフィール／編集へのリンクを中心とし、投稿操作はSettings > AIの独立した「AIに投稿を依頼」画面でPersonaを選択して依頼文を入力し、既存の送信前Previewへ進む。
+- ユーザー向け表示の日本語化。Home／Mentions／AI機能／Insights／Profileの5タブ、各画面タイトル、テーマ、AI使用状況、GitHub接続、外部ブレイン、ナレッジ下書きの主な表示を日本語に統一した。開発ドキュメントも日本語を基本とする。
+- 投稿後Navigation統一。AI機能タブの「AI返信の確認クッション」を任意でONにでき、初期値はOFF、選択は端末へ永続化する。OFFでは手動AI返信も生成からatomic投稿まで連続実行し、ONでは生成内容を確認してから投稿する。@メンションによるPersona AIの自動返信には承認を挟まない。生成・保存失敗時は画面と再試行導線を保持する。通常投稿、Human Reply、Continuation、AI Reply、Persona Postの成功は共通イベントでHome rootへ戻り、新規Thoughtを一時ハイライトする。
+- AI Persona管理とPersona Post依頼を分離。AI Personas一覧は各AIのプロフィール／編集へのリンクを中心とし、投稿操作はAI機能タブの独立した「AIに投稿を依頼」画面でPersonaを選択して依頼文を入力し、既存の送信前Previewへ進む。
 
-- UI演出プリセットとしてのTheme v1。Default／Dynamic Aurora／Pulse Neon／Blue Cosmosを`Primitive → Semantic → Theme → Effect`で解決し、Home／Mentions／Searchは静かな強度、Insights／Profileは強めの強度で同じ画面構造へ適用する。Profile > Settings > Appearance / Themeでライブプレビュー付き選択を行い、UserDefaultsへ永続化する。AI Thoughtは本文を発光させず専用Edge／Glowだけを加え、Reduce Motion時はambient animationを停止する。
+- UI演出プリセットとしてのTheme v1。Default／Dynamic Aurora／Pulse Neon／Blue Cosmosを`Primitive → Semantic → Theme → Effect`で解決し、Home／Mentionsは静かな強度、AI機能／Insights／Profileは強めの強度で同じ画面構造へ適用する。Profile > Settings > Appearance / Themeでライブプレビュー付き選択を行い、UserDefaultsへ永続化する。AI Thoughtは本文を発光させず専用Edge／Glowだけを加え、Reduce Motion時はambient animationを停止する。
 
 - @ID／Mention／Reply v1。HumanとAI Personaを不変UUIDの共通Actorとして扱い、3〜30文字の一意な小文字handleを設定できる。Composerの`@`候補はHuman／AIを表示し、保存時にActor ID・handle snapshot・UTF-16範囲をschema v16のRelationへ保存する。既存`repliesTo` chain、返信先preview、Actor Profileをhandle表示へ接続し、handle変更後もRelationを維持する。
 
-- GitHub Repository Settings v1。Settings > External Brainからowner／repository／branchを既存UserDefaultsへ、PATを既存Keychainへ分離保存し、Token置換・確認付き削除、Repository変更時のローカルKnowledge保持警告を提供する。既存GitHub Contents clientのread-only接続確認でAuthentication／Repository／Branchとpush権限由来のDraft／Knowledge capability、分類済み接続エラー、rate limit残数を表示する。Draft／Knowledge pathはdomain定義をread-only表示する。
+- GitHub Repository Settings v1。Settings > External Brainからowner／repository／branchを既存UserDefaultsへ、PATを既存Keychainへ分離保存し、Token置換・確認付き削除、Repository変更時のローカルKnowledge保持警告を提供する。既存GitHub Contents clientのread-only接続確認でAuthentication／Repository／Branchとpush権限由来のDraft／Knowledge capability、分類済み接続エラー、rate limit残数を表示する。各AI Personaプロフィールでも設定・同期済みcacheをローカル判定し、明示的なGET接続確認に成功してPersonaのAGENT.mdも同期済みの場合だけ緑ライトと最終確認日時を表示する。接続確認はAI APIを呼ばず、不要なGitHub `/user` 照会も行わない。Draft／Knowledge pathはdomain定義をread-only表示する。
 - Knowledge Quality & Consolidation v1。正式Knowledgeを手動ローカル解析し、正規化title／body一致、本文token類似度、tag重複からDuplicate／Similar候補を、180日未更新かつ未参照からStale候補を提示する。Quality画面でCompare、Dismiss、A/Bを並べたMerge Draft作成を行い、既存Review／Promoteへ戻す。明示操作だけでArchive／Supersedeし、対象pathを通常Retrieval indexから除外する。active KnowledgeのretrievalCount／lastRetrievedAtを記録し、単一のブラックボックスQuality Scoreは持たない。
 - Knowledge Review & Promote Pipeline v1。SQLiteへDraft／provenance／Review状態／GitHub同期状態を永続化し、一覧・FTS検索・状態filter・編集可能Review・Approve／Reject・確認付きPromoteを提供する。`approved`だけを`projects/aitextapp/knowledge/`へnew-file-onlyで昇格し、成功時だけKnowledgeDocument、path、SHA、promotedAtを保存してローカルExternal Brain FTSへ即時反映する。Review操作はAI APIを呼ばず、lifecycle analyticsへsource type付きで記録する。
 - Persona External Brain v2 / Knowledge Draft Pipeline。AI Reply／Persona Post／Daily Summaryから明示操作後だけAIでMarkdown Draftを生成し、decision／knowledge／memory／project-noteを選択できる。ローカルFTSで関連する既存資料を最大3件確認し、編集可能Previewで内容と安全な`drafts/`保存先をHuman Reviewした後、既存Keychain tokenでGitHubへnew-file-only保存する。AI生成とGitHub保存は別操作で、保存失敗時もDraftを保持する。保存した`status: draft`は通常RAG対象外で、正式Knowledgeへの昇格は後続の明示Review／Promote Pipelineだけが行う。Knowledge Draft生成はUsage Analyticsへ記録し、GitHub writeはAI Callへ数えない。
 
-- External Brain Routing v1。Persona別AGENT.mdのRetrieval RouteをAI Replyだけでなく独立Persona Postにも適用し、依頼文を検索queryとして最大5チャンクを取得する。空白で単語分割できない日本語自然文はtrigramへ展開し、長い一文との完全一致を要求せず関連Knowledgeを検索する。長いheading chunkは先頭固定ではなく検索一致箇所の周辺をAIへ渡す。送信前にroute／source／heading／excerpt／最終payloadを確認でき、Usage metadataへ使用有無とchunk数を記録する。Daily SummaryにはPersona routeを適用しない。
-- AI API Usage Analytics v1。設定の「AI」から使用状況Dashboardを開く。AI API Callをschema v12内の独立したローカルMetadataとして記録し、AI Reply／Daily Summary／Persona Post／Knowledge Draftを共通Recorderへ統合する。Knowledge Draftはsource typeも保持する。Persona／Feature／Provider／Model別件数、成功率、Error、Latency、日別推移を集計し、External Brain使用有無・取得chunk数も保持する。token usageはproviderから取得できる場合だけ実測保存し、現状はnilのまま文字数を常時記録する。prompt／response／Thought／External Brain本文はUsage DBへ保存せず、Telemetry保存失敗は既存AI機能を失敗させない。
+- External Brain Routing v1。Persona別AGENT.mdのRetrieval RouteをAI Replyだけでなく独立Persona Postにも適用し、依頼文を検索queryとして最大5チャンクを取得する。空白で単語分割できない日本語自然文はtrigramへ展開し、長い一文との完全一致を要求せず関連Knowledgeを検索する。長いheading chunkは先頭固定ではなく検索一致箇所の周辺を1件最大2,000文字、合計最大約10,000文字までAIへ渡す。送信前にroute／source／heading／excerpt／最終payloadを確認でき、Usage metadataへ使用有無とchunk数を記録する。Daily SummaryにはPersona routeを適用しない。
+- AI API Usage Analytics v1。AI機能タブから使用状況Dashboardを開く。AI API Callをschema v12内の独立したローカルMetadataとして記録し、AI Reply／Daily Summary／Persona Post／Knowledge Draftを共通Recorderへ統合する。Knowledge Draftはsource typeも保持する。Persona／Feature／Provider／Model別件数、成功率、Error、Latency、日別推移を集計し、External Brain使用有無・取得chunk数も保持する。token usageはproviderから取得できる場合だけ実測保存し、現状はnilのまま文字数を常時記録する。prompt／response／Thought／External Brain本文はUsage DBへ保存せず、Telemetry保存失敗は既存AI機能を失敗させない。
 - Persona External Brain v1。単一GitHub RepositoryとPersona別AGENT.md／Retrieval Routeを使い、MarkdownをApplication SupportへSHA差分同期してheading単位のSQLite FTS5 indexから最大5チャンクを取得する。AI Reply送信前Previewで資料と最終payloadを確認できる。GitHubはread-only、tokenはKeychain保存で、障害時はcacheまたはExternal Brainなしで返信を継続する。
 
-- `TabView`によるHome／Mentions／Search／Insights／Profileの5タブ。各タブは独立した`NavigationStack`を持ち、Home右上の鉛筆から投稿Composerを開き、隣のフィルターから投稿者単位でTimelineを絞り込む。MentionsはHuman／AI Persona宛てのMention・Reply、Searchは本文検索、InsightsはDaily Summary／Analytics、Profileは投稿一覧を持たない共通Actor Profile UIを表示する。SettingsはProfile右上へ集約する。
+- `TabView`によるHome／Mentions／AI機能／Insights／Profileの5タブ。各タブは独立した`NavigationStack`を持つ。Home上部の検索欄で本文検索し、右上の鉛筆から投稿Composerを開き、隣のフィルターから投稿者単位でTimelineを絞り込む。MentionsはHuman／AI Persona宛てのMentionとReplyをセグメントで分け、Homeと同じThought行デザインで表示する。AI機能はAI投稿依頼、AIペルソナ設定、AI使用状況、生成設定、OpenAI API key、外部ブレイン、ナレッジ下書きを集約する。InsightsはDaily Summary／Analytics、Profileは投稿一覧を持たない共通Actor Profile UIを表示し、一般設定はProfile右上へ置く。
 - ローカルの単一人間Persona基盤。SQLite schema v6の`personas`／`thought_authors`で既存・新規Thoughtを固定のデフォルト人間へ紐づけ、表示名と512px以下へ正方形化したJPEGアイコンをSQLite内へ保存する。
 - Timelineの投稿者名・丸型アイコン表示と、写真選択／削除／表示名編集を行うプロフィール画面。未設定時は標準人物アイコンを表示し、プロフィール変更を既存Thoughtへ一括反映する。
 - 複数AI Personaの作成・編集・無効化UIと、投稿ごとの実Persona表示。任意Persona IDでThoughtを原子的に保存でき、通信はユーザーの明示操作時だけ行う。
 - AI Personaごとの役割・指示設定と、明示的な「投稿を依頼」導線。ユーザー依頼と最終payloadをプレビューし、確定後だけFirebase AI Logicを呼び、140文字以内の成功応答だけをAI Persona名義でTimelineへ保存する。
 - SQLite schema v7の`ai_persona_configurations`／`ai_post_generations`。AI設定と生成来歴をThought本文から分離し、Thought・投稿者・provider／model／prompt version／ユーザー依頼を同一transactionで保存する。自動投稿は行わない。
-- AI Personaへの単一メンションv1。Timeline ComposerでactiveなAIを選択し、schema v8の`thought_mentions`へ本文と同じtransactionでPersona IDを保存する。Timelineは現在のPersona名を`@名前`で表示し、メンションだけではAI通信を開始しない。
+- AI Personaへの単一メンションv1。Timeline ComposerでactiveなAIを選択すると本文に`@handle`を挿入し、別Personaへの切替時は選択済みhandleを置換、解除時は本文からも除く。schema v8の`thought_mentions`へ本文と同じtransactionでPersona IDを保存する。Timelineは現在のPersona名を`@名前`で表示し、メンションだけではAI通信を開始しない。
 - メンション付きThoughtから明示的に依頼するAI返信v1。送信前にAI、対象Thought、役割、指示、最終payload、provider／modelを確認し、対象Thoughtだけを送る。成功した140文字以内の応答はAI名義Thought、`repliesTo` Relation、返信先を含む生成来歴としてschema v9へatomic保存する。同一Thoughtへの複数返信を許可し、Detailで返信一覧を確認できる。
 - AI Reply Context v1。対象Thoughtから`repliesTo`だけを遡る直近最大5件を、Human／AI投稿者付き・古い順で送信前previewとpromptへ含める。削除済み本文、Continuation、重複、cycleを除外し、送信直前のContext再取得でThought・Relation・投稿者・対象が変わっていればAIを呼ばない。Mentionだけでは通信しない。AI Replyへの人間返信は相手AIを自動メンションして同じReply chainへatomic保存する。
 - AI Persona Reply v2。HumanがAI ThoughtへReplyすると相手AIをRelationから引き継ぎ、Reply Thread、Role／Instructions、同Personaの直近5発言、任意のExternal Brainで既存AI Reply promptを組み立てる。同一Human ReplyへのAI生成済みReplyはCore／SQLite双方で拒否する。Persona別`Auto Reply`はschema v17へ永続化し、既定ON。ONではHumanの@メンションを起点に承認なしで生成・atomic投稿する。AI投稿を起点にしないためAI同士の自動連鎖は行わない。
-- Timeline Reply Context。Human／AI双方の返信を通常Timelineへ独立Thoughtとして表示し、`repliesTo`から取得した返信先Personaと本文を最大2行の文脈として添える。Human／AI返信の保存が成功したらDetailを閉じてTimelineへ戻り、失敗時は入力と画面を保持する。返信先本文は複製保存せず、削除済みの場合もRelationを保持してplaceholderを表示する。schema v15は`user_version`だけ進んで旧`continues`限定制約が残ったDBを実定義から検知・非破壊補修し、起動時DB health checkでその他の破損・必須schema欠落を即時検知する。
-- Homeの返信表示切替。Home右上の会話ボタンで、rootに対する最初の返信は残したまま、返信への返信（2件目以降）を一時的に畳める。再度押すと全返信を表示し、投稿直後の返信は畳み中でも一時表示して投稿結果を確認できる。
+- Timeline Reply Context。Human／AI双方の返信を通常Timelineへ独立Thoughtとして表示し、`repliesTo`から取得した返信先Personaと本文を1行の文脈として添える。長い返信先本文は末尾を省略し、返信行の縦間隔を通常Thoughtより詰める。Human／AI返信の保存が成功したらDetailを閉じてTimelineへ戻り、失敗時は入力と画面を保持する。返信先本文は複製保存せず、削除済みの場合もRelationを保持してplaceholderを表示する。schema v15は`user_version`だけ進んで旧`continues`限定制約が残ったDBを実定義から検知・非破壊補修し、起動時DB health checkでその他の破損・必須schema欠落を即時検知する。
+- Homeの返信表示切替。Homeはデフォルトで、rootに対する最初の返信だけを残し、返信への返信（2件目以降）を畳む。Home右上の会話ボタンで全返信との表示を切り替え、投稿直後の返信は畳み中でも一時表示して投稿結果を確認できる。
 - Daily Summary v3。`ThoughtRepository.fetchHumanThoughts(from:to:)`が`thought_authors`と`personas.kind`をRepository／SQLite JOINで判定し、期間内・未削除のHuman Thoughtだけを取得する。AI投稿／自動返信／返信／フリートーク本文はprompt・件数・タグ・テーマ・思考の流れ・Continuation集計から完全に除外する。Mention先は判定に影響しない。要約済みの過去日も「この日を再生成」から最新promptで送信前Previewへ進み、新しい生成が成功した場合だけ日付単位で旧Summaryを置き換える。既存v1／v2 Summaryと`aiInteractions`は削除せず後方互換で読めるが、新規v3生成では`aiInteractions`を要求・保存しない。AI側の活動は将来の独立したAI Summaryの責務とする。
 - サマリー閲覧専用ページ。振り返りから生成済みサマリーを種別・対象日・概要付きで新しい順に確認でき、詳細には再生成・外部脳保存・タグ追加などの変更操作を置かない。現時点の種別はデイリーだけだが、生成カレンダーと閲覧導線を分離して将来の週次／月次追加先を明確にする。
 - AI Tag Suggestions。Daily SummaryがHuman Thoughtのprompt連番単位でタグ名・理由を提案し、生成後に有効なHuman indexだけを内部Thought IDへ解決する。確定タグ分析とは分離し、不正indexとAI Thought候補を除外する。Detailの「追加」を押した場合だけ既存`ThoughtTagRepository`の独立transactionで確定タグにする。
@@ -64,7 +64,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
 - `PRAGMA user_version`によるschema version管理（現在v19）。v14は実カラム補修、v15はReply Relation制約補修、v16はActor handle／Mention snapshot、v17はAI Persona Auto Reply、v18は旧`account_id`単独UNIQUE制約の非破壊補修、v19はAI Persona providerを非破壊追加する。
 - Home右上の鉛筆アイコンから開き、入力へ自動focusする投稿Composer。投稿操作はNavigation bar右上に置き、空入力や140文字超過時は無効化する。
-- Lazy Timeline、自然な相対日時、メニュー内削除、Empty State。
+- Lazy Timeline、自然な相対日時、Thought本文のコピー、メニュー内削除、Empty State。Timeline・詳細・会話履歴の各操作メニューから本文全体をペーストボードへコピーできる。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。
 - iOS 16以降用SwiftUIアプリ、Xcode project/shared scheme。
 - 投稿ルール、順序、Unicode、削除、ファイル再読込のSwift Testingテスト。
@@ -95,7 +95,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - Thought本文・promptを含まないAI要約専用Export modelと、将来の解析／再Importを見据えたJSON schema v1。
 - `latest`／`previous`の外部2世代、version・schema・サイズ・SHA-256を持つmanifest、作成後検証と失敗時rollback。
 - security-scoped bookmarkによる保存先再利用、Restore事前検証・確認UI・次回起動前のatomic適用と現DB rollback。
-- Timelineから開くThought検索画面。標準`.searchable`で本文の部分一致検索を入力中に更新し、空入力の初期状態、0件表示、日時、新しい順、Detail遷移を提供。
+- Home上部の標準`.searchable`で本文の部分一致検索を入力中に更新し、0件表示、日時、新しい順、Detail遷移を提供。
 - `ThoughtRepository.search(query:)`検索境界と、SQLiteのbind済み`LIKE ... ESCAPE` query、テスト用Memory Repository実装。前後空白、`%`／`_`のliteral検索、deleted除外に対応（検索導入自体ではschema変更なし）。
 - Thought原文と分離した`ThoughtTag`／`ThoughtTagRepository`、SQLite schema v4の`tags`／`thought_tags`。正規化名と複合主キーでタグ名・付与の重複を防止。
 - Thought Detailのタグ確認・編集、既存タグ付与、新規タグ作成、個別解除。Timeline／本文検索結果の最大2件＋省略表示、タグ一覧、タグ別Thought一覧、既存Detailへの遷移。

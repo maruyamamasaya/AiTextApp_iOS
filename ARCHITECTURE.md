@@ -46,7 +46,7 @@ SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
 - `MentionsView`: 保存済みMention relationと`repliesTo` relationから、Human／AI Persona宛ての受信項目を新しい順で表示する。
 - `SearchTabView`: 現在はThought本文検索を提供し、将来Persona／Tag／Knowledge検索を追加できる独立タブ境界。
 - `InsightsView`: Daily Summary CalendarとThought Analyticsをまとめ、週次・月次分析を追加できる分析ハブ。
-- `ActorProfileView`: Human／AI共通のプロフィール表示。自分のProfileタブでは編集とSettingsへのToolbar導線を追加する。
+- `ActorProfileView`: Human／AI共通のプロフィール表示。自分のProfileタブでは編集とSettingsへのToolbar導線を追加する。AIではPersona別External Brain設定、Repository、Keychain token、同期済みAGENT cacheをローカル評価し、明示GET確認が成功した場合だけ接続済みの緑ライトを表示する。
 - `ThoughtAnalyticsView`: 直近30日の基本サマリー、日別／曜日別／時間帯別分布、上位タグ、Continuation件数を標準SwiftUIの縦Sectionと簡易バーで表示する完全ローカル画面。
 - `AIAPIUsageAnalyticsView`: 今日／7日／30日／全期間のAI Call、成功率、文字数または完全な実測token、Feature／Persona／Provider・Model／Error、Latency、External Brain、日別推移をSQLiteだけで表示する。
 - `DailySummaryCalendarView`: 月単位で要約済み／Thoughtあり未要約／Thoughtなしを表示し、日別詳細と明示生成の送信前プレビューへ遷移する。
@@ -124,3 +124,5 @@ application composition rootはローカル`GoogleService-Info.plist`を検証�
 ## GitHub Repository Settings
 
 External Brainのowner／repository／branchは`ExternalBrainManager`が既存UserDefaults keyへ保存し、Read、sync、Draft new-file-only保存、Promoteの全経路が同じ設定を参照する。PATは`ExternalBrainTokenStore`だけがKeychainへ保存し、UserDefaults、SQLite、Markdown、Usageへ渡さない。接続確認は既存`GitHubExternalBrainRemote`によるGETだけでAuthentication、Repository、Branchを検証し、repository permissionsのpush値からDraft／Knowledge capabilityを推定する。接続確認は設定保存とは独立し、失敗しても設定とローカルKnowledgeを保持する。
+
+AI Personaプロフィールの接続チェッカーはAI生成clientを呼ばない。未確認時はPersona有効化、AGENT path、Repository、Keychain token、同期済みcacheだけを端末内で判定し、明示確認時はRepositoryとBranchの2 GETだけを行う。Repository応答自体で認証とread権限を確認できるため、独立した`/user`照会は行わない。緑表示は直近の明示確認でAuthentication／Repository／Branchがすべて成功し、そのPersonaのAGENT.mdも同期済みの場合に限定する。GitHubだけ確認できてAGENT.mdが未同期なら同期が必要な橙表示とし、設定またはtoken変更時は確認結果と日時を破棄する。

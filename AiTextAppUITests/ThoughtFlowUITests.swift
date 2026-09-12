@@ -40,6 +40,24 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertFalse(postedThought.waitForExistence(timeout: 1), "削除確定後はTimelineから消える")
     }
 
+    func testThoughtBodyCopyActionIsAvailableFromTimelineMenu() {
+        let composer = openComposer()
+        let body = "コピーするThought"
+        composer.tap()
+        composer.typeText(body)
+        app.buttons["postButton"].tap()
+
+        XCTAssertTrue(app.staticTexts[body].waitForExistence(timeout: 2))
+        let menu = app.buttons.matching(identifier: "thoughtMenu").firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 2))
+        menu.tap()
+
+        let copy = app.buttons["本文をコピー"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 2))
+        copy.tap()
+        XCTAssertFalse(copy.exists, "コピー後に操作メニューを閉じる")
+    }
+
     func testMentionSuggestionsAppearBelowComposerAndInsertSelection() {
         let composer = openComposer()
         composer.typeText("@")
@@ -55,6 +73,17 @@ final class ThoughtFlowUITests: XCTestCase {
         suggestion.tap()
         XCTAssertTrue((composer.value as? String)?.contains("@mio ") == true)
         XCTAssertFalse(suggestion.exists)
+    }
+
+    func testMentionMenuSelectionInsertsHandleIntoEmptyComposer() {
+        let composer = openComposer()
+        app.buttons["mentionPersonaMenu"].tap()
+
+        let mioMenuItem = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "@mio")).firstMatch
+        XCTAssertTrue(mioMenuItem.waitForExistence(timeout: 2))
+        mioMenuItem.tap()
+
+        XCTAssertTrue((composer.value as? String)?.contains("@mio ") == true, "AI Personaの選択をThought本文に反映する")
     }
 
     func testActorIconOpensReadOnlyProfileAndPostDetail() {
@@ -170,7 +199,7 @@ final class ThoughtFlowUITests: XCTestCase {
         )
     }
 
-    func testHomeCanHideRepliesAfterTheFirstAndShowThemAgain() {
+    func testHomeHidesRepliesAfterTheFirstByDefaultAndCanShowThem() {
         app.terminate()
         app.launchArguments.append("--ui-testing-reply-collapse")
         app.launch()
@@ -178,16 +207,16 @@ final class ThoughtFlowUITests: XCTestCase {
         let firstReplyRow = timelineRow(containing: "最初の返信")
         let laterReplyRow = timelineRow(containing: "2件目の返信")
         XCTAssertTrue(firstReplyRow.waitForExistence(timeout: 5))
-        XCTAssertTrue(laterReplyRow.exists)
+        XCTAssertTrue(laterReplyRow.waitForNonExistence(timeout: 2), "2件目以降の返信はデフォルトで隠す")
 
         let replyVisibilityButton = app.buttons["homeReplyVisibilityButton"]
         XCTAssertTrue(replyVisibilityButton.exists)
         replyVisibilityButton.tap()
         XCTAssertTrue(firstReplyRow.exists, "最初の返信は表示する")
-        XCTAssertTrue(laterReplyRow.waitForNonExistence(timeout: 2), "2件目以降の返信を隠す")
+        XCTAssertTrue(laterReplyRow.waitForExistence(timeout: 2), "押すとすべての返信を表示する")
 
         replyVisibilityButton.tap()
-        XCTAssertTrue(laterReplyRow.waitForExistence(timeout: 2), "再度押すとすべての返信を表示する")
+        XCTAssertTrue(laterReplyRow.waitForNonExistence(timeout: 2), "再度押すと2件目以降の返信を隠す")
     }
 
     func testTimelineOpensLocalAnalyticsAndShowsSummary() {
@@ -221,9 +250,7 @@ final class ThoughtFlowUITests: XCTestCase {
             app.buttons["postButton"].tap()
         }
 
-        app.tabBars.buttons["検索"].tap()
-        XCTAssertTrue(app.navigationBars["検索"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.descendants(matching: .any)["thoughtSearchInitialState"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["思考メモ"].waitForExistence(timeout: 2))
 
         let searchField = app.searchFields.firstMatch
         XCTAssertTrue(searchField.waitForExistence(timeout: 2))
@@ -231,7 +258,7 @@ final class ThoughtFlowUITests: XCTestCase {
         searchField.typeText("検索対象")
 
         let results = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "searchResult_")
+            NSPredicate(format: "identifier BEGINSWITH %@", "timelineThought_")
         )
         XCTAssertEqual(results.count, 1)
         XCTAssertTrue(app.staticTexts["検索対象のThought"].exists)
@@ -245,18 +272,38 @@ final class ThoughtFlowUITests: XCTestCase {
     func testFiveTabsMentionsProfileAndSettingsNavigation() {
         let tabBar = app.tabBars.firstMatch
         XCTAssertTrue(tabBar.waitForExistence(timeout: 5))
-        for title in ["ホーム", "メンション", "検索", "振り返り", "プロフィール"] {
+        for title in ["ホーム", "メンション", "AI機能", "振り返り", "プロフィール"] {
             XCTAssertTrue(tabBar.buttons[title].exists, "\(title)タブを表示する")
         }
+
+        tabBar.buttons["AI機能"].tap()
+        XCTAssertTrue(app.navigationBars["AI機能"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["aiPersonasButton"].exists)
+        XCTAssertTrue(app.buttons["aiUsageAnalyticsButton"].exists)
+        XCTAssertTrue(app.buttons["externalBrainSettingsButton"].exists)
+        tabBar.buttons["ホーム"].tap()
 
         let composer = openComposer()
         composer.tap()
         composer.typeText("@myself メンション確認")
         app.buttons["postButton"].tap()
 
+        app.staticTexts["@myself メンション確認"].tap()
+        XCTAssertTrue(app.navigationBars["Thought"].waitForExistence(timeout: 2))
+        app.buttons["writeReplyButton"].tap()
+        let replyComposer = app.textViews["humanReplyComposer"]
+        XCTAssertTrue(replyComposer.waitForExistence(timeout: 2))
+        replyComposer.typeText("リプライ確認")
+        app.buttons["postHumanReplyButton"].tap()
+
         tabBar.buttons["メンション"].tap()
         XCTAssertTrue(app.navigationBars["メンション"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.segmentedControls["mentionsKindPicker"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.segmentedControls["mentionsKindPicker"].buttons["メンション"].isSelected)
         XCTAssertTrue(app.staticTexts["@myself メンション確認"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["リプライ確認"].exists)
+        app.segmentedControls["mentionsKindPicker"].buttons["リプライ"].tap()
+        XCTAssertTrue(app.staticTexts["リプライ確認"].waitForExistence(timeout: 2))
 
         tabBar.buttons["振り返り"].tap()
         XCTAssertTrue(app.navigationBars["振り返り"].waitForExistence(timeout: 2))
@@ -315,7 +362,7 @@ final class ThoughtFlowUITests: XCTestCase {
             app.navigationBars["外観とテーマ"].buttons.element(boundBy: 0).tap()
             app.navigationBars["設定"].buttons["完了"].tap()
 
-            for tab in ["ホーム", "メンション", "検索", "振り返り", "プロフィール"] {
+            for tab in ["ホーム", "メンション", "AI機能", "振り返り", "プロフィール"] {
                 tabBar.buttons[tab].tap()
                 XCTAssertTrue(tabBar.buttons[tab].isSelected)
                 add(XCTAttachment(screenshot: app.screenshot(), quality: .medium).named("Theme-\(theme)-\(tab)"))

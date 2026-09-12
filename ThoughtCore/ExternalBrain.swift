@@ -62,6 +62,38 @@ public struct GitHubRepositoryCapabilities: Equatable, Sendable {
     }
 }
 
+public enum PersonaExternalBrainConnectionStatus: Equatable, Sendable {
+    case disabled
+    case invalidAgentPath
+    case repositoryNotConfigured
+    case tokenMissing
+    case verificationNeeded(hasLocalCache: Bool)
+    case synchronizationNeeded
+    case verified
+    case failed(GitHubConnectionIssue)
+
+    public static func resolve(
+        configuration: PersonaExternalBrainConfiguration,
+        repositoryConfigured: Bool,
+        hasToken: Bool,
+        hasCachedAgent: Bool,
+        capabilities: GitHubRepositoryCapabilities?
+    ) -> Self {
+        guard configuration.enabled else { return .disabled }
+        guard ExternalBrainPath.isSafe(configuration.agentPath) else { return .invalidAgentPath }
+        guard repositoryConfigured else { return .repositoryNotConfigured }
+        guard hasToken else { return .tokenMissing }
+        if let issue = capabilities?.issue { return .failed(issue) }
+        if let capabilities,
+           capabilities.authentication,
+           capabilities.repositoryRead,
+           capabilities.branchRead {
+            return hasCachedAgent ? .verified : .synchronizationNeeded
+        }
+        return .verificationNeeded(hasLocalCache: hasCachedAgent)
+    }
+}
+
 public protocol GitHubRepositoryConnectionTesting: Sendable {
     func testConnection(configuration: ExternalBrainRepositoryConfiguration, token: String) async throws -> GitHubRepositoryCapabilities
 }
@@ -235,6 +267,7 @@ public enum ExternalBrainError: Error, LocalizedError, Equatable {
 }
 
 public final class ExternalBrainIndex: @unchecked Sendable {
+    public static let excerptCharacterLimit = 2_000
     private var db: OpaquePointer?; private let lock = NSLock()
     public init(url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -301,7 +334,7 @@ public final class ExternalBrainIndex: @unchecked Sendable {
         guard !terms.isEmpty else { return nil }
         return terms.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: " OR ")
     }
-    private func excerpt(from content: String, matching terms: [String], maximum: Int = 600) -> String {
+    private func excerpt(from content: String, matching terms: [String], maximum: Int = ExternalBrainIndex.excerptCharacterLimit) -> String {
         guard content.count > maximum else { return content }
         let matchedOffset = terms.compactMap { term in
             content.range(of: term, options: [.caseInsensitive, .diacriticInsensitive]).map {

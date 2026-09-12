@@ -8,7 +8,7 @@ struct MainTabView: View {
     @State private var selection: Tab = .home
     @State private var navigationResetID = UUID()
 
-    private enum Tab: Hashable { case home, mentions, search, insights, profile }
+    private enum Tab: Hashable { case home, mentions, ai, insights, profile }
 
     var body: some View {
         TabView(selection: $selection) {
@@ -24,11 +24,11 @@ struct MainTabView: View {
                 .tag(Tab.mentions)
                 .accessibilityIdentifier("mentionsTab")
 
-            SearchTabView(store: store)
+            AIFeaturesView(store: store)
                 .id(navigationResetID)
-                .tabItem { Label("検索", systemImage: "magnifyingglass") }
-                .tag(Tab.search)
-                .accessibilityIdentifier("searchTab")
+                .tabItem { Label("AI機能", systemImage: "cpu") }
+                .tag(Tab.ai)
+                .accessibilityIdentifier("aiFeaturesTab")
 
             InsightsView(store: store)
                 .id(navigationResetID)
@@ -61,9 +61,13 @@ struct TimelineView: View {
     @State private var highlightedThoughtID: UUID?
     @State private var composerIsPresented = false
     @State private var selectedAuthorID: UUID?
-    @State private var hidesLaterReplies = false
+    @State private var hidesLaterReplies = true
+    @State private var searchQuery = ""
 
     private var visibleThoughts: [Thought] {
+        if store.hasSearchQuery {
+            return store.searchResults
+        }
         let authorFiltered = selectedAuthorID.map { authorID in
             store.thoughts.filter { store.personasByThoughtID[$0.id]?.id == authorID }
         } ?? store.thoughts
@@ -139,6 +143,12 @@ struct TimelineView: View {
             .animation(.easeOut(duration: 0.2), value: store.thoughts.map(\.id))
             .navigationTitle("思考メモ")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(
+                text: $searchQuery,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "Thought本文を検索"
+            )
+            .onChange(of: searchQuery) { store.search($0) }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -230,9 +240,12 @@ struct TimelineView: View {
 
     private var emptyState: some View {
         VStack(spacing: 6) {
-            Text(selectedAuthorID == nil ? "まだThoughtはありません" : "このユーザーのThoughtはありません")
+            Image(systemName: store.hasSearchQuery ? "text.magnifyingglass" : "square.and.pencil")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+            Text(emptyStateTitle)
                 .font(.headline)
-            Text("右上の鉛筆から\n140文字以内で残してみましょう。")
+            Text(emptyStateDetail)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -241,6 +254,18 @@ struct TimelineView: View {
         .padding(.horizontal, 24)
         .multilineTextAlignment(.center)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(store.hasSearchQuery ? "thoughtSearchEmptyState" : "timelineEmptyState")
+    }
+
+    private var emptyStateTitle: String {
+        if store.hasSearchQuery { return "一致するThoughtはありません" }
+        return selectedAuthorID == nil ? "まだThoughtはありません" : "このユーザーのThoughtはありません"
+    }
+
+    private var emptyStateDetail: String {
+        store.hasSearchQuery
+            ? "別のキーワードを試してください。"
+            : "右上の鉛筆から\n140文字以内で残してみましょう。"
     }
 
     private var selectedAuthorName: String? {
@@ -368,7 +393,7 @@ private struct NewThoughtComposerView: View {
                 Button("\(persona.displayName)  @\(persona.handle)") { store.insertMention(persona) }
             }
             if store.selectedMentionPersona != nil {
-                Button("メンションを外す", role: .destructive) { store.selectedMentionPersona = nil }
+                Button("メンションを外す", role: .destructive) { store.removeSelectedMention() }
             }
         } label: {
             Label("メンション", systemImage: "at")
@@ -440,8 +465,6 @@ private struct SettingsView: View {
     @ObservedObject var store: ThoughtStore
     @EnvironmentObject private var themeController: ThemeController
     @Environment(\.dismiss) private var dismiss
-    @State private var openAIAPIKey = ""
-    @State private var confirmsOpenAIAPIKeyRemoval = false
 
     var body: some View {
         NavigationStack {
@@ -457,88 +480,6 @@ private struct SettingsView: View {
                         }
                     }
                     .accessibilityIdentifier("appearanceThemeButton")
-                }
-
-                Section("AI") {
-                    LabeledContent("Daily Summary") {
-                        Text("OpenAI · \(ReviewSummaryAIConfiguration.openAIModelName) · medium")
-                            .foregroundStyle(.secondary)
-                    }
-                    Picker("Knowledge DraftのAI Provider", selection: $store.knowledgeDraftAIProvider) {
-                        ForEach(AIProvider.allCases) { provider in
-                            Text(provider.displayName).tag(provider)
-                        }
-                    }
-                    .accessibilityIdentifier("knowledgeDraftAIProviderPicker")
-                    Text("Knowledge Draft: \(store.knowledgeDraftAIProvider.defaultModel) · medium。AIペルソナの投稿・手動返信・自動返信はPersonaごとにProviderを選択でき、どちらもlowで生成します。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    LabeledContent("OpenAI API key", value: store.hasOpenAIAPIKey ? "Keychainに設定済み" : "未設定")
-                    SecureField("新しいOpenAI API key", text: $openAIAPIKey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .privacySensitive()
-                        .accessibilityIdentifier("openAIAPIKeyField")
-                    Button("OpenAI API keyを保存") {
-                        if store.saveOpenAIAPIKey(openAIAPIKey) { openAIAPIKey = "" }
-                    }
-                    .disabled(openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("saveOpenAIAPIKeyButton")
-                    if store.hasOpenAIAPIKey {
-                        Button("OpenAI API keyを削除", role: .destructive) {
-                            confirmsOpenAIAPIKeyRemoval = true
-                        }
-                    }
-                    if let message = store.openAIAPIKeyMessage {
-                        Text(message).font(.footnote).foregroundStyle(.secondary)
-                    }
-                    Text("自分の端末だけで使う暫定構成です。キーはこの端末限定のKeychainへ保存されますが、配布用アプリでは安全なバックエンドへ移行してください。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    Toggle(
-                        "AI返信の確認クッション",
-                        isOn: Binding(
-                            get: { store.aiReplyPreviewPreference == .alwaysShow },
-                            set: { store.aiReplyPreviewPreference = $0 ? .alwaysShow : .skip }
-                        )
-                    )
-                    .accessibilityIdentifier("aiReplyPreviewPreference")
-                    Text("OFFではAI返信を生成後そのまま投稿します。ONでは手動で返信を依頼したとき、生成内容を確認してから投稿できます。@メンションによる自動返信には確認を挟みません。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    NavigationLink {
-                        AIPostRequestView(store: store)
-                    } label: {
-                        Label("AIに投稿を依頼", systemImage: "square.and.pencil")
-                    }
-                    .accessibilityIdentifier("aiPostRequestPageButton")
-
-                    NavigationLink {
-                        AIPersonaManagementView(store: store)
-                    } label: {
-                        Label("AIペルソナ", systemImage: "person.2.badge.gearshape")
-                    }
-                    .accessibilityIdentifier("aiPersonasButton")
-
-                    NavigationLink {
-                        AIAPIUsageAnalyticsView(store: store)
-                    } label: {
-                        Label("AI使用状況", systemImage: "waveform.path.ecg")
-                    }
-                    .accessibilityIdentifier("aiUsageAnalyticsButton")
-
-                    NavigationLink { ExternalBrainSettingsView(store: store) } label: {
-                        HStack {
-                            Label("外部ブレイン", systemImage: "brain.head.profile")
-                            Spacer()
-                            Text(store.externalBrainManager.repository.isConfigured ? (store.externalBrainManager.connectionCapabilities?.issue == nil && store.externalBrainManager.connectionCapabilities != nil ? "接続済み" : "設定済み") : "未設定")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    NavigationLink { KnowledgeManagementView(store: store) } label: { Label("ナレッジ下書き", systemImage: "doc.text.magnifyingglass") }
                 }
 
                 Section("データ") {
@@ -574,81 +515,237 @@ private struct SettingsView: View {
             .sheet(item: $store.exportArtifact) { artifact in
                 ShareSheet(url: artifact.url, onFailure: store.sharingFailed)
             }
+        }
+    }
+}
+
+private struct AIFeaturesView: View {
+    @ObservedObject var store: ThoughtStore
+    @State private var openAIAPIKey = ""
+    @State private var confirmsOpenAIAPIKeyRemoval = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("AIペルソナ") {
+                    NavigationLink {
+                        AIPostRequestView(store: store)
+                    } label: {
+                        Label("AIに投稿を依頼", systemImage: "square.and.pencil")
+                    }
+                    .accessibilityIdentifier("aiPostRequestPageButton")
+
+                    NavigationLink {
+                        AIPersonaManagementView(store: store)
+                    } label: {
+                        Label("AIペルソナの設定", systemImage: "person.2.badge.gearshape")
+                    }
+                    .accessibilityIdentifier("aiPersonasButton")
+                }
+
+                Section("利用状況") {
+                    NavigationLink {
+                        AIAPIUsageAnalyticsView(store: store)
+                    } label: {
+                        Label("AI使用状況", systemImage: "waveform.path.ecg")
+                    }
+                    .accessibilityIdentifier("aiUsageAnalyticsButton")
+                }
+
+                Section("外部ブレイン") {
+                    NavigationLink { ExternalBrainSettingsView(store: store) } label: {
+                        HStack {
+                            Label("外部ブレイン設定", systemImage: "brain.head.profile")
+                            Spacer()
+                            Text(externalBrainStatus)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityIdentifier("externalBrainSettingsButton")
+
+                    NavigationLink { KnowledgeManagementView(store: store) } label: {
+                        Label("ナレッジ下書き", systemImage: "doc.text.magnifyingglass")
+                    }
+                    .accessibilityIdentifier("knowledgeManagementButton")
+                }
+
+                Section("生成設定") {
+                    LabeledContent("Daily Summary") {
+                        Text("OpenAI · \(ReviewSummaryAIConfiguration.openAIModelName) · medium")
+                            .foregroundStyle(.secondary)
+                    }
+                    Picker("Knowledge DraftのAI Provider", selection: $store.knowledgeDraftAIProvider) {
+                        ForEach(AIProvider.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
+                    }
+                    .accessibilityIdentifier("knowledgeDraftAIProviderPicker")
+                    Text("Knowledge Draft: \(store.knowledgeDraftAIProvider.defaultModel) · medium。AIペルソナの投稿・手動返信・自動返信はPersonaごとにProviderを選択でき、どちらもlowで生成します。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Toggle(
+                        "AI返信の確認クッション",
+                        isOn: Binding(
+                            get: { store.aiReplyPreviewPreference == .alwaysShow },
+                            set: { store.aiReplyPreviewPreference = $0 ? .alwaysShow : .skip }
+                        )
+                    )
+                    .accessibilityIdentifier("aiReplyPreviewPreference")
+                    Text("OFFではAI返信を生成後そのまま投稿します。ONでは手動で返信を依頼したとき、生成内容を確認してから投稿できます。@メンションによる自動返信には確認を挟みません。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("OpenAI API key") {
+                    LabeledContent("状態", value: store.hasOpenAIAPIKey ? "Keychainに設定済み" : "未設定")
+                    SecureField("新しいOpenAI API key", text: $openAIAPIKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .privacySensitive()
+                        .accessibilityIdentifier("openAIAPIKeyField")
+                    Button("OpenAI API keyを保存") {
+                        if store.saveOpenAIAPIKey(openAIAPIKey) { openAIAPIKey = "" }
+                    }
+                    .disabled(openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("saveOpenAIAPIKeyButton")
+                    if store.hasOpenAIAPIKey {
+                        Button("OpenAI API keyを削除", role: .destructive) {
+                            confirmsOpenAIAPIKeyRemoval = true
+                        }
+                    }
+                    if let message = store.openAIAPIKeyMessage {
+                        Text(message).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Text("自分の端末だけで使う暫定構成です。キーはこの端末限定のKeychainへ保存されますが、配布用アプリでは安全なバックエンドへ移行してください。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .themedScrollableBackground()
+            .themedScreen(.expressive)
+            .navigationTitle("AI機能")
+            .navigationBarTitleDisplayMode(.inline)
             .confirmationDialog("OpenAI API keyを削除しますか？", isPresented: $confirmsOpenAIAPIKeyRemoval, titleVisibility: .visible) {
                 Button("削除", role: .destructive) { store.removeOpenAIAPIKey() }
                 Button("キャンセル", role: .cancel) {}
             }
         }
     }
+
+    private var externalBrainStatus: String {
+        guard store.externalBrainManager.repository.isConfigured else { return "未設定" }
+        guard let capabilities = store.externalBrainManager.connectionCapabilities else { return "設定済み" }
+        return capabilities.issue == nil ? "接続済み" : "設定済み"
+    }
 }
 
 private struct MentionsView: View {
     @ObservedObject var store: ThoughtStore
+    @State private var selection: InboxKind = .mentions
+    @State private var replyTarget: Thought?
 
-    private var items: [Thought] { store.incomingMentionAndReplyThoughts() }
+    private enum InboxKind: String, CaseIterable, Identifiable {
+        case mentions = "メンション"
+        case replies = "リプライ"
+
+        var id: Self { self }
+    }
+
+    private var items: [Thought] {
+        store.incomingMentionAndReplyThoughts().filter { thought in
+            let isReply = store.replyTargetIDsByThoughtID[thought.id] != nil
+            return selection == .replies ? isReply : !isReply
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                if items.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "at").font(.title2).foregroundStyle(.secondary)
-                        Text("メンションはありません").font(.headline)
-                        Text("自分またはAI Persona宛てのメンション・返信がここに表示されます。")
-                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            VStack(spacing: 0) {
+                Picker("表示する通知", selection: $selection) {
+                    ForEach(InboxKind.allCases) { kind in
+                        Text(kind.rawValue).tag(kind)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 240)
-                    .accessibilityIdentifier("mentionsEmptyState")
-                } else {
-                    ForEach(items) { thought in
-                        NavigationLink(value: thought.id) {
-                            VStack(alignment: .leading, spacing: 7) {
-                                HStack(spacing: 8) {
-                                    let actor = store.personasByThoughtID[thought.id] ?? store.defaultHumanPersona
-                                    PersonaIcon(persona: actor, size: 32)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(actor.displayName).font(.subheadline.weight(.semibold))
-                                        Text("@\(actor.handle)").font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Label(
-                                        store.replyTargetIDsByThoughtID[thought.id] == nil ? "Mention" : "Reply",
-                                        systemImage: store.replyTargetIDsByThoughtID[thought.id] == nil ? "at" : "arrowshape.turn.up.left"
-                                    )
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .accessibilityIdentifier("mentionsKindPicker")
+
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        if items.isEmpty {
+                            emptyState
+                        } else {
+                            ForEach(items) { thought in
+                                let replyTarget = store.replyTargetsByThoughtID[thought.id]
+                                ThoughtRow(
+                                    store: store,
+                                    thought: thought,
+                                    persona: store.personasByThoughtID[thought.id] ?? store.defaultHumanPersona,
+                                    mentionedPersona: store.mentionedPersonasByThoughtID[thought.id],
+                                    replyTarget: replyTarget,
+                                    replyTargetPersona: replyTarget.flatMap { store.personasByThoughtID[$0.id] },
+                                    tags: store.tagsByThoughtID[thought.id] ?? [],
+                                    onRequestReply: { self.replyTarget = thought },
+                                    onDelete: { store.requestDeletion(of: thought) }
+                                )
+                                .accessibilityIdentifier("mentionItem_\(thought.id.uuidString)")
+                                if thought.id != items.last?.id {
+                                    Divider().padding(.leading, 16)
                                 }
-                                Text(thought.body).lineLimit(3)
-                                Text(ThoughtDateText.string(for: thought.createdAt))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                             }
-                            .padding(.vertical, 4)
                         }
-                        .accessibilityIdentifier("mentionItem_\(thought.id.uuidString)")
                     }
                 }
             }
-            .themedScrollableBackground()
             .themedScreen(.calm)
             .navigationTitle("メンション")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: UUID.self) { thoughtID in
                 ThoughtDetailView(store: store, initialThoughtID: thoughtID)
             }
+            .sheet(item: $replyTarget) { thought in
+                AIReplyRequestView(store: store, thought: thought)
+            }
+            .confirmationDialog(
+                "このThoughtを削除しますか？",
+                isPresented: deletionDialogIsPresented,
+                titleVisibility: .visible
+            ) {
+                Button("削除", role: .destructive) { store.confirmDeletion() }
+                Button("キャンセル", role: .cancel) { store.cancelDeletion() }
+            } message: {
+                Text("削除したThoughtはタイムラインに表示されなくなります。")
+            }
         }
     }
-}
 
-private struct SearchTabView: View {
-    @ObservedObject var store: ThoughtStore
-
-    var body: some View {
-        NavigationStack {
-            ThoughtSearchView(store: store)
-                .navigationTitle("検索")
-                .themedScreen(.calm)
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: selection == .mentions ? "at" : "arrowshape.turn.up.left")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+            Text(selection == .mentions ? "メンションはありません" : "リプライはありません")
+                .font(.headline)
+            Text(selection == .mentions
+                 ? "自分またはAI Persona宛てのメンションがここに表示されます。"
+                 : "Thoughtへのリプライがここに表示されます。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .padding(.horizontal, 24)
+        .accessibilityIdentifier("mentionsEmptyState")
+    }
+
+    private var deletionDialogIsPresented: Binding<Bool> {
+        Binding(
+            get: { store.deletionCandidate != nil },
+            set: { if !$0 { store.cancelDeletion() } }
+        )
     }
 }
 
@@ -802,101 +899,6 @@ private struct TagStrip: View {
         }
     }
 
-}
-
-private struct ThoughtSearchView: View {
-    @ObservedObject var store: ThoughtStore
-    @State private var query = ""
-
-    var body: some View {
-        Group {
-            if !store.hasSearchQuery {
-                searchInitialState
-            } else if store.searchResults.isEmpty {
-                searchEmptyState
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(store.searchResults) { thought in
-                            VStack(alignment: .leading, spacing: 8) {
-                                NavigationLink {
-                                    ThoughtDetailView(store: store, initialThoughtID: thought.id)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                    Text(thought.body)
-                                        .font(.body)
-                                        .lineSpacing(4)
-                                        .foregroundStyle(.primary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .multilineTextAlignment(.leading)
-                                    Text(ThoughtDateText.string(for: thought.createdAt))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("検索結果、\(thought.body)")
-                                .accessibilityHint("ダブルタップして詳細とHistoryを開きます")
-                                .accessibilityIdentifier("searchResult_\(thought.id.uuidString)")
-                                TagStrip(tags: store.tagsByThoughtID[thought.id] ?? [])
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            if thought.id != store.searchResults.last?.id {
-                                Divider().padding(.leading, 16)
-                            }
-                        }
-                    }
-                }
-                .scrollDismissesKeyboard(.interactively)
-            }
-        }
-        .navigationTitle("検索")
-        .navigationBarTitleDisplayMode(.inline)
-        .searchable(
-            text: $query,
-            placement: .navigationBarDrawer(displayMode: .always),
-            prompt: "Thought本文を検索"
-        )
-        .onChange(of: query) { store.search($0) }
-    }
-
-    private var searchInitialState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            Text("キーワードでThoughtを探す")
-                .font(.headline)
-            Text("本文の一部を入力してください。")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(24)
-        .multilineTextAlignment(.center)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("thoughtSearchInitialState")
-    }
-
-    private var searchEmptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "text.magnifyingglass")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            Text("一致するThoughtはありません")
-                .font(.headline)
-            Text("別のキーワードを試してください。")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(24)
-        .multilineTextAlignment(.center)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("thoughtSearchEmptyState")
-    }
 }
 
 private struct ThoughtTagListView: View {
@@ -1155,6 +1157,12 @@ private struct ThoughtDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 if let currentThought {
                     Menu {
+                        Button {
+                            UIPasteboard.general.string = currentThought.body
+                        } label: {
+                            Label("本文をコピー", systemImage: "doc.on.doc")
+                        }
+                        .accessibilityIdentifier("copyCurrentThoughtBodyButton")
                         Button("タグを編集") { showsTagEditor = true }
                         if let input = store.knowledgeDraftInput(for: currentThought) { Button("Knowledge Draftへ移す") { knowledgeDraftInput = input } }
                         Button("この投稿から返信を分岐") {
@@ -1286,6 +1294,12 @@ private struct ThoughtDetailView: View {
 
             if entry.thought.deletedAt == nil {
                 Menu {
+                    Button {
+                        UIPasteboard.general.string = entry.thought.body
+                    } label: {
+                        Label("本文をコピー", systemImage: "doc.on.doc")
+                    }
+                    .accessibilityIdentifier("copyHistoryThoughtBodyButton_\(entry.id.uuidString)")
                     Button("削除", role: .destructive) { store.requestDeletion(of: entry.thought) }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -1362,7 +1376,7 @@ private struct ThoughtRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel("\(persona.displayName)のプロフィールを開く")
             .accessibilityIdentifier("actorIcon_\(thought.id.uuidString)")
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: replyTarget == nil ? 8 : 4) {
                 HStack(spacing: 6) {
                     NavigationLink { ActorProfileView(store: store, persona: persona) } label: {
                         Text(persona.displayName).font(.subheadline.weight(.semibold))
@@ -1377,35 +1391,34 @@ private struct ThoughtRow: View {
                         Text("AI").font(.caption2.weight(.bold)).foregroundStyle(.tint)
                     }
                 }
-                if let replyTargetPersona {
-                    NavigationLink { ActorProfileView(store: store, persona: replyTargetPersona) } label: {
-                        Text("↩ @\(replyTargetPersona.handle) に返信")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tint)
+                if let replyTarget {
+                    HStack(spacing: 4) {
+                        if let replyTargetPersona {
+                            NavigationLink { ActorProfileView(store: store, persona: replyTargetPersona) } label: {
+                                Text("↩ @\(replyTargetPersona.handle)")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.tint)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Text("↩ 返信")
+                                .fontWeight(.semibold)
+                        }
+                        Text("·")
+                        Text(replyTarget.deletedAt == nil ? replyTarget.body : "削除されたThought")
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
-                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("replyContext_\(thought.id.uuidString)")
                 }
                 NavigationLink(value: thought.id) {
-                    VStack(alignment: .leading, spacing: 8) {
-                    if let replyTarget {
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(alignment: .top, spacing: 7) {
-                                Rectangle()
-                                    .fill(Color.secondary.opacity(0.35))
-                                    .frame(width: 2)
-                                Text(replyTarget.deletedAt == nil ? replyTarget.body : "削除されたThought")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.leading)
-                            }
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("replyContext_\(thought.id.uuidString)")
-                    }
+                    VStack(alignment: .leading, spacing: replyTarget == nil ? 8 : 4) {
                     Text(thought.body)
                         .font(.body)
-                        .lineSpacing(4)
+                        .lineSpacing(replyTarget == nil ? 4 : 2)
                         .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .multilineTextAlignment(.leading)
@@ -1434,6 +1447,12 @@ private struct ThoughtRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Menu {
+                Button {
+                    UIPasteboard.general.string = thought.body
+                } label: {
+                    Label("本文をコピー", systemImage: "doc.on.doc")
+                }
+                .accessibilityIdentifier("copyThoughtBodyButton_\(thought.id.uuidString)")
                 Button("削除", role: .destructive, action: onDelete)
             } label: {
                 Image(systemName: "ellipsis")
@@ -1442,12 +1461,12 @@ private struct ThoughtRow: View {
             }
             .foregroundStyle(.secondary)
             .accessibilityLabel("Thoughtの操作")
-            .accessibilityHint("削除メニューを表示します")
+            .accessibilityHint("本文のコピーまたは削除メニューを表示します")
             .accessibilityIdentifier("thoughtMenu")
         }
         .themeSurface(isAI: persona.kind == .ai)
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, replyTarget == nil ? 6 : 2)
         .accessibilityElement(children: .contain)
         .contentShape(Rectangle())
     }
@@ -1852,6 +1871,8 @@ private struct ActorProfileView: View {
                     }
                 }
 
+                PersonaExternalBrainConnectionChecker(store: store, persona: persona)
+
             }
 
         }
@@ -1893,6 +1914,111 @@ private struct ActorProfileView: View {
     }
 }
 
+private struct PersonaExternalBrainConnectionChecker: View {
+    @ObservedObject var manager: ExternalBrainManager
+    let persona: Persona
+
+    init(store: ThoughtStore, persona: Persona) {
+        manager = store.externalBrainManager
+        self.persona = persona
+    }
+
+    private var status: PersonaExternalBrainConnectionStatus {
+        manager.connectionStatus(for: persona.id)
+    }
+
+    var body: some View {
+        Section("外部ブレイン接続") {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle().fill(statusColor.opacity(0.18)).frame(width: 28, height: 28)
+                    Circle().fill(statusColor).frame(width: 12, height: 12)
+                }
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(statusTitle).font(.headline)
+                    Text(statusDetail).font(.footnote).foregroundStyle(.secondary)
+                    if let checkedAt = manager.connectionCheckedAt {
+                        Text("最終確認: \(checkedAt.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("外部ブレイン接続、\(statusTitle)、\(statusDetail)")
+            .accessibilityIdentifier("personaExternalBrainConnectionStatus")
+
+            Button {
+                Task { await manager.testConnection() }
+            } label: {
+                if manager.isTestingConnection {
+                    HStack { ProgressView(); Text("確認中…") }
+                } else {
+                    Label("接続を確認", systemImage: "network")
+                }
+            }
+            .disabled(manager.isTestingConnection || !canTestConnection)
+            .accessibilityIdentifier("personaExternalBrainConnectionCheckButton")
+
+            Text("AI APIは呼びません。GitHubのRepositoryとBranchを読み取るだけなので、AIトークン消費はありません。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var canTestConnection: Bool {
+        let configuration = manager.configuration(for: persona.id)
+        return configuration.enabled && manager.repository.isConfigured && manager.hasToken
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case .verified: .green
+        case .verificationNeeded, .synchronizationNeeded: .orange
+        case .disabled: .secondary
+        case .invalidAgentPath, .repositoryNotConfigured, .tokenMissing, .failed: .red
+        }
+    }
+
+    private var statusTitle: String {
+        switch status {
+        case .disabled: "使用しない設定"
+        case .invalidAgentPath: "AGENT.mdの設定が必要"
+        case .repositoryNotConfigured: "Repositoryが未設定"
+        case .tokenMissing: "GitHub tokenが未設定"
+        case .verificationNeeded(let hasLocalCache): hasLocalCache ? "ローカル利用可・接続未確認" : "接続未確認"
+        case .synchronizationNeeded: "GitHub接続済み・同期が必要"
+        case .verified: "接続確認済み"
+        case .failed: "接続できません"
+        }
+    }
+
+    private var statusDetail: String {
+        switch status {
+        case .disabled:
+            "このAIペルソナでは外部ブレインがOFFです。"
+        case .invalidAgentPath:
+            "AIペルソナ編集で安全なAGENT.mdのパスを設定してください。"
+        case .repositoryNotConfigured:
+            "AI機能の「外部ブレイン設定」でGitHub Repositoryを設定してください。"
+        case .tokenMissing:
+            "AI機能の「外部ブレイン設定」でGitHub tokenを保存してください。"
+        case .verificationNeeded(let hasLocalCache):
+            hasLocalCache
+                ? "同期済みキャッシュは使えます。現在のGitHub接続は未確認です。"
+                : "接続確認後に同期すると、このペルソナから参照できます。"
+        case .synchronizationNeeded:
+            "Repositoryへ接続できました。外部ブレインを使うには同期してください。"
+        case .verified:
+            "GitHub接続と、このペルソナの同期済みAGENT.mdを確認できました。"
+        case .failed(let issue):
+            issue.localizedDescription
+        }
+    }
+}
+
 private struct AIPersonaManagementView: View {
     @ObservedObject var store: ThoughtStore
     @State private var showsNewAIEditor = false
@@ -1917,7 +2043,7 @@ private struct AIPersonaManagementView: View {
                     .accessibilityIdentifier("addAIPersonaButton")
             }
             Section {
-                Text("AIペルソナを選ぶと、プロフィールと設定を確認・編集できます。投稿の依頼は設定の「AIに投稿を依頼」から行います。")
+                Text("AIペルソナを選ぶと、プロフィールと設定を確認・編集できます。投稿の依頼はAI機能の「AIに投稿を依頼」から行います。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

@@ -582,6 +582,9 @@ final class ThoughtStore: ObservableObject {
 
     func updateDraft(_ value: String) {
         draft = ThoughtDraft.limited(value)
+        if let selectedMentionPersona, mentionRange(for: selectedMentionPersona, in: draft) == nil {
+            self.selectedMentionPersona = nil
+        }
     }
 
     var mentionSuggestions: [Persona] {
@@ -590,13 +593,39 @@ final class ThoughtStore: ObservableObject {
     }
 
     func insertMention(_ persona: Persona) {
-        guard let range = draft.range(of: "@[A-Za-z0-9_]*$", options: .regularExpression) else { return }
-        updateDraft(draft.replacingCharacters(in: range, with: "@\(persona.handle) "))
+        let token = "@\(persona.handle)"
+        let updatedDraft: String
+        if let selectedMentionPersona, let range = mentionRange(for: selectedMentionPersona, in: draft) {
+            updatedDraft = draft.replacingCharacters(in: range, with: token)
+        } else if let range = draft.range(of: "@[A-Za-z0-9_]*$", options: .regularExpression) {
+            updatedDraft = draft.replacingCharacters(in: range, with: "\(token) ")
+        } else {
+            updatedDraft = draft.isEmpty ? "\(token) " : "\(token) \(draft)"
+        }
+        updateDraft(updatedDraft)
+        selectedMentionPersona = persona
+    }
+
+    func removeSelectedMention() {
+        guard let persona = selectedMentionPersona else { return }
+        if let range = mentionRange(for: persona, in: draft) {
+            var removalRange = range
+            if removalRange.upperBound < draft.endIndex, draft[removalRange.upperBound] == " " {
+                removalRange = removalRange.lowerBound..<draft.index(after: removalRange.upperBound)
+            }
+            draft.removeSubrange(removalRange)
+        }
+        selectedMentionPersona = nil
     }
 
     private func trailingMentionQuery(in body: String) -> String? {
         guard let range = body.range(of: "@[A-Za-z0-9_]*$", options: .regularExpression) else { return nil }
         return String(body[range].dropFirst())
+    }
+
+    private func mentionRange(for persona: Persona, in body: String) -> Range<String.Index>? {
+        let pattern = "(?i)(?<![A-Za-z0-9_])@\(NSRegularExpression.escapedPattern(for: persona.handle))(?![A-Za-z0-9_])"
+        return body.range(of: pattern, options: .regularExpression)
     }
 
     private func resolvedMentions(in thought: Thought) -> [ThoughtMention] {

@@ -44,6 +44,30 @@ private func temporaryBrain() throws -> (URL, ExternalBrainCache) {
     #expect(GitHubRepositoryCapabilities.failure(.branchNotFound, branch: "main").repositoryRead)
 }
 
+@Test func personaExternalBrainConnectionStatusRequiresExplicitRemoteSuccessForGreenState() {
+    let personaID = UUID()
+    let enabled = PersonaExternalBrainConfiguration(
+        personaID: personaID,
+        enabled: true,
+        agentPath: "personas/reviewer/AGENT.md"
+    )
+    let success = GitHubRepositoryCapabilities(
+        authentication: true,
+        repositoryRead: true,
+        branchRead: true,
+        writeDrafts: false,
+        writeKnowledge: false,
+        branch: "main"
+    )
+
+    #expect(PersonaExternalBrainConnectionStatus.resolve(configuration: enabled, repositoryConfigured: true, hasToken: true, hasCachedAgent: true, capabilities: nil) == .verificationNeeded(hasLocalCache: true))
+    #expect(PersonaExternalBrainConnectionStatus.resolve(configuration: enabled, repositoryConfigured: true, hasToken: true, hasCachedAgent: true, capabilities: success) == .verified)
+    #expect(PersonaExternalBrainConnectionStatus.resolve(configuration: enabled, repositoryConfigured: true, hasToken: true, hasCachedAgent: false, capabilities: success) == .synchronizationNeeded)
+    #expect(PersonaExternalBrainConnectionStatus.resolve(configuration: enabled, repositoryConfigured: true, hasToken: true, hasCachedAgent: true, capabilities: .failure(.network, branch: "main")) == .failed(.network))
+    #expect(PersonaExternalBrainConnectionStatus.resolve(configuration: enabled, repositoryConfigured: true, hasToken: false, hasCachedAgent: true, capabilities: success) == .tokenMissing)
+    #expect(PersonaExternalBrainConnectionStatus.resolve(configuration: .init(personaID: personaID), repositoryConfigured: true, hasToken: true, hasCachedAgent: true, capabilities: success) == .disabled)
+}
+
 @Test func parsesAgentRoleRoutesRulesAndProjectPlaceholder() throws {
     let agent = try ExternalBrainAgentParser.parse("""
     ---
@@ -153,7 +177,7 @@ private func temporaryBrain() throws -> (URL, ExternalBrainCache) {
     let detail = "固有識別子Cardinalの設定値は42です"
     let remote = FakeExternalBrainRemote([
         "personas/a/AGENT.md": ("1", "# Role\nArchitect\n# Retrieval Route\n1. projects/aitextapp/"),
-        "projects/aitextapp/long.md": ("1", "# 長い資料\n\(String(repeating: "前置きです。", count: 100))\n\(detail)")
+        "projects/aitextapp/long.md": ("1", "# 長い資料\n\(String(repeating: "前置きです。", count: 500))\n\(detail)")
     ])
     _ = try await cache.synchronize(remote: remote, configuration: .init(owner: "o", repository: "r"), token: "t")
 
@@ -163,6 +187,7 @@ private func temporaryBrain() throws -> (URL, ExternalBrainCache) {
     )
 
     #expect(result?.chunks.first?.excerpt.contains(detail) == true)
+    #expect((result?.chunks.first?.excerpt.count ?? 0) <= ExternalBrainIndex.excerptCharacterLimit)
 }
 
 @Test func replyPromptBoundariesExternalBrainAsReference() throws {

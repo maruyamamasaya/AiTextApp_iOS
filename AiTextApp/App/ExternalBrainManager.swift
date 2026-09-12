@@ -27,7 +27,6 @@ struct GitHubExternalBrainRemote: ExternalBrainRemote, GitHubRepositoryConnectio
     func testConnection(configuration: ExternalBrainRepositoryConfiguration, token: String) async throws -> GitHubRepositoryCapabilities {
         guard configuration.isConfigured else { throw GitHubConnectionIssue.notConfigured }
         guard !token.isEmpty else { throw GitHubConnectionIssue.tokenMissing }
-        _ = try await request(try apiURL("user"), token: token, scope: .authentication)
         let (repositoryData, repositoryResponse) = try await request(try apiURL("repos/\(configuration.owner)/\(configuration.repository)"), token: token, scope: .repository)
         let repository = try JSONDecoder().decode(RepositoryResponse.self, from: repositoryData)
         let encodedBranch = configuration.branch.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? configuration.branch
@@ -114,12 +113,13 @@ enum ExternalBrainTokenStore {
 
 @MainActor
 final class ExternalBrainManager: ObservableObject {
-    @Published var repository: ExternalBrainRepositoryConfiguration { didSet { persist(); connectionCapabilities = nil } }
+    @Published var repository: ExternalBrainRepositoryConfiguration { didSet { persist(); connectionCapabilities = nil; connectionCheckedAt = nil } }
     @Published var personaConfigurations: [UUID: PersonaExternalBrainConfiguration] { didSet { persist() } }
     @Published private(set) var manifest = ExternalBrainManifest()
     @Published private(set) var isSyncing = false
     @Published private(set) var isTestingConnection = false
     @Published private(set) var connectionCapabilities: GitHubRepositoryCapabilities?
+    @Published private(set) var connectionCheckedAt: Date?
     @Published var message: String?
     private let defaults: UserDefaults
     private let cache: ExternalBrainCache?
@@ -139,17 +139,29 @@ final class ExternalBrainManager: ObservableObject {
     }
     func configuration(for personaID: UUID) -> PersonaExternalBrainConfiguration { personaConfigurations[personaID] ?? .init(personaID: personaID) }
     func savePersona(_ value: PersonaExternalBrainConfiguration) { personaConfigurations[value.personaID] = value }
+    func connectionStatus(for personaID: UUID) -> PersonaExternalBrainConnectionStatus {
+        let configuration = configuration(for: personaID)
+        let agentPath = ExternalBrainPath.normalized(configuration.agentPath)
+        return .resolve(
+            configuration: configuration,
+            repositoryConfigured: repository.isConfigured,
+            hasToken: hasToken,
+            hasCachedAgent: manifest.files[agentPath] != nil,
+            capabilities: connectionCapabilities
+        )
+    }
     var hasToken: Bool { !(ExternalBrainTokenStore.load() ?? "").isEmpty }
     var repositoryDisplayName: String { repository.isConfigured ? "\(repository.owner)/\(repository.repository)" : "未設定" }
     var draftDirectory: String { KnowledgeDraftPath.directory + "/" }
     var knowledgeDirectory: String { KnowledgeDocumentPath.directory + "/" }
-    func saveToken(_ token: String) -> Bool { do { let value = token.trimmingCharacters(in: .whitespacesAndNewlines); guard !value.isEmpty else { message = "新しいTokenを入力してください。"; return false }; try ExternalBrainTokenStore.save(value); connectionCapabilities = nil; message = "認証情報をKeychainへ保存しました。"; return true } catch { message = "認証情報を保存できませんでした。"; return false } }
-    func removeToken() { ExternalBrainTokenStore.remove(); connectionCapabilities = nil; message = "GitHub tokenを削除しました。" }
+    func saveToken(_ token: String) -> Bool { do { let value = token.trimmingCharacters(in: .whitespacesAndNewlines); guard !value.isEmpty else { message = "新しいTokenを入力してください。"; return false }; try ExternalBrainTokenStore.save(value); connectionCapabilities = nil; connectionCheckedAt = nil; message = "認証情報をKeychainへ保存しました。"; return true } catch { message = "認証情報を保存できませんでした。"; return false } }
+    func removeToken() { ExternalBrainTokenStore.remove(); connectionCapabilities = nil; connectionCheckedAt = nil; message = "GitHub tokenを削除しました。" }
     func testConnection() async {
         guard !isTestingConnection else { return }
-        guard repository.isConfigured else { connectionCapabilities = .failure(.notConfigured, branch: repository.branch); return }
-        guard let token = ExternalBrainTokenStore.load(), !token.isEmpty else { connectionCapabilities = .failure(.tokenMissing, branch: repository.branch); return }
+        guard repository.isConfigured else { connectionCapabilities = .failure(.notConfigured, branch: repository.branch); connectionCheckedAt = Date(); return }
+        guard let token = ExternalBrainTokenStore.load(), !token.isEmpty else { connectionCapabilities = .failure(.tokenMissing, branch: repository.branch); connectionCheckedAt = Date(); return }
         isTestingConnection = true; defer { isTestingConnection = false }
+        defer { connectionCheckedAt = Date() }
         do { connectionCapabilities = try await connectionTester.testConnection(configuration: repository, token: token); message = "GitHub接続を確認しました。" }
         catch let issue as GitHubConnectionIssue { connectionCapabilities = .failure(issue, branch: repository.branch); message = issue.localizedDescription }
         catch { connectionCapabilities = .failure(.network, branch: repository.branch); message = GitHubConnectionIssue.network.localizedDescription }

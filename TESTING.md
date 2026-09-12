@@ -12,7 +12,7 @@ swift test
 
 入力境界、SQLite、Persona、AI Reply／Context、タグ、ローカル分析、backup、Export、Historyに加え、Actor handleの正規化・一意性・ID維持、Human／AI Mention snapshotと範囲、Conversation Treeの両Relation統合・branch・currentPath・最新leaf、同一対象への複数AI各1返信、Daily Summary v2のHuman／AI分類、Humanタグ限定、AIタグ候補のHuman index解決／不正index除外／生成時非保存／明示追加、複数AI、Relation、共通時間帯とtimezone境界、空Insight、v1 decode／v2 round-trip、SQLite再読込、stale previewを検証します。
 
-Persona External Brain／External Brain Routing v1はAGENT.md解析、`{current_project}`展開、unsafe path拒否、Markdown front matter／heading chunk／draft除外、SHA差分同期・削除・offline cache、日本語自然文queryのtrigram検索、長いchunkの一致箇所周辺excerpt、FTS route／metadata優先、最大件数、0件、AI Reply／Persona Post promptの参考資料境界とUsage metadataを`ExternalBrainTests.swift`で検証します。
+Persona External Brain／External Brain Routing v1はAGENT.md解析、`{current_project}`展開、unsafe path拒否、Markdown front matter／heading chunk／draft除外、SHA差分同期・削除・offline cache、日本語自然文queryのtrigram検索、長いchunkの一致箇所周辺2,000文字excerpt、FTS route／metadata優先、最大件数、0件、AI Reply／Persona Post promptの参考資料境界とUsage metadataを`ExternalBrainTests.swift`で検証します。
 
 Knowledge Draft Pipelineは4種のtype、3種のsource、front matter、safe slugと`drafts/`path境界、source外の事実を追加しないprompt、Human／AI区別、ローカルFTS最大3件、0件、AI生成、`status: draft`のRetrieval除外を`ExternalBrainTests.swift`で検証します。GitHub Contents writeのtoken未設定、権限、offline、同名conflict、new-file-only、保存失敗時Draft保持はMac上のURLProtocol／実Repository検証対象です。
 
@@ -20,15 +20,15 @@ Knowledge Review & Promoteは許可された状態遷移、unreviewedからの�
 
 Knowledge Quality & Consolidationは現行schema v15（機能追加時v14）、完全一致duplicate、無関係Knowledgeの候補除外、stale条件、candidate dismiss、Knowledge本文不変、Archive／Supersede metadata、retrievalCount／lastRetrievedAtを`ExternalBrainTests.swift`で検証します。Quality解析とローカルMerge DraftはAI clientを受け取らないpure/local境界です。
 
-GitHub Repository Settingsは設定modelのCodable round-trip、secret fieldを持たないこと、Draft／Knowledge pathのdomain正本、401／403／404とrate limitの分類を`ExternalBrainTests.swift`で検証します。UserDefaults復元、Keychain保存・置換・削除、既存GitHub clientへの同一設定反映、GETだけの実接続確認はMac上のapp integration検証対象です。
+GitHub Repository Settingsは設定modelのCodable round-trip、secret fieldを持たないこと、Draft／Knowledge pathのdomain正本、401／403／404とrate limitの分類、AIプロフィールの接続状態で実接続成功時だけverifiedになることを`ExternalBrainTests.swift`で検証します。UserDefaults復元、Keychain保存・置換・削除、既存GitHub clientへの同一設定反映、GETだけの実接続確認、プロフィール上の緑ライトと最終確認日時はMac上のapp integration検証対象です。
 
 AI API Usage Analyticsは`AIAPIUsageTests.swift`で現行schema v15上の保存・再読込、Knowledge Draft source type、success／failure／cancel／retry、Persona有無、External Brain有無、character、実測tokenのnil保持、Latency、Error分類、今日／7日／30日／全期間と各dimension、本文系columnを持たないprivacy、Telemetry書込失敗時の生成結果維持を検証します。v13なのに追加列が欠けた既存DBを構築し、起動時の非破壊補修、該当SELECT、再実行可能性も検証します。加えて、最新versionを名乗りながら旧Relation制約を持つDBのv15自動補修と、必須table欠落をhealth checkが拒否することを検証します。生成requestについてはPersona系の`concisePersona`／low／1,024 token、Daily SummaryのOpenAI／`dailySummary`／medium、Knowledge Draftの`knowledgeDraft`／mediumが固定されることをCore testで確認します。
 
 ## UI Test
 
-`AiTextAppUITests`はHome／Mentions／Search／Insights／Profileの5タブ、Home Composerの投稿、Mention表示、`@mio`の自動返信、Conversation表示、最新leafへの通常返信、Homeで返信2件目以降を畳む／戻す切替、本文検索、Insightsのサマリー閲覧専用ページ・Daily Summary生成・Analytics入口、共通Profile表示、Profile右上からSettingsへの導線を検証します。Thoughtに紐づくタグ、Continuation、Daily Summaryなどの主要flowも維持します。
+`AiTextAppUITests`はHome／Mentions／AI機能／Insights／Profileの5タブ、Home上部の本文検索とDetail遷移、Home Composerの投稿、メンションメニュのAI Persona選択による`@handle`本文挿入、Thought本文コピー操作、MentionsのMention／Replyセグメント分離とHome共通行表示、AI機能のペルソナ／使用状況／外部ブレイン入口、`@mio`の自動返信、Conversation表示、最新leafへの通常返信、Homeで返信2件目以降が初期非表示となることと全件表示への切替、Insightsのサマリー閲覧専用ページ・Daily Summary生成・Analytics入口、共通Profile表示、Profile右上から一般Settingsへの導線を検証します。Thoughtに紐づくタグ、Continuation、Daily Summaryなどの主要flowも維持します。
 
-Theme UI testは4テーマを順に選択し、Home／Mentions／Search／Insights／ProfileとTab Barの各組み合わせをScreenshot attachmentへ保存します。最後に再起動して選択状態が維持されることを確認します。AI Thought固有Surfaceは共通`ThoughtRow`のactor kind分岐だけで適用し、本文自体へGlowを付けないことをコードレビュー対象とします。
+Theme UI testは4テーマを順に選択し、Home／Mentions／AI機能／Insights／ProfileとTab Barの各組み合わせをScreenshot attachmentへ保存します。最後に再起動して選択状態が維持されることを確認します。AI Thought固有Surfaceは共通`ThoughtRow`のactor kind分岐だけで適用し、本文自体へGlowを付けないことをコードレビュー対象とします。
 
 ローカル分析UIは「Timelineで1件投稿 → 分析を開く → 今日／7日／30日／活動日／活動日平均 → 日別カレンダーの今日が1件」をXCUITestで確認します。日別カレンダーの配置・濃淡・今日の枠線、locale曜日、時間帯、タグEmpty State、Continuation説明はSimulatorで目視とVoiceOver確認も行います。
 

@@ -8,10 +8,10 @@
 - `AiTextApp/App/AppTheme.swift` — Primitive／Semantic／Theme／Effect token、4テーマ、UserDefaults永続化、Reduce Motion対応background、共通Surface、テーマ選択Preview。
 - `AiTextApp/App/ThoughtAnalyticsView.swift` — ローカル分析のサマリーと日別／曜日／時間帯／タグ／Continuation表示。
 - `AiTextApp/App/DailySummaryView.swift` — 生成済みサマリーの閲覧専用一覧／詳細、Human Thoughtだけを示す月カレンダー、日別件数／継続件数、構造化Summary、Human限定の送信前プレビュー、要約済み過去日の安全な再生成導線。
-- `AiTextApp/App/TimelineView.swift` — `MainTabView`（Home／Mentions／Search／Insights／Profile）、各タブの独立`NavigationStack`、Home右上の返信2件目以降を畳む切替・投稿Composer・投稿者フィルター、Mention／Reply一覧、検索、サマリー閲覧／生成を分けた分析ハブ、投稿一覧を持たない共通Actor Profile、Profile右上から開くSettings、Thought Detail、History、Continuation Composer、削除UI。
+- `AiTextApp/App/TimelineView.swift` — `MainTabView`（Home／Mentions／AI機能／Insights／Profile）、各タブの独立`NavigationStack`、Home上部の本文検索、右上の返信2件目以降を畳む切替・投稿Composer・投稿者フィルター、Mention／Reply一覧、AI機能ハブ、サマリー閲覧／生成を分けた分析ハブ、投稿一覧を持たない共通Actor Profile、Profile右上から開く一般Settings、Thought Detail、History、Continuation Composer、削除UI。
 - `AiTextApp/App/TimelineView.swift`内`ProfileEditorView`／`PersonaIcon` — デフォルト人間の表示名、写真選択・縮小、丸型アイコン表示。
 - `AiTextApp/App/TimelineView.swift`内`PersonaManagementView`／`AIPersonaEditorView` — 複数AI Personaの一覧、追加、編集、無効化。
-- `AiTextApp/App/TimelineView.swift`内`AIPersonaManagementView`／`ActorProfileView` — AI Persona一覧からプロフィールを開き、表示内容と設定を確認・編集する管理導線。
+- `AiTextApp/App/TimelineView.swift`内`AIPersonaManagementView`／`ActorProfileView` — AI Persona一覧からプロフィールを開き、表示内容と設定を確認・編集する管理導線。AIプロフィールには外部ブレインのローカル準備状態、GET接続確認、成功時の緑ライトと最終確認日時を表示する。
 - `AiTextApp/App/TimelineView.swift`内`AIPostRequestView`／`AIPostPreviewView` — Settingsの独立画面で投稿者AIを選択して依頼を入力し、Persona External Brainのroute／source、最終payloadを確認して明示送信する導線。
 - `AiTextApp/App/TimelineView.swift`内`AIReplyRequestView`／`AIReplyPreviewView` — メンション付きThoughtへのAI返信依頼、対象と最終payload確認、明示送信、Detail返信表示。
 - `AiTextApp/App/ThoughtStore.swift` — Timeline投稿境界、本文検索／タグ／Review／History／Continuation UI stateとCoreの接続。
@@ -60,7 +60,7 @@ Search: `ThoughtRepository|ThoughtRelationRepository|createContinuation|SQLiteTh
 
 - `ThoughtCore/AIAPIUsage.swift` — Usage metadata、Feature／Status／Error分類、記録・分析repository境界、共通Recorder、ローカル集計。
 - `ThoughtCore/SQLiteThoughtRepository.swift` — schema v14内の`ai_api_usage`保存・期間query、Knowledge lifecycle／Quality／retrieval usage保存。
-- `AiTextApp/App/AIAPIUsageAnalyticsView.swift` — 設定の「AI」セクションから開く期間別Dashboard。
+- `AiTextApp/App/AIAPIUsageAnalyticsView.swift` — AI機能タブから開く期間別Dashboard。
 - `ThoughtCoreTests/AIAPIUsageTests.swift` — 記録、集計、privacy、failure isolation。
 
 ## Tests
