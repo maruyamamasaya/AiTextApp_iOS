@@ -45,8 +45,8 @@ final class ThoughtStore: ObservableObject {
     @Published var aiReplyPreviewPreference: AIReplyPreviewPreference {
         didSet { userDefaults.set(aiReplyPreviewPreference.rawValue, forKey: Self.aiReplyPreviewPreferenceKey) }
     }
-    @Published var defaultAIProvider: AIProvider {
-        didSet { userDefaults.set(defaultAIProvider.rawValue, forKey: Self.defaultAIProviderKey) }
+    @Published var knowledgeDraftAIProvider: AIProvider {
+        didSet { userDefaults.set(knowledgeDraftAIProvider.rawValue, forKey: Self.knowledgeDraftAIProviderKey) }
     }
     @Published private(set) var hasOpenAIAPIKey = false
     @Published var openAIAPIKeyMessage: String?
@@ -114,7 +114,8 @@ final class ThoughtStore: ObservableObject {
     private var isPosting = false
     private let userDefaults: UserDefaults
     private static let aiReplyPreviewPreferenceKey = "ai.replyPreviewPreference"
-    private static let defaultAIProviderKey = "ai.defaultProvider"
+    private static let knowledgeDraftAIProviderKey = "ai.knowledgeDraftProvider"
+    private static let legacyDefaultAIProviderKey = "ai.defaultProvider"
 
     private func handlePostSuccess(_ thought: Thought, resetsNavigation: Bool = true) {
         postNavigationRequest = PostNavigationRequest(
@@ -137,7 +138,9 @@ final class ThoughtStore: ObservableObject {
     ) {
         self.userDefaults = userDefaults
         aiReplyPreviewPreference = AIReplyPreviewPreference(rawValue: userDefaults.string(forKey: Self.aiReplyPreviewPreferenceKey) ?? "") ?? .skip
-        defaultAIProvider = AIProvider(rawValue: userDefaults.string(forKey: Self.defaultAIProviderKey) ?? "") ?? .gemini
+        let savedKnowledgeProvider = userDefaults.string(forKey: Self.knowledgeDraftAIProviderKey)
+            ?? userDefaults.string(forKey: Self.legacyDefaultAIProviderKey)
+        knowledgeDraftAIProvider = AIProvider(rawValue: savedKnowledgeProvider ?? "") ?? .gemini
         hasOpenAIAPIKey = !(OpenAIAPIKeyStore.load() ?? "").isEmpty
         self.summaryClient = summaryClient
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
@@ -503,7 +506,7 @@ final class ThoughtStore: ObservableObject {
     func prepareDailySummary(for day: Date, calendar: Calendar = .current) {
         guard let thoughtRepository, let tagRepository, let relationRepository, let personaRepository else { dailySummaryError = "要約対象を読み込めませんでした。"; return }
         do {
-            dailySummaryPreview = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: day, calendar: calendar, provider: defaultAIProvider)
+            dailySummaryPreview = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: day, calendar: calendar)
             dailySummaryError = nil
         } catch ReviewSummaryError.noThoughts { dailySummaryPreview = nil; dailySummaryError = "Thoughtが0件の日は要約できません。" }
         catch { dailySummaryPreview = nil; dailySummaryError = "要約対象を準備できませんでした。" }
@@ -517,7 +520,7 @@ final class ThoughtStore: ObservableObject {
         defer { isGeneratingDailySummary = false }
         do {
             guard let tagRepository, let relationRepository, let personaRepository else { throw ReviewSummaryError.stalePreview }
-            let current = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: preview.interval.start, provider: preview.request.provider)
+            let current = try PrepareDailySummary(thoughts: thoughtRepository, tags: tagRepository, relations: relationRepository, authors: personaRepository)(day: preview.interval.start)
             guard current.inputs == preview.inputs && current.relations == preview.relations && current.existingTags == preview.existingTags && current.continuationCount == preview.continuationCount else { throw ReviewSummaryError.stalePreview }
             let value = try await GenerateDailySummary(client: summaryClient, repository: dailySummaryRepository, usageRepository: aiUsageRepository)(preview: preview)
             dailySummary = value
@@ -634,7 +637,7 @@ final class ThoughtStore: ObservableObject {
         isGeneratingKnowledgeDraft = true; knowledgeDraftError = nil; knowledgeDraftMessage = nil
         defer { isGeneratingKnowledgeDraft = false }
         let related = externalBrainManager.relatedKnowledge(query: input.sourceContent)
-        do { let value = try await GenerateKnowledgeDraft(client: summaryClient, usageRepository: aiUsageRepository)(input: input, type: type, related: related, provider: defaultAIProvider); try knowledgeDraftRepository?.saveKnowledgeDraft(value); knowledgeDraft = value; loadKnowledge() }
+        do { let value = try await GenerateKnowledgeDraft(client: summaryClient, usageRepository: aiUsageRepository)(input: input, type: type, related: related, provider: knowledgeDraftAIProvider); try knowledgeDraftRepository?.saveKnowledgeDraft(value); knowledgeDraft = value; loadKnowledge() }
         catch { knowledgeDraftError = error.localizedDescription }
     }
 

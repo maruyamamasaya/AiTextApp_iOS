@@ -169,7 +169,7 @@ private func temporaryBrain() throws -> (URL, ExternalBrainCache) {
     for source in KnowledgeDraftSource.allCases {
         let input = KnowledgeDraftInput(source: source, sourceContent: "Humanの明示内容とAIの提案", context: "Human requestとAI statementを区別")
         let request = try KnowledgeDraftPrompt.request(input: input, type: .memory, project: "aitextapp", related: [])
-        #expect(request.prompt.contains("sourceに存在しない事実を追加しない")); #expect(request.prompt.contains("HumanとAIの発言を混同しない")); #expect(request.prompt.contains("Markdown見出しと本文だけ")); #expect(request.prompt.contains(source.rawValue)); #expect(request.usageContext?.feature == .knowledgeDraft); #expect(request.usageContext?.sourceType == source)
+        #expect(request.prompt.contains("sourceに存在しない事実を追加しない")); #expect(request.prompt.contains("HumanとAIの発言を混同しない")); #expect(request.prompt.contains("Markdown見出しと本文だけ")); #expect(request.prompt.contains(source.rawValue)); #expect(request.usageContext?.feature == .knowledgeDraft); #expect(request.usageContext?.sourceType == source); #expect(request.generationProfile == .knowledgeDraft); #expect(request.generationProfile.reasoningEffort == .medium)
     }
 }
 

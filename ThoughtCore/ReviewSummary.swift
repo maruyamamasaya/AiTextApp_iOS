@@ -46,11 +46,18 @@ public struct ReviewSummaryRequest: Equatable, Sendable {
     public let prompt: String
     public let usageContext: AIAPIUsageContext?
     public let provider: AIProvider
+    public let generationProfile: AIGenerationProfile
 
-    public init(prompt: String, usageContext: AIAPIUsageContext? = nil, provider: AIProvider = .gemini) {
+    public init(
+        prompt: String,
+        usageContext: AIAPIUsageContext? = nil,
+        provider: AIProvider = .gemini,
+        generationProfile: AIGenerationProfile = .reviewSummary
+    ) {
         self.prompt = prompt
         self.usageContext = usageContext
         self.provider = provider
+        self.generationProfile = generationProfile
     }
 }
 
@@ -110,6 +117,34 @@ public enum AIProvider: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .gemini: ReviewSummaryAIConfiguration.geminiModelName
         case .openAI: ReviewSummaryAIConfiguration.openAIModelName
+        }
+    }
+}
+
+public enum AIReasoningEffort: String, Equatable, Sendable {
+    case low
+    case medium
+}
+
+public enum AIGenerationProfile: String, Equatable, Sendable {
+    case concisePersona
+    case dailySummary
+    case knowledgeDraft
+    case reviewSummary
+
+    public var reasoningEffort: AIReasoningEffort {
+        switch self {
+        case .concisePersona: .low
+        case .dailySummary, .knowledgeDraft, .reviewSummary: .medium
+        }
+    }
+
+    public var maxOutputTokens: Int {
+        switch self {
+        case .concisePersona: 1_024
+        case .reviewSummary: 2_048
+        case .knowledgeDraft: 4_096
+        case .dailySummary: 8_192
         }
     }
 }
@@ -189,7 +224,11 @@ public struct ProviderRoutingReviewSummaryClient: ReviewSummaryClient {
 }
 
 public protocol ReviewSummaryGeneratingTransport: Sendable {
-    func generateContent(prompt: String, modelName: String) async throws -> String?
+    func generateContent(
+        prompt: String,
+        modelName: String,
+        generationProfile: AIGenerationProfile
+    ) async throws -> String?
 }
 
 /// Provider-independent client logic around the Firebase AI Logic transport.
@@ -209,7 +248,8 @@ public struct FirebaseReviewSummaryClient: ReviewSummaryClient {
     public func generateSummary(_ request: ReviewSummaryRequest) async throws -> ReviewSummaryResponse {
         guard let text = try await transport.generateContent(
             prompt: request.prompt,
-            modelName: modelName
+            modelName: modelName,
+            generationProfile: request.generationProfile
         ) else {
             throw ReviewSummaryError.emptyResponse
         }
@@ -287,7 +327,7 @@ public struct PrepareReviewSummary: Sendable {
         return ReviewSummaryPreview(
             interval: interval,
             thoughts: thoughts,
-            request: ReviewSummaryRequest(prompt: prompt)
+            request: ReviewSummaryRequest(prompt: prompt, generationProfile: .reviewSummary)
         )
     }
 }

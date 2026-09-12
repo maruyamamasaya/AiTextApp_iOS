@@ -228,7 +228,7 @@ public enum AIThoughtReplyPrompt {
         --- Output Rules ---
         このThoughtに対する返信を日本語140文字以内で返してください。前置き、引用符、Markdown、文字数説明は不要です。
         """
-        return AIThoughtReplyPreview(persona: persona, configuration: configuration, targetThought: targetThought, userRequest: normalizedRequest, context: context, externalBrain: externalBrain, personaStatements: personaStatements, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .thoughtReply, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0), provider: configuration.provider))
+        return AIThoughtReplyPreview(persona: persona, configuration: configuration, targetThought: targetThought, userRequest: normalizedRequest, context: context, externalBrain: externalBrain, personaStatements: personaStatements, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .thoughtReply, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0), provider: configuration.provider, generationProfile: .concisePersona))
     }
 }
 
@@ -320,7 +320,7 @@ public enum AIPostPrompt {
 
         日本語で140文字以内の投稿本文だけを返してください。前置き、引用符、Markdown、文字数の説明は付けないでください。
         """
-        return AIPostPreview(persona: persona, configuration: configuration, userRequest: request, externalBrain: externalBrain, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .personaPost, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0), provider: configuration.provider))
+        return AIPostPreview(persona: persona, configuration: configuration, userRequest: request, externalBrain: externalBrain, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .personaPost, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0), provider: configuration.provider, generationProfile: .concisePersona))
     }
 }
 

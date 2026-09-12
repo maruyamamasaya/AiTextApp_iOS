@@ -22,7 +22,7 @@ Knowledge Quality & Consolidationは現行schema v15（機能追加時v14）、�
 
 GitHub Repository Settingsは設定modelのCodable round-trip、secret fieldを持たないこと、Draft／Knowledge pathのdomain正本、401／403／404とrate limitの分類を`ExternalBrainTests.swift`で検証します。UserDefaults復元、Keychain保存・置換・削除、既存GitHub clientへの同一設定反映、GETだけの実接続確認はMac上のapp integration検証対象です。
 
-AI API Usage Analyticsは`AIAPIUsageTests.swift`で現行schema v15上の保存・再読込、Knowledge Draft source type、success／failure／cancel／retry、Persona有無、External Brain有無、character、実測tokenのnil保持、Latency、Error分類、今日／7日／30日／全期間と各dimension、本文系columnを持たないprivacy、Telemetry書込失敗時の生成結果維持を検証します。v13なのに追加列が欠けた既存DBを構築し、起動時の非破壊補修、該当SELECT、再実行可能性も検証します。加えて、最新versionを名乗りながら旧Relation制約を持つDBのv15自動補修と、必須table欠落をhealth checkが拒否することを検証します。
+AI API Usage Analyticsは`AIAPIUsageTests.swift`で現行schema v15上の保存・再読込、Knowledge Draft source type、success／failure／cancel／retry、Persona有無、External Brain有無、character、実測tokenのnil保持、Latency、Error分類、今日／7日／30日／全期間と各dimension、本文系columnを持たないprivacy、Telemetry書込失敗時の生成結果維持を検証します。v13なのに追加列が欠けた既存DBを構築し、起動時の非破壊補修、該当SELECT、再実行可能性も検証します。加えて、最新versionを名乗りながら旧Relation制約を持つDBのv15自動補修と、必須table欠落をhealth checkが拒否することを検証します。生成requestについてはPersona系の`concisePersona`／low／1,024 token、Daily SummaryのOpenAI／`dailySummary`／medium、Knowledge Draftの`knowledgeDraft`／mediumが固定されることをCore testで確認します。
 
 ## UI Test
 
@@ -56,7 +56,7 @@ Daily SummaryはThoughtがある日／ない日、要約済み状態、過去月
 
 XcodeでFirebase package resolveとapp targetのcompileを行った後、Debug Providerを登録したSimulator、App Attestを登録した実機の順で明示送信を確認します。成功時のSQLite provider／model、未設定plist、未登録Debug token、App Check拒否、offline、429／quota、その他API、空応答を確認します。Console設定や実APIを必要とする検証は通常のUnit Testへ組み込みません。
 
-OpenAI直接接続は個人所有実機だけで確認します。設定画面でAPI keyの未設定／保存済み／削除状態、Keychain保存後の再起動、401／403、429、offline、空応答を確認し、Gemini／OpenAIそれぞれでPersona Post、AI Reply、Daily Summary、Knowledge Draftのprovider／modelとUsageを確認します。API keyそのものをテストfixture、Screenshot attachment、ログへ含めません。TestFlight／App Store用archiveの検証前には、直接接続をバックエンド方式へ置き換えることを確認します。
+OpenAI直接接続は個人所有実機だけで確認します。設定画面でAPI keyの未設定／保存済み／削除状態、Keychain保存後の再起動、401／403、429、offline、空応答を確認します。Persona Post／手動Reply／自動ReplyはPersonaで選んだGemini／OpenAIとlow、Daily SummaryはOpenAIとmedium、Knowledge Draftは設定したProviderとmediumが実応答・Usageへ反映されることを確認します。API keyそのものをテストfixture、Screenshot attachment、ログへ含めません。TestFlight／App Store用archiveの検証前には、直接接続をバックエンド方式へ置き換えることを確認します。
 
 ## General Checks
 

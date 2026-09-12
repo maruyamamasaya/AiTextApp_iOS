@@ -439,13 +439,17 @@ private struct SettingsView: View {
                 }
 
                 Section("AI") {
-                    Picker("既定のAI Provider", selection: $store.defaultAIProvider) {
+                    LabeledContent("Daily Summary") {
+                        Text("OpenAI · \(ReviewSummaryAIConfiguration.openAIModelName) · medium")
+                            .foregroundStyle(.secondary)
+                    }
+                    Picker("Knowledge DraftのAI Provider", selection: $store.knowledgeDraftAIProvider) {
                         ForEach(AIProvider.allCases) { provider in
                             Text(provider.displayName).tag(provider)
                         }
                     }
-                    .accessibilityIdentifier("defaultAIProviderPicker")
-                    Text("Daily SummaryとKnowledge Draftに使用します。AIペルソナは、それぞれの編集画面でProviderを選べます。使用Model: \(store.defaultAIProvider.defaultModel)")
+                    .accessibilityIdentifier("knowledgeDraftAIProviderPicker")
+                    Text("Knowledge Draft: \(store.knowledgeDraftAIProvider.defaultModel) · medium。AIペルソナの投稿・手動返信・自動返信はPersonaごとにProviderを選択でき、どちらもlowで生成します。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
@@ -1956,6 +1960,9 @@ private struct AIPersonaEditorView: View {
                         }
                     }
                     LabeledContent("Model", value: provider.defaultModel)
+                    LabeledContent("思考量", value: "Low")
+                    Text("このProviderはAI Personaの投稿・手動返信・自動返信に共通で使います。")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Text(provider == .gemini ? "Firebase AI LogicからGeminiを呼び出します。" : "この端末のKeychainに保存したAPI keyでOpenAIを直接呼び出します。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }

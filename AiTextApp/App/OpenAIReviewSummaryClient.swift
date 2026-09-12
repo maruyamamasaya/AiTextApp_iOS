@@ -51,9 +51,20 @@ enum OpenAIAPIKeyStore {
 
 struct OpenAIDirectReviewSummaryClient: ReviewSummaryClient {
     private struct RequestBody: Encodable {
+        struct Reasoning: Encodable {
+            let effort: String
+        }
+
         let model: String
         let input: String
         let store: Bool
+        let reasoning: Reasoning
+        let maxOutputTokens: Int
+
+        private enum CodingKeys: String, CodingKey {
+            case model, input, store, reasoning
+            case maxOutputTokens = "max_output_tokens"
+        }
     }
 
     private struct ResponseBody: Decodable {
@@ -96,7 +107,13 @@ struct OpenAIDirectReviewSummaryClient: ReviewSummaryClient {
         urlRequest.timeoutInterval = 60
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.httpBody = try JSONEncoder().encode(RequestBody(model: modelName, input: request.prompt, store: false))
+        urlRequest.httpBody = try JSONEncoder().encode(RequestBody(
+            model: modelName,
+            input: request.prompt,
+            store: false,
+            reasoning: .init(effort: request.generationProfile.reasoningEffort.rawValue),
+            maxOutputTokens: request.generationProfile.maxOutputTokens
+        ))
 
         let data: Data
         let response: URLResponse

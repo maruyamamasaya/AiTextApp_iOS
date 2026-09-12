@@ -12,7 +12,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ## 実装済み
 
-- Gemini／OpenAIのAI Provider切替。既存Personaと既定ProviderはGeminiを維持し、AI Personaごとの投稿・返信はPersona設定、Daily Summary／Knowledge DraftはSettingsの既定Providerで選択する。個人所有端末だけへXcodeから導入する暫定運用として、OpenAI API keyは`WhenUnlockedThisDeviceOnly`のKeychainへ保存し、Responses APIへ直接送る。schema v19でPersona設定にproviderを非破壊追加し、生成開始時のprovider／modelをrequestとUsageへ固定する。TestFlight／App Store／第三者配布へ進む前に、API keyを端末から除去してバックエンド＋Secret管理へ移行する。
+- Gemini／OpenAIのAI Provider切替と用途別生成Profile。AI Personaごとの投稿・手動返信・自動返信はPersona設定でGemini／OpenAIを選択し、両Providerとも`low`、最大出力1,024 tokenで生成する。Daily SummaryはOpenAIの`medium`、最大8,192 tokenへ固定し、Knowledge DraftはSettingsでProviderを選択して`medium`、最大4,096 tokenで生成する。個人所有端末だけへXcodeから導入する暫定運用として、OpenAI API keyは`WhenUnlockedThisDeviceOnly`のKeychainへ保存し、Responses APIへ直接送る。schema v19でPersona設定にproviderを非破壊追加し、生成開始時のprovider／model／generation profileをrequestへ固定する。TestFlight／App Store／第三者配布へ進む前に、API keyを端末から除去してバックエンド＋Secret管理へ移行する。
 
 - Conversation中心のAI返信／投稿履歴。Human ThoughtでactiveなAI Personaを@メンションすると、元ThoughtとMentionを先に保存・表示してから各AIが自動返信する。生成中／失敗／再試行をTimelineとConversationへ表示し、失敗しても元Thoughtを保持する。AI返信は通常Thought＋author＋`repliesTo`＋生成metadataとして保存し、同一対象・同一AIの二重返信を拒否しつつ複数AI返信を許可する。
 - `continues`／`repliesTo`を統合する`LoadConversationThread`を追加し、root、nodes、edges、currentPath、leaves、最新leafをDBから再構築する。Thought DetailはConversation表示へ移行し、通常返信は選択Thoughtではなく最新leafへ、過去地点への返信は`…`内の「この投稿から返信を分岐」へ分離した。会話Primary Actionとタグ／Knowledge Draft／削除などの管理操作も分離した。
@@ -81,8 +81,8 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - SQLiteの日付範囲query（開始inclusive／終了exclusive）とRelation件数の一括query。
 - Files／iCloud Driveのユーザー選択フォルダへSQLite Online Backup APIの完全snapshotを保存する外部災害復旧バックアップ。
 - Thought原文と分離したSQLite schema v3の`review_summaries`と、通信／保存を抽象化した要約use case。
-- Firebase Apple SDK 12.17.0以降の`FirebaseAILogic`／`FirebaseAppCheck`／`FirebaseCore`依存と、通常起動でFirebase AI Logicを選ぶcomposition root。
-- Daily Summaryの確定promptを変更せず送るFirebase transport、中央管理した`firebase-ai-logic`／`gemini-3.7-flash`、成功時だけ既存SQLite保存へ進む実クライアント。
+- Firebase Apple SDK 12.17.0以降の`FirebaseAILogic`／`FirebaseAppCheck`／`FirebaseCore`依存と、Gemini／OpenAIをrequest単位で選ぶcomposition root。
+- Daily Summaryの確定promptをOpenAI `gpt-5.6-luna`へmediumで送り、成功時だけ既存SQLite保存へ進む実クライアント。Gemini transportはPersona系と選択時のKnowledge Draftに利用する。
 - Firebase未設定、App Check、rate limit、network、その他API、空応答を区別するエラー境界。DebugはApp Check Debug Provider、ReleaseはApp AttestをFirebase初期化前に設定する。
 - SDK非依存transportによるFirebaseクライアント変換テスト。MockクライアントはCore／UIテスト用として維持。
 - 選択期間ごとのAI要約履歴画面。再要約結果を新しい順に表示し、最新、生成日時、対象件数、生成元を確認可能。
@@ -100,7 +100,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - タグ追加／解除transaction、deleted Thoughtを除外するタグ一覧・タグ別query、v1〜v3から既存Thoughtを保持するmigration経路。
 - Timelineから開くローカル分析画面。今日／過去7日／過去30日、活動日数、1活動日平均、30日の日別カレンダー（件数・濃淡・今日の枠線）、曜日別・時間帯別分布、上位5タグ、Continuationを持つThought数を表示。
 - typed分析model、端末Calendarから30日の日／時間帯境界を構築する`LoadThoughtAnalytics`、CRUDから分離したread-only `ThoughtAnalyticsRepository`。
-- Daily Summary v3: Calendar日境界、RepositoryでのHuman限定取得、Humanタグ／Relation／時間帯分析、構造化Gemini応答、既存Summary互換の独立SQLite保存、月間カレンダー、日別詳細、Timeline統合。AI Summaryは未実装で別責務。
+- Daily Summary v3: Calendar日境界、RepositoryでのHuman限定取得、Humanタグ／Relation／時間帯分析、OpenAI `medium`の構造化応答、既存Summary互換の独立SQLite保存、月間カレンダー、日別詳細、Timeline統合。AI Summaryは未実装で別責務。
 - SQLiteの境界CTE＋`COUNT`／`GROUP BY`、タグJOIN集計、activeな期間内親子のRelation集計。原文全件をViewへ取得せず、deleted／期間外ThoughtをSQLで除外する。
 
 ## 未実装

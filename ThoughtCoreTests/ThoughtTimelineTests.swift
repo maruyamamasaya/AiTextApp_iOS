@@ -21,6 +21,7 @@ private actor RecordingReviewSummaryClient: ReviewSummaryClient {
 private struct ReviewSummaryTransportCall: Equatable, Sendable {
     let prompt: String
     let modelName: String
+    let generationProfile: AIGenerationProfile
 }
 
 private actor RecordingReviewSummaryTransport: ReviewSummaryGeneratingTransport {
@@ -33,8 +34,8 @@ private actor RecordingReviewSummaryTransport: ReviewSummaryGeneratingTransport 
         self.error = error
     }
 
-    func generateContent(prompt: String, modelName: String) async throws -> String? {
-        calls.append(ReviewSummaryTransportCall(prompt: prompt, modelName: modelName))
+    func generateContent(prompt: String, modelName: String, generationProfile: AIGenerationProfile) async throws -> String? {
+        calls.append(ReviewSummaryTransportCall(prompt: prompt, modelName: modelName, generationProfile: generationProfile))
         if let error { throw error }
         return response
     }
@@ -747,7 +748,8 @@ struct ThoughtHistoryReviewTests {
 
         #expect(await transport.recordedCalls() == [ReviewSummaryTransportCall(
             prompt: request.prompt,
-            modelName: ReviewSummaryAIConfiguration.modelName
+            modelName: ReviewSummaryAIConfiguration.modelName,
+            generationProfile: .reviewSummary
         )])
         #expect(response.text == "Firebaseの要約")
         #expect(response.provider == ReviewSummaryAIConfiguration.providerName)
@@ -1531,6 +1533,9 @@ struct PersonaTests {
 
         #expect(saved.provider == .openAI)
         #expect(preview.request.provider == .openAI)
+        #expect(preview.request.generationProfile == .concisePersona)
+        #expect(preview.request.generationProfile.reasoningEffort == .low)
+        #expect(preview.request.generationProfile.maxOutputTokens == 1_024)
         #expect(try fixture.sqliteUserVersion() == SQLiteThoughtRepository.schemaVersion)
     }
 

@@ -25,14 +25,23 @@ enum FirebaseAIBootstrap {
 }
 
 struct FirebaseAILogicTransport: ReviewSummaryGeneratingTransport {
-    func generateContent(prompt: String, modelName: String) async throws -> String? {
+    func generateContent(
+        prompt: String,
+        modelName: String,
+        generationProfile: AIGenerationProfile
+    ) async throws -> String? {
         guard FirebaseApp.app() != nil else {
             throw ReviewSummaryServiceError.firebaseNotConfigured
         }
 
         do {
             let ai = FirebaseAI.firebaseAI(backend: .googleAI())
-            let model = ai.generativeModel(modelName: modelName)
+            let thinkingLevel: ThinkingConfig.ThinkingLevel = generationProfile.reasoningEffort == .low ? .low : .medium
+            let generationConfig = GenerationConfig(
+                maxOutputTokens: generationProfile.maxOutputTokens,
+                thinkingConfig: ThinkingConfig(thinkingLevel: thinkingLevel)
+            )
+            let model = ai.generativeModel(modelName: modelName, generationConfig: generationConfig)
             return try await model.generateContent(prompt).text
         } catch let error as ReviewSummaryServiceError {
             throw error

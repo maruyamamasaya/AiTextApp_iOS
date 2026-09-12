@@ -13,7 +13,7 @@ OpenAIの公式API認証ガイドは、API keyをブラウザやアプリなど�
 
 - OpenAI API keyはSettingsの`SecureField`から入力し、`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`のKeychain itemへ保存する。
 - Keyはソース、plist、UserDefaults、SQLite、Export、backup、analytics、ログ、Screenshotへ含めない。
-- OpenAI選択時はiOS appからResponses APIへHTTPSで直接通信し、`store: false`を指定する。
+- OpenAI選択時はiOS appからResponses APIへHTTPSで直接通信し、`store: false`を指定する。用途別generation profileから`reasoning.effort`と`max_output_tokens`も明示し、AI Personaの投稿・手動返信・自動返信はlow、Daily SummaryとKnowledge Draftはmediumとする。
 - GeminiはFirebase AI LogicとApp Checkを継続する。OpenAI直接接続にFirebase Functions、Secret Manager、Blaze planは使わない。
 - Keyの削除UIと、未設定・認証失敗・rate limit・network・API errorの境界を提供する。
 

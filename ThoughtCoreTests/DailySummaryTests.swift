@@ -20,15 +20,17 @@ struct DailySummaryTests {
         #expect(preview.interval.start == start)
         #expect(preview.interval.end == calendar.date(byAdding: .day, value: 1, to: start))
         #expect(preview.thoughts == [active])
-        #expect(preview.request.provider == .gemini)
+        #expect(preview.request.provider == .openAI)
+        #expect(preview.request.generationProfile == .dailySummary)
+        #expect(preview.request.generationProfile.reasoningEffort == .medium)
         #expect(!preview.request.prompt.contains("削除済み"))
         #expect(!preview.request.prompt.contains("翌日"))
     }
 
-    @Test func freezesSelectedProviderIntoPreview() throws {
+    @Test func fixesOpenAIProviderIntoPreview() throws {
         let start = calendar.startOfDay(for: Date())
         let repository = MemoryThoughtRepository(records: [Thought(body: "OpenAIでまとめる", createdAt: start.addingTimeInterval(60))])
-        let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar, provider: .openAI)
+        let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar)
         #expect(preview.request.provider == .openAI)
     }
 

@@ -27,13 +27,13 @@ Firebase Apple SDKはSwift Package Managerで12.17.0以降を指定し、app tar
 3. Xcodeでpackageをresolveし、`FirebaseCore`、`FirebaseAILogic`、`FirebaseAppCheck`がapp targetへリンクされていることを確認する。
 4. Debug buildを起動する。Debug configurationはApp Attest entitlementを持たず、Personal Teamでも署名可能にする。`AppCheckDebugProviderFactory`が出力するDebug tokenをFirebase ConsoleのApp Check > Manage debug tokensへ登録する。tokenはScheme、ソース、文書へ記録・コミットしない。
 5. Release buildは`AppAttestProviderFactory`と`AiTextApp.entitlements`のproduction App Attest環境を使う。ConsoleでApp Attestを登録し、実機で成功を確認してからenforcementを段階的に有効化する。
-6. Daily Summaryでプレビュー内容を確認して明示送信し、保存された要約のproviderが`firebase-ai-logic`、modelが`gemini-3.7-flash`であることを確認する。
+6. AI PersonaでGeminiを選び、投稿・手動返信・自動返信が`gemini-3.7-flash`のlowで生成されることを確認する。Daily SummaryはOpenAI固定のため、このGemini接続確認には使わない。
 
 `GoogleService-Info.plist`がない場合は起動を継続し、AI送信時に未設定エラーを表示します。App Check、429／quota、network、その他API、空応答はユーザー向けの別エラーへ変換します。Firebase ConsoleのenforcementはDebug tokenと実機App Attestの確認後に有効化してください。
 
 ### OpenAI Responses API接続
 
-この接続は、自分のiPhoneだけへXcodeから導入し、TestFlight／App Store／第三者配布を行わない期間だけの暫定運用です。設定 > AIのSecureFieldへOpenAI API keyを貼り付け、「OpenAI API keyを保存」を押します。キーは`WhenUnlockedThisDeviceOnly`のKeychainへ保存され、iCloud Keychain同期、端末移行、UserDefaults、SQLite、Export、backup、ログ、Gitの対象にしません。OpenAI選択時はResponses APIへ`store: false`で直接通信します。Firebase Functions、Secret Manager、Blaze planは使用しません。
+この接続は、自分のiPhoneだけへXcodeから導入し、TestFlight／App Store／第三者配布を行わない期間だけの暫定運用です。設定 > AIのSecureFieldへOpenAI API keyを貼り付け、「OpenAI API keyを保存」を押します。キーは`WhenUnlockedThisDeviceOnly`のKeychainへ保存され、iCloud Keychain同期、端末移行、UserDefaults、SQLite、Export、backup、ログ、Gitの対象にしません。OpenAI選択時はResponses APIへ`store: false`で直接通信します。AI Personaの投稿・手動返信・自動返信は`reasoning.effort: low`、Daily SummaryとKnowledge Draftは`medium`を使います。Daily SummaryはOpenAI固定、Knowledge Draftは設定画面でProviderを選択します。Firebase Functions、Secret Manager、Blaze planは使用しません。
 
 キーをコード、plist、Scheme environment、文書へ記録しないでください。端末の譲渡、紛失、侵害の疑いがある場合は設定画面から削除し、OpenAI側でも直ちに失効・再発行します。アプリをTestFlight／App Storeで配布する、第三者へ渡す、複数端末・複数利用者へ広げる、または継続運用へ移る前に、直接接続を停止してAPI keyをバックエンドのSecret管理へ移します。移行先には利用者認証、端末／アプリ検証、rate limit、model allowlist、入力上限、監視と利用停止手段を設けます。
 

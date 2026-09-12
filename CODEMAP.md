@@ -19,7 +19,7 @@
 - `AiTextApp/App/ExternalBackupManager.swift` — security-scoped bookmark、外部backup／RestoreのUI state。
 - `AiTextApp/App/FolderPicker.swift` — iOS標準Filesフォルダpicker bridge。
 - `AiTextApp/App/GeminiReviewSummaryClient.swift` — Firebase／App Check bootstrap、Firebase AI Logic transport、通常起動用client factory。
-- `AiTextApp/App/OpenAIReviewSummaryClient.swift` — 個人所有端末限定のOpenAI直接client、`ThisDeviceOnly` Keychain、Responses API request／response、token usage、HTTP error変換。
+- `AiTextApp/App/OpenAIReviewSummaryClient.swift` — 個人所有端末限定のOpenAI直接client、`ThisDeviceOnly` Keychain、Responses APIの`reasoning.effort`／`max_output_tokens`、response／token usage、HTTP error変換。
 - `AiTextApp/App/ExternalBrainManager.swift` — 単一GitHub Repository設定、Keychain token、read-only GitHub API、同期状態。
 - `AiTextApp/App/ExternalBrainManager.swift` — read用remoteと分離したGitHub Draft writer、`drafts/`へのnew-file-only保存、Read／Write Drafts capability表示。
 - `AiTextApp/App/TimelineView.swift`内`KnowledgeManagementView`／`KnowledgeDraftReviewView` — Draft一覧・検索・filter、Review編集、Approve／Reject、Promote確認、正式Knowledge一覧・詳細。
@@ -44,7 +44,7 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 
 - `ThoughtCore/ThoughtRepository.swift` — CRUD・本文検索・通常の日付範囲query・Daily Summary専用`fetchHumanThoughts(from:to:)`境界、Review期間計算、テスト用メモリ実装。
 - `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v19、Persona／投稿者／AI設定・Provider・生成来歴／メンション／AI返信Relation、Knowledge Review／Quality／usage、実カラム照合migration、各種query、旧JSON migration／2世代backup。
-- `ThoughtCore/ReviewSummary.swift` — AI要約model、immutable送信preview、通信／transport／保存protocol、中央provider／model設定、typed service error、対象準備／鮮度検証／生成・保存use case、Mock client。
+- `ThoughtCore/ReviewSummary.swift` — AI要約model、immutable送信preview、通信／transport／保存protocol、中央provider／model設定、用途別`AIGenerationProfile`、typed service error、対象準備／鮮度検証／生成・保存use case、Mock client。
 - `ThoughtCore/DailySummary.swift` — Human限定のv3 prompt、確定Humanタグ・時間帯・Human Relation、stale対応preview、準備／生成use case。既存v1／v2 modelの互換decodeは維持し、新規生成ではAI本文・`aiInteractions`を扱わない。
 - `ThoughtCore/ReviewSummaryExporter.swift` — 旧期間要約の互換コード。現在のUIからは利用せず、既存データを壊さないため保持する。
 - `ThoughtCore/ThoughtExporter.swift` — Repository経由のMarkdown／JSON生成。
