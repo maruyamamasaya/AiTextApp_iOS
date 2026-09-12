@@ -11,6 +11,9 @@ public protocol ThoughtRepository: Sendable {
     /// Returns active Thoughts in ascending creation order. `from` is inclusive
     /// and `to` is exclusive.
     func fetchThoughts(from startDate: Date, to endDate: Date) throws -> [Thought]
+    /// Returns only active Thoughts authored by a Human Persona, in ascending
+    /// creation order. This is the source boundary for Daily Summary.
+    func fetchHumanThoughts(from startDate: Date, to endDate: Date) throws -> [Thought]
     @discardableResult func softDelete(id: UUID, at date: Date) throws -> Bool
 }
 
@@ -27,7 +30,7 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
     private var authorIDs: [UUID: UUID] = [:]
     private var aiConfigurations: [UUID: AIPersonaConfiguration] = [:]
     private var aiGenerations: [UUID: AIPostGeneration] = [:]
-    private var mentionIDs: [UUID: UUID] = [:]
+    private var mentionsByThoughtID: [UUID: [ThoughtMention]] = [:]
     private let lock = NSLock()
 
     public init(records: [Thought] = [], relations: [ThoughtRelation] = [], summaries: [ReviewSummary] = [], dailySummaries: [DailySummary] = [], tags: [ThoughtTag] = [], thoughtTagIDs: [UUID: Set<UUID>] = [:]) {
@@ -63,15 +66,15 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         try lock.withLock {
             guard personas[authorPersonaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) }
             for mention in mentions { guard mention.thoughtID == thought.id, personas[mention.personaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) } }
-            if let first = mentions.first { mentionIDs[thought.id] = first.personaID }
+            mentionsByThoughtID[thought.id] = mentions
             records.append(thought); authorIDs[thought.id] = authorPersonaID
         }
     }
-    public func fetchMentionedPersonas(for thoughtIDs: [UUID]) throws -> [UUID: Persona] { lock.withLock { Dictionary(uniqueKeysWithValues: thoughtIDs.compactMap { id in mentionIDs[id].flatMap { personas[$0] }.map { (id, $0) } }) } }
+    public func fetchMentionedPersonas(for thoughtIDs: [UUID]) throws -> [UUID: Persona] { lock.withLock { Dictionary(uniqueKeysWithValues: thoughtIDs.compactMap { id in mentionsByThoughtID[id]?.first.flatMap { personas[$0.personaID] }.map { (id, $0) } }) } }
     public func fetchMentions(for thoughtIDs: [UUID]) throws -> [UUID: [ThoughtMention]] { lock.withLock {
         Dictionary(uniqueKeysWithValues: thoughtIDs.compactMap { thoughtID in
-            guard let personaID = mentionIDs[thoughtID], let persona = personas[personaID] else { return nil }
-            return (thoughtID, [ThoughtMention(thoughtID: thoughtID, personaID: personaID, handleSnapshot: persona.handle, rangeLocation: 0, rangeLength: 0)])
+            guard let values = mentionsByThoughtID[thoughtID] else { return nil }
+            return (thoughtID, values)
         })
     } }
 
@@ -94,6 +97,7 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         guard personas[authorPersonaID]?.kind == .ai, personas[authorPersonaID]?.deletedAt == nil, aiConfigurations[authorPersonaID] != nil,
               let target = records.first(where: { $0.id == targetThoughtID }), target.deletedAt == nil,
               generation.thoughtID == thought.id, generation.personaID == authorPersonaID, generation.kind == .reply, generation.replyTargetThoughtID == targetThoughtID else { throw CocoaError(.fileNoSuchFile) }
+        guard !aiGenerations.values.contains(where: { $0.kind == .reply && $0.replyTargetThoughtID == targetThoughtID && $0.personaID == authorPersonaID }) else { throw AIPostError.duplicateReply }
         let relation = ThoughtRelation(id: relationID, sourceThoughtID: thought.id, targetThoughtID: targetThoughtID, type: .repliesTo, createdAt: thought.createdAt)
         try validate(relation, includingSource: thought.id)
         records.append(thought); authorIDs[thought.id] = authorPersonaID; aiGenerations[thought.id] = generation; relations.append(relation)
@@ -108,6 +112,10 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         let ids = Set(thoughtIDs); return Dictionary(uniqueKeysWithValues: relations.filter { $0.type == .repliesTo && ids.contains($0.sourceThoughtID) }.map { ($0.sourceThoughtID, $0.targetThoughtID) })
     } }
     public func fetchAIPostGeneration(for thoughtID: UUID) throws -> AIPostGeneration? { lock.withLock { aiGenerations[thoughtID] } }
+    public func fetchRecentAIStatements(personaID: UUID, limit: Int) throws -> [Thought] { lock.withLock {
+        guard limit > 0 else { return [] }
+        return records.filter { authorIDs[$0.id] == personaID && $0.deletedAt == nil }.sorted { $0.createdAt > $1.createdAt }.prefix(limit).map { $0 }
+    } }
     public func fetchActiveAIReplyPersona(id: UUID) throws -> Persona? { lock.withLock { guard let persona = personas[id], persona.kind == .ai, persona.deletedAt == nil else { return nil }; return persona } }
     public func loadAIReplyContext(targetThoughtID: UUID, maximumEntries: Int) throws -> AIReplyContext { try lock.withLock {
         guard maximumEntries > 0, records.contains(where: { $0.id == targetThoughtID }) else { throw CocoaError(.fileNoSuchFile) }
@@ -124,7 +132,7 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         guard let body = ThoughtDraft.validBody(from: body), records.contains(where: { $0.id == targetThoughtID && $0.deletedAt == nil }) else { return nil }
         if let mentionedPersonaID { guard personas[mentionedPersonaID]?.deletedAt == nil else { throw CocoaError(.fileNoSuchFile) } }
         let thought = Thought(id: thoughtID, body: body, createdAt: now), relation = ThoughtRelation(id: relationID, sourceThoughtID: thoughtID, targetThoughtID: targetThoughtID, type: .repliesTo, createdAt: now)
-        try validate(relation, includingSource: thoughtID); records.append(thought); authorIDs[thoughtID] = Persona.defaultHumanID; if let mentionedPersonaID { mentionIDs[thoughtID] = mentionedPersonaID }; relations.append(relation); return thought
+        try validate(relation, includingSource: thoughtID); records.append(thought); authorIDs[thoughtID] = Persona.defaultHumanID; if let mentionedPersonaID, let persona = personas[mentionedPersonaID] { mentionsByThoughtID[thoughtID] = [.init(thoughtID: thoughtID, personaID: mentionedPersonaID, handleSnapshot: persona.handle, rangeLocation: 0, rangeLength: 0, createdAt: now)] }; relations.append(relation); return thought
     } }
 
     public func fetchTimeline() throws -> [Thought] {
@@ -145,6 +153,22 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         lock.withLock {
             records
                 .filter { $0.deletedAt == nil && $0.createdAt >= startDate && $0.createdAt < endDate }
+                .sorted {
+                    $0.createdAt == $1.createdAt
+                        ? $0.id.uuidString < $1.id.uuidString
+                        : $0.createdAt < $1.createdAt
+                }
+        }
+    }
+
+    public func fetchHumanThoughts(from startDate: Date, to endDate: Date) throws -> [Thought] {
+        lock.withLock {
+            records
+                .filter {
+                    $0.deletedAt == nil &&
+                    $0.createdAt >= startDate && $0.createdAt < endDate &&
+                    authorIDs[$0.id].flatMap { personas[$0] }?.kind == .human
+                }
                 .sorted {
                     $0.createdAt == $1.createdAt
                         ? $0.id.uuidString < $1.id.uuidString
@@ -407,6 +431,7 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         guard relation.sourceThoughtID != relation.targetThoughtID,
               records.contains(where: { $0.id == relation.targetThoughtID }),
               records.contains(where: { $0.id == relation.sourceThoughtID }) || includingSource == relation.sourceThoughtID,
+              !relations.contains(where: { $0.sourceThoughtID == relation.sourceThoughtID }),
               !relations.contains(where: {
                   $0.sourceThoughtID == relation.sourceThoughtID &&
                   $0.targetThoughtID == relation.targetThoughtID &&
@@ -420,7 +445,7 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
             guard visited.insert(candidate).inserted else { continue }
             if candidate == relation.sourceThoughtID { throw MemoryRelationError.invalidRelation }
             pending.append(contentsOf: relations
-                .filter { $0.sourceThoughtID == candidate && $0.type == .continues }
+                .filter { $0.sourceThoughtID == candidate }
                 .map(\.targetThoughtID))
         }
     }

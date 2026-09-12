@@ -1,27 +1,18 @@
 import SwiftUI
 
-enum AppRoute: String, Identifiable {
-    case quickCapture
-    var id: String { rawValue }
-
-    init?(externalURL: URL) {
-        guard QuickCaptureRoute.matches(externalURL) else { return nil }
-        self = .quickCapture
-    }
-}
-
 @main
 struct AiTextApp: App {
     @StateObject private var store: ThoughtStore
-    @State private var presentedRoute: AppRoute? = nil
+    @StateObject private var themeController = ThemeController()
 
     init() {
         // UI tests use an isolated repository so automation never touches a
         // person's Application Support database.
-        if ProcessInfo.processInfo.arguments.contains("--ui-testing-fail-posts") {
-            _store = StateObject(wrappedValue: ThoughtStore(repository: FailingThoughtRepository()))
-        } else if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
-            _store = StateObject(wrappedValue: ThoughtStore(repository: MemoryThoughtRepository()))
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
+            let repository = MemoryThoughtRepository()
+            let mio = Persona(displayName: "Mio", handle: "mio", kind: .ai)
+            try? repository.createAIPersona(mio, configuration: .init(personaID: mio.id, role: "対話相手", instructions: "短く自然に返信する", autoReplyEnabled: true))
+            _store = StateObject(wrappedValue: ThoughtStore(repository: repository, summaryClient: MockReviewSummaryClient(text: "一緒に考えてみましょう。")))
         } else {
             var restoreError: String?
             let fileManager = FileManager.default
@@ -46,30 +37,10 @@ struct AiTextApp: App {
 
     var body: some Scene {
         WindowGroup {
-            TimelineView(store: store, presentedRoute: $presentedRoute)
-                .onOpenURL { url in
-                    guard let route = AppRoute(externalURL: url) else { return }
-                    presentedRoute = route
-                }
-                .sheet(item: $presentedRoute) { route in
-                    switch route {
-                    case .quickCapture:
-                        QuickCaptureView(store: store)
-                    }
-                }
+            ThemeHost(controller: themeController) {
+                MainTabView(store: store)
+            }
+            .environmentObject(themeController)
         }
     }
-}
-
-private final class FailingThoughtRepository: ThoughtRepository, @unchecked Sendable {
-    private let memory = MemoryThoughtRepository()
-    func create(_ thought: Thought) throws { throw CocoaError(.fileWriteUnknown) }
-    func fetchTimeline() throws -> [Thought] { try memory.fetchTimeline() }
-    func search(query: String) throws -> [Thought] { try memory.search(query: query) }
-    func fetchByID(_ id: UUID) throws -> Thought? { try memory.fetchByID(id) }
-    func fetchAll() throws -> [Thought] { try memory.fetchAll() }
-    func fetchThoughts(from startDate: Date, to endDate: Date) throws -> [Thought] {
-        try memory.fetchThoughts(from: startDate, to: endDate)
-    }
-    func softDelete(id: UUID, at date: Date) throws -> Bool { try memory.softDelete(id: id, at: date) }
 }

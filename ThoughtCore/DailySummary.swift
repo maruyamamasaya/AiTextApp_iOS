@@ -127,25 +127,26 @@ public struct DailySummaryThoughtInput: Equatable, Sendable {
 }
 
 public enum DailySummaryPrompt {
-    public static let version = 2
+    public static let version = 3
     public static func make(inputs: [DailySummaryThoughtInput], relations: [ThoughtRelation], existingTags: [String], calendar: Calendar) throws -> String {
         guard !inputs.isEmpty else { throw ReviewSummaryError.noThoughts }
+        guard inputs.allSatisfy({ $0.author.kind == .human }) else { throw ReviewSummaryError.stalePreview }
         let ids = Dictionary(uniqueKeysWithValues: inputs.enumerated().map { ($0.element.thought.id, $0.offset + 1) })
         let formatter = DateFormatter(); formatter.calendar = calendar; formatter.timeZone = calendar.timeZone; formatter.dateFormat = "HH:mm"
         let bodies = inputs.enumerated().map { index, input in
-            let author = input.author.kind == .human ? "Human" : "AI: \(input.author.displayName)"
-            let tags = input.author.kind == .human ? input.tags.map(\.name).joined(separator: ", ") : ""
+            let tags = input.tags.map(\.name).joined(separator: ", ")
             let links = relations.filter { $0.sourceThoughtID == input.thought.id }.compactMap { relation in ids[relation.targetThoughtID].map { "\(relation.type.rawValue) Thought \($0)" } }.joined(separator: ", ")
-            return "[\(formatter.string(from: input.thought.createdAt))]\nThought \(index + 1)\nAuthor: \(author)\nTimeOfDay: \(input.timeOfDay.title)\nTags: \(tags.isEmpty ? "なし" : tags)\(links.isEmpty ? "" : "\nRelation: \(links)")\n\(input.thought.body)"
+            return "[\(formatter.string(from: input.thought.createdAt))]\nThought \(index + 1)\nAuthor: Human\nTimeOfDay: \(input.timeOfDay.title)\nTags: \(tags.isEmpty ? "なし" : tags)\(links.isEmpty ? "" : "\nRelation: \(links)")\n\(input.thought.body)"
         }.joined(separator: "\n\n")
         return """
-        以下は利用者が明示的に選択した1日分のThoughtです。Human Thoughtを振り返りの主データとし、AI Thought／AI Replyは「AIとの対話」だけで補助的に扱ってください。AIの発言をHuman本人の考えとして扱わないでください。
+        以下は1日分のうち、author PersonaのkindがHumanであるThoughtだけです。Daily Summaryは「その日にユーザー本人が何を考え、何に関心を持ち、どんな思考の流れがあったか」を要約してください。
+        AI Personaの投稿・返信・フリートーク・生成本文は入力に含まれていません。推測でAIの発言を補ったり、ユーザー本人の考えとして扱ったりしないでください。
         Human Thoughtにない内容を補完せず、診断的表現、性格・生活習慣の断定、少数データからの傾向断定を避けてください。
         タグ別分析はHuman Thoughtに実際に付与済みのタグだけを事実として使ってください。タグなしThoughtへ既存タグを付けたことにせず、AIタグ候補を既存タグとして扱わず、自動変更を指示しないでください。
         Thought単位のAIタグ候補はthoughtTagSuggestionsだけへ提案し、同じSummaryの概要・テーマ・タグ別分析では確定情報として再利用しないでください。thoughtIndexは下記の連番を使い、Human Thoughtだけを対象にしてください。不正な連番やUUIDは出力しないでください。意味的に近い既存タグがある場合は既存の表記を優先しますが、同義だと断定しないでください。
         時間帯情報は提供しますが、明確な意味がある場合だけ分析してください。投稿数が少ない、関連が弱い、偶然と考えられる場合は言及せずtimeOfDayInsightsを空配列にしてください。時間帯から性格や生活習慣を断定しないでください。
         JSON以外を出力せず、次のキーを必ず含めてください。
-        {"overview":"", "themes":[], "humanThoughtPatterns":[], "deepDives":[], "concerns":[], "thoughtFlow":"", "tagGroups":[{"tagName":"","summary":"","themes":[],"thoughtCount":0}], "aiInteractions":[{"personaName":"","topics":[],"summary":""}], "timeOfDayInsights":[{"period":"","insight":""}], "continuationCandidates":[], "carryOvers":[], "existingTagCandidates":[], "newTagCandidates":[], "thoughtTagSuggestions":[{"thoughtIndex":1,"tagName":"","reason":""}]}
+        {"overview":"", "themes":[], "humanThoughtPatterns":[], "deepDives":[], "concerns":[], "thoughtFlow":"", "tagGroups":[{"tagName":"","summary":"","themes":[],"thoughtCount":0}], "timeOfDayInsights":[{"period":"","insight":""}], "continuationCandidates":[], "carryOvers":[], "existingTagCandidates":[], "newTagCandidates":[], "thoughtTagSuggestions":[{"thoughtIndex":1,"tagName":"","reason":""}]}
 
         既存タグ: \(existingTags.joined(separator: ", "))
         Thought（古い順、内部UUIDなし）:
@@ -166,22 +167,22 @@ public struct PrepareDailySummary: Sendable {
         let start = calendar.startOfDay(for: day)
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { throw ReviewSummaryError.noThoughts }
         let interval = DateInterval(start: start, end: end)
-        let records = try thoughts.fetchThoughts(from: start, to: end)
+        let records = try thoughts.fetchHumanThoughts(from: start, to: end)
         guard !records.isEmpty else { throw ReviewSummaryError.noThoughts }
         let recordIDs = Set(records.map(\.id))
         let authorMap = try authors.fetchPersonas(for: records.map(\.id))
         var names = Set<String>(), inputs: [DailySummaryThoughtInput] = [], relationSnapshot: [ThoughtRelation] = []
         for thought in records {
-            guard let author = authorMap[thought.id] else { throw ReviewSummaryError.stalePreview }
+            guard let author = authorMap[thought.id], author.kind == .human else { throw ReviewSummaryError.stalePreview }
             let thoughtTags = try tags.fetchTags(for: thought.id)
-            if author.kind == .human { thoughtTags.forEach { names.insert($0.name) } }
-            inputs.append(DailySummaryThoughtInput(thought: thought, author: author, tags: author.kind == .human ? thoughtTags : [], timeOfDay: .containing(hour: calendar.component(.hour, from: thought.createdAt))))
+            thoughtTags.forEach { names.insert($0.name) }
+            inputs.append(DailySummaryThoughtInput(thought: thought, author: author, tags: thoughtTags, timeOfDay: .containing(hour: calendar.component(.hour, from: thought.createdAt))))
             relationSnapshot.append(contentsOf: try relations.fetchBySourceThoughtID(thought.id).filter { $0.type == .continues || $0.type == .repliesTo })
         }
         let existing = names.sorted()
-        let counts = try relations.fetchContinuationCounts(for: records.map(\.id))
         relationSnapshot = relationSnapshot.filter { recordIDs.contains($0.targetThoughtID) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        return DailySummaryPreview(interval: interval, thoughts: records, existingTags: existing, continuationCount: counts.values.reduce(0, +), request: .init(prompt: try DailySummaryPrompt.make(inputs: inputs, relations: relationSnapshot, existingTags: existing, calendar: calendar), usageContext: .init(feature: .dailySummary)), inputs: inputs, relations: relationSnapshot)
+        let continuationCount = relationSnapshot.filter { $0.type == .continues }.count
+        return DailySummaryPreview(interval: interval, thoughts: records, existingTags: existing, continuationCount: continuationCount, request: .init(prompt: try DailySummaryPrompt.make(inputs: inputs, relations: relationSnapshot, existingTags: existing, calendar: calendar), usageContext: .init(feature: .dailySummary)), inputs: inputs, relations: relationSnapshot)
     }
 }
 
@@ -191,7 +192,7 @@ public struct GenerateDailySummary: Sendable {
     private let usage: AIAPIUsageRecorder?
     public init(client: any ReviewSummaryClient, repository: any DailySummaryRepository, usageRepository: (any AIAPIUsageRepository)? = nil) { self.client = client; self.repository = repository; usage = usageRepository.map { AIAPIUsageRecorder(repository: $0) } }
     public func callAsFunction(preview: DailySummaryPreview, now: Date = Date()) async throws -> DailySummary {
-        guard !preview.thoughts.isEmpty else { throw ReviewSummaryError.noThoughts }
+        guard !preview.thoughts.isEmpty, preview.inputs.allSatisfy({ $0.author.kind == .human }) else { throw ReviewSummaryError.noThoughts }
         let finish: @Sendable (ReviewSummaryResponse) async throws -> DailySummary = { response in
         let raw = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let json = raw.hasPrefix("```") ? raw.replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "").trimmingCharacters(in: .whitespacesAndNewlines) : raw
@@ -199,10 +200,9 @@ public struct GenerateDailySummary: Sendable {
         let content = try JSONDecoder().decode(DailySummaryContent.self, from: data)
         let existing = Set(preview.existingTags)
         let humanTagCounts = Dictionary(grouping: preview.inputs.filter { $0.author.kind == .human }.flatMap { input in input.tags.map { ($0.name, input.thought.id) } }, by: { $0.0 }).mapValues { Set($0.map { $0.1 }).count }
-        let aiNames = Set(preview.inputs.filter { $0.author.kind == .ai }.map { $0.author.displayName })
         let resolvedSuggestions = content.thoughtTagSuggestions.compactMap { suggestion -> DailySummaryThoughtTagSuggestion? in
             let offset = suggestion.thoughtIndex - 1
-            guard preview.inputs.indices.contains(offset), preview.inputs[offset].author.kind == .human,
+            guard preview.inputs.indices.contains(offset),
                   let name = ThoughtTag.displayName(from: suggestion.tagName), !suggestion.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
             return DailySummaryThoughtTagSuggestion(thoughtIndex: suggestion.thoughtIndex, thoughtID: preview.inputs[offset].thought.id, tagName: name, reason: suggestion.reason.trimmingCharacters(in: .whitespacesAndNewlines))
         }
@@ -218,7 +218,9 @@ public struct GenerateDailySummary: Sendable {
             continuationCandidates: content.continuationCandidates,
             carryOvers: content.carryOvers,
             tagGroups: content.tagGroups.compactMap { group in humanTagCounts[group.tagName].map { DailySummaryTagGroup(tagName: group.tagName, summary: group.summary, themes: group.themes, thoughtCount: $0) } },
-            aiInteractions: content.aiInteractions.filter { aiNames.contains($0.personaName) },
+            // Kept in the persisted model only so existing v2 summaries remain decodable.
+            // New Daily Summaries never save AI-authored content or AI-derived summaries.
+            aiInteractions: [],
             timeOfDayInsights: content.timeOfDayInsights,
             thoughtTagSuggestions: resolvedSuggestions
         )

@@ -28,13 +28,9 @@
 		A10000000000000000000019 /* GeminiReviewSummaryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* GeminiReviewSummaryClient.swift */; };
 		A10000000000000000000020 /* ReviewSummaryExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022 /* ReviewSummaryExporter.swift */; };
 		A10000000000000000000021 /* ThoughtTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000024 /* ThoughtTag.swift */; };
-		A10000000000000000000022 /* QuickCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* QuickCaptureView.swift */; };
 		B10000000000000000000023 /* ThoughtAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000026 /* ThoughtAnalytics.swift */; };
 		B10000000000000000000024 /* ThoughtAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000027 /* ThoughtAnalyticsView.swift */; };
-		C10000000000000000000001 /* QuickCaptureRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* QuickCaptureRoute.swift */; };
-		C10000000000000000000002 /* QuickCaptureWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* QuickCaptureWidget.swift */; };
-		C10000000000000000000003 /* QuickCaptureRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* QuickCaptureRoute.swift */; };
-		C10000000000000000000004 /* AiTextAppWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* AiTextAppWidget.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		F10000000000000000000010 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000010 /* AppTheme.swift */; };
 		D10000000000000000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000001 /* FirebaseCore */; };
 		D10000000000000000000002 /* FirebaseAILogic in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000002 /* FirebaseAILogic */; };
 		D10000000000000000000003 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000003 /* FirebaseAppCheck */; };
@@ -54,28 +50,7 @@
 			remoteGlobalIDString = A50000000000000000000001;
 			remoteInfo = AiTextApp;
 		};
-		CB0000000000000000000001 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = A70000000000000000000001 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = C50000000000000000000001;
-			remoteInfo = AiTextAppWidget;
-		};
 /* End PBXContainerItemProxy section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		C60000000000000000000004 /* Embed Foundation Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				C10000000000000000000004 /* AiTextAppWidget.appex in Embed Foundation Extensions */,
-			);
-			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A20000000000000000000001 /* AiTextApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AiTextApp.swift; sourceTree = "<group>"; };
@@ -102,13 +77,9 @@
 		A20000000000000000000022 /* ReviewSummaryExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSummaryExporter.swift; sourceTree = "<group>"; };
 		A20000000000000000000023 /* AiTextApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AiTextApp.entitlements; sourceTree = "<group>"; };
 		A20000000000000000000024 /* ThoughtTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThoughtTag.swift; sourceTree = "<group>"; };
-		A20000000000000000000025 /* QuickCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureView.swift; sourceTree = "<group>"; };
 		B20000000000000000000026 /* ThoughtAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThoughtAnalytics.swift; sourceTree = "<group>"; };
 		B20000000000000000000027 /* ThoughtAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThoughtAnalyticsView.swift; sourceTree = "<group>"; };
-		C20000000000000000000001 /* QuickCaptureRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureRoute.swift; sourceTree = "<group>"; };
-		C20000000000000000000002 /* QuickCaptureWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureWidget.swift; sourceTree = "<group>"; };
-		C20000000000000000000003 /* AiTextAppWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AiTextAppWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		C20000000000000000000004 /* Widget Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F20000000000000000000010 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		C20000000000000000000005 /* App Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2D000000000000000000001 /* DailySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailySummary.swift; sourceTree = "<group>"; };
 		A2D000000000000000000002 /* DailySummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailySummaryView.swift; sourceTree = "<group>"; };
@@ -137,13 +108,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		C30000000000000000000001 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -151,8 +115,6 @@
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000002 /* AiTextApp */,
-				C40000000000000000000001 /* Shared */,
-				C40000000000000000000002 /* AiTextAppWidget */,
 				A40000000000000000000004 /* ThoughtCore */,
 				A40000000000000000000007 /* AiTextAppUITests */,
 				A40000000000000000000005 /* Products */,
@@ -181,8 +143,8 @@
 				A20000000000000000000018 /* ExternalBackupManager.swift */,
 				A20000000000000000000019 /* FolderPicker.swift */,
 				A20000000000000000000021 /* GeminiReviewSummaryClient.swift */,
-				A20000000000000000000025 /* QuickCaptureView.swift */,
 				B20000000000000000000027 /* ThoughtAnalyticsView.swift */,
+				F20000000000000000000010 /* AppTheme.swift */,
 				A2D000000000000000000002 /* DailySummaryView.swift */,
 				F20000000000000000000002 /* ExternalBrainManager.swift */,
 				G20000000000000000000002 /* AIAPIUsageAnalyticsView.swift */,
@@ -217,7 +179,6 @@
 			children = (
 				A20000000000000000000009 /* AiTextApp.app */,
 				A20000000000000000000014 /* AiTextAppUITests.xctest */,
-				C20000000000000000000003 /* AiTextAppWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -246,23 +207,6 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		C40000000000000000000001 /* Shared */ = {
-			isa = PBXGroup;
-			children = (
-				C20000000000000000000001 /* QuickCaptureRoute.swift */,
-			);
-			path = Shared;
-			sourceTree = "<group>";
-		};
-		C40000000000000000000002 /* AiTextAppWidget */ = {
-			isa = PBXGroup;
-			children = (
-				C20000000000000000000002 /* QuickCaptureWidget.swift */,
-				C20000000000000000000004 /* Widget Info.plist */,
-			);
-			path = AiTextAppWidget;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -274,12 +218,10 @@
 				A30000000000000000000001 /* Frameworks */,
 				A60000000000000000000002 /* Resources */,
 				D60000000000000000000001 /* Copy Optional Firebase Configuration */,
-				C60000000000000000000004 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				CC0000000000000000000001 /* PBXTargetDependency */,
 			);
 			name = AiTextApp;
 			packageProductDependencies = (
@@ -308,23 +250,6 @@
 			productReference = A20000000000000000000014 /* AiTextAppUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
-		C50000000000000000000001 /* AiTextAppWidget */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = C90000000000000000000001 /* Build configuration list for PBXNativeTarget "AiTextAppWidget" */;
-			buildPhases = (
-				C60000000000000000000001 /* Sources */,
-				C30000000000000000000001 /* Frameworks */,
-				C60000000000000000000002 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = AiTextAppWidget;
-			productName = AiTextAppWidget;
-			productReference = C20000000000000000000003 /* AiTextAppWidget.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -341,9 +266,6 @@
 					A50000000000000000000002 = {
 						CreatedOnToolsVersion = 16.0;
 						TestTargetID = A50000000000000000000001;
-					};
-					C50000000000000000000001 = {
-						CreatedOnToolsVersion = 16.0;
 					};
 				};
 			};
@@ -365,7 +287,6 @@
 			targets = (
 				A50000000000000000000001 /* AiTextApp */,
 				A50000000000000000000002 /* AiTextAppUITests */,
-				C50000000000000000000001 /* AiTextAppWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -376,13 +297,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000008 /* Assets.xcassets in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		C60000000000000000000002 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -433,10 +347,9 @@
 				A10000000000000000000019 /* GeminiReviewSummaryClient.swift in Sources */,
 				A10000000000000000000020 /* ReviewSummaryExporter.swift in Sources */,
 				A10000000000000000000021 /* ThoughtTag.swift in Sources */,
-				A10000000000000000000022 /* QuickCaptureView.swift in Sources */,
 				B10000000000000000000023 /* ThoughtAnalytics.swift in Sources */,
 				B10000000000000000000024 /* ThoughtAnalyticsView.swift in Sources */,
-				C10000000000000000000001 /* QuickCaptureRoute.swift in Sources */,
+				F10000000000000000000010 /* AppTheme.swift in Sources */,
 				A1D000000000000000000001 /* DailySummary.swift in Sources */,
 				A1D000000000000000000002 /* DailySummaryView.swift in Sources */,
 				F11000000000000000000001 /* ExternalBrain.swift in Sources */,
@@ -454,15 +367,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		C60000000000000000000001 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				C10000000000000000000002 /* QuickCaptureWidget.swift in Sources */,
-				C10000000000000000000003 /* QuickCaptureRoute.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -470,11 +374,6 @@
 			isa = PBXTargetDependency;
 			target = A50000000000000000000001 /* AiTextApp */;
 			targetProxy = AB0000000000000000000001 /* PBXContainerItemProxy */;
-		};
-		CC0000000000000000000001 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = C50000000000000000000001 /* AiTextAppWidget */;
-			targetProxy = CB0000000000000000000001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -628,48 +527,6 @@
 			};
 			name = Release;
 		};
-		CA0000000000000000000001 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = U29GY347DY;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = AiTextAppWidget/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.AiTextApp.Widget;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Debug;
-		};
-		CA0000000000000000000002 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = U29GY347DY;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = AiTextAppWidget/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.AiTextApp.Widget;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -696,15 +553,6 @@
 			buildConfigurations = (
 				AA0000000000000000000005 /* Debug */,
 				AA0000000000000000000006 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		C90000000000000000000001 /* Build configuration list for PBXNativeTarget "AiTextAppWidget" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				CA0000000000000000000001 /* Debug */,
-				CA0000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

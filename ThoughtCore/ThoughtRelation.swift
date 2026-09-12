@@ -74,6 +74,72 @@ public struct ThoughtHistoryEntry: Identifiable, Equatable, Sendable {
     }
 }
 
+public struct ConversationNode: Identifiable, Equatable, Sendable {
+    public let thought: Thought
+    public let depth: Int
+    public let incomingRelation: ThoughtRelation?
+    public let isOnCurrentPath: Bool
+    public let hasBranches: Bool
+    public var id: UUID { thought.id }
+
+    public init(thought: Thought, depth: Int, incomingRelation: ThoughtRelation?, isOnCurrentPath: Bool, hasBranches: Bool) {
+        self.thought = thought; self.depth = depth; self.incomingRelation = incomingRelation
+        self.isOnCurrentPath = isOnCurrentPath; self.hasBranches = hasBranches
+    }
+}
+
+/// Thoughtと既存Relationだけから再構築する会話ツリー。
+public struct ConversationThread: Equatable, Sendable {
+    public let root: Thought
+    public let nodes: [ConversationNode]
+    public let edges: [ThoughtRelation]
+    public let currentPath: [Thought]
+    public let leaves: [Thought]
+    public let selectedThoughtID: UUID
+
+    public var lastThought: Thought {
+        leaves.max {
+            $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt
+        } ?? currentPath.last ?? root
+    }
+}
+
+public struct LoadConversationThread: Sendable {
+    private let thoughts: any ThoughtRepository
+    private let relations: any ThoughtRelationRepository
+
+    public init(thoughts: any ThoughtRepository, relations: any ThoughtRelationRepository) {
+        self.thoughts = thoughts; self.relations = relations
+    }
+
+    public func callAsFunction(containing thoughtID: UUID) throws -> ConversationThread {
+        guard try thoughts.fetchByID(thoughtID) != nil else { throw CocoaError(.fileNoSuchFile) }
+        var rootID = thoughtID
+        var ancestors = Set<UUID>()
+        var parentEdges: [ThoughtRelation] = []
+        while ancestors.insert(rootID).inserted, let parent = try relations.fetchBySourceThoughtID(rootID).first {
+            parentEdges.append(parent); rootID = parent.targetThoughtID
+        }
+        guard let root = try thoughts.fetchByID(rootID) else { throw CocoaError(.fileNoSuchFile) }
+        let pathIDs = Set([thoughtID] + parentEdges.map(\.targetThoughtID))
+        var visited = Set<UUID>(), nodes: [ConversationNode] = [], edges: [ThoughtRelation] = [], leaves: [Thought] = []
+        try append(from: rootID, depth: 0, incoming: nil, pathIDs: pathIDs, visited: &visited, nodes: &nodes, edges: &edges, leaves: &leaves)
+        let currentPath = nodes.filter { pathIDs.contains($0.id) }.sorted { $0.depth < $1.depth }.map(\.thought)
+        return .init(root: root, nodes: nodes, edges: edges, currentPath: currentPath, leaves: leaves, selectedThoughtID: thoughtID)
+    }
+
+    private func append(from id: UUID, depth: Int, incoming: ThoughtRelation?, pathIDs: Set<UUID>, visited: inout Set<UUID>, nodes: inout [ConversationNode], edges: inout [ThoughtRelation], leaves: inout [Thought]) throws {
+        guard visited.insert(id).inserted, let thought = try thoughts.fetchByID(id) else { return }
+        let children = try relations.fetchByTargetThoughtID(id)
+        nodes.append(.init(thought: thought, depth: depth, incomingRelation: incoming, isOnCurrentPath: pathIDs.contains(id), hasBranches: children.count > 1))
+        if children.isEmpty { leaves.append(thought) }
+        for relation in children {
+            edges.append(relation)
+            try append(from: relation.sourceThoughtID, depth: depth + 1, incoming: relation, pathIDs: pathIDs, visited: &visited, nodes: &nodes, edges: &edges, leaves: &leaves)
+        }
+    }
+}
+
 /// Loads one continuation history without fetching the complete Thought table.
 /// A current Thought is first traced to its oldest ancestor, then each branch is
 /// flattened depth-first in the repository's stable relation order.

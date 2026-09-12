@@ -11,20 +11,19 @@ final class ThoughtFlowUITests: XCTestCase {
     }
 
     func testPostCancelDeleteThenConfirmDelete() {
-        let composer = app.textViews["thoughtComposer"]
+        let composer = openComposer()
         let post = app.buttons["postButton"]
         let body = "UIテスト Thought 🚀"
 
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
-        XCTAssertFalse(post.exists, "空文字では投稿ボタンを表示しない")
+        XCTAssertFalse(post.isEnabled, "空文字では投稿できない")
         composer.tap()
         composer.typeText(body)
         XCTAssertTrue(post.waitForExistence(timeout: 2))
         XCTAssertTrue(post.isEnabled)
         post.tap()
 
-        XCTAssertEqual(composer.value as? String, "", "投稿後にComposerが空になる")
-        XCTAssertFalse(post.exists, "投稿後は投稿ボタンを再び隠す")
+        XCTAssertFalse(composer.exists, "投稿後に投稿画面を閉じる")
         let postedThought = app.staticTexts[body]
         XCTAssertTrue(postedThought.waitForExistence(timeout: 2), "投稿がTimeline先頭に表示される")
 
@@ -41,8 +40,25 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertFalse(postedThought.waitForExistence(timeout: 1), "削除確定後はTimelineから消える")
     }
 
+    func testMentionSuggestionsAppearBelowComposerAndInsertSelection() {
+        let composer = openComposer()
+        composer.typeText("@")
+
+        let suggestion = app.buttons["mentionSuggestion_mio"]
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 2))
+        XCTAssertGreaterThanOrEqual(
+            suggestion.frame.minY,
+            composer.frame.maxY,
+            "メンション候補は入力欄の下に表示する"
+        )
+
+        suggestion.tap()
+        XCTAssertTrue((composer.value as? String)?.contains("@mio ") == true)
+        XCTAssertFalse(suggestion.exists)
+    }
+
     func testActorIconOpensReadOnlyProfileAndPostDetail() {
-        let composer = app.textViews["thoughtComposer"]
+        let composer = openComposer()
         let body = "プロフィールから開くThought"
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         composer.tap()
@@ -58,16 +74,15 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["プロフィール"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["Display Name"].exists)
         XCTAssertTrue(app.staticTexts["@myself"].exists)
-        XCTAssertTrue(app.staticTexts["Posts / 過去の発言"].exists)
-        XCTAssertTrue(app.staticTexts[body].exists)
-
+        XCTAssertFalse(app.staticTexts["Posts / 過去の発言"].exists)
+        app.navigationBars["プロフィール"].buttons.element(boundBy: 0).tap()
         app.staticTexts[body].tap()
         XCTAssertTrue(app.navigationBars["Thought"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["detailActorProfileLink"].exists)
     }
 
     func testCreateContinuationAndShowItInHistoryAndTimeline() {
-        let composer = app.textViews["thoughtComposer"]
+        let composer = openComposer()
         let parent = "History A"
         let child = "History B"
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
@@ -95,7 +110,7 @@ final class ThoughtFlowUITests: XCTestCase {
     }
 
     func testWriteReplyOpensFocusedComposerAndPostsReply() {
-        let composer = app.textViews["thoughtComposer"]
+        let composer = openComposer()
         let parent = "返信先Thought"
         let reply = "返信したThought"
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
@@ -128,14 +143,43 @@ final class ThoughtFlowUITests: XCTestCase {
         )
     }
 
+    func testMentionedAIAutoRepliesAndNormalReplyContinuesLatestLeaf() {
+        let composer = openComposer()
+        let root = "@mio このUIどう思う？"
+        composer.tap()
+        composer.typeText(root)
+        app.buttons["postButton"].tap()
+
+        XCTAssertTrue(app.staticTexts[root].waitForExistence(timeout: 3), "Human ThoughtはAI通信を待たず表示する")
+        XCTAssertTrue(app.staticTexts["一緒に考えてみましょう。"].waitForExistence(timeout: 5), "@mioでAI Thoughtを自動生成する")
+
+        let rootRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "timelineThought_", root)).firstMatch
+        XCTAssertTrue(rootRow.waitForExistence(timeout: 2))
+        rootRow.tap()
+        XCTAssertTrue(app.staticTexts["会話"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["一緒に考えてみましょう。"].exists, "AI返信を別枠ではなくConversationへ表示する")
+        app.buttons["writeReplyButton"].tap()
+        let replyComposer = app.textViews["humanReplyComposer"]
+        XCTAssertTrue(replyComposer.waitForExistence(timeout: 2))
+        replyComposer.typeText("もう少し詳しく")
+        app.buttons["postHumanReplyButton"].tap()
+
+        XCTAssertTrue(app.staticTexts["@mio もう少し詳しく"].waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "replyContext_")).firstMatch.waitForExistence(timeout: 2),
+            "通常返信は会話の最新AI Thoughtを返信先にする"
+        )
+    }
+
     func testTimelineOpensLocalAnalyticsAndShowsSummary() {
-        let composer = app.textViews["thoughtComposer"]
+        let composer = openComposer()
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         composer.tap()
         composer.typeText("分析対象Thought")
         app.buttons["postButton"].tap()
 
-        let analyticsButton = app.buttons["thoughtAnalyticsButton"]
+        app.tabBars.buttons["振り返り"].tap()
+        let analyticsButton = app.buttons["insightsAnalyticsButton"]
         XCTAssertTrue(analyticsButton.waitForExistence(timeout: 2))
         analyticsButton.tap()
 
@@ -150,150 +194,16 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(elements["analyticsDailyCellToday"].label.hasSuffix("、1件"))
     }
 
-    func testQuickCapturePostsTrimmedThoughtOnceAndReturnsToTimeline() {
-        let quickCapture = app.buttons["quickCaptureButton"]
-        XCTAssertTrue(quickCapture.waitForExistence(timeout: 5))
-        quickCapture.tap()
-
-        XCTAssertTrue(app.navigationBars["Quick Capture"].waitForExistence(timeout: 2))
-        let editor = app.textViews["quickCaptureEditor"]
-        let post = app.buttons["quickCapturePostButton"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 2))
-        XCTAssertEqual(editor.value as? String, "")
-        XCTAssertFalse(post.isEnabled)
-        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2), "表示時に入力へfocusする")
-
-        editor.typeText("  Quick Capture Thought  ")
-        XCTAssertTrue(post.isEnabled)
-        post.tap()
-
-        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
-        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Quick Capture Thought")).count, 1)
-    }
-
-    func testExternalQuickCaptureRouteFromColdLaunchPostsOnceAndReturnsToTimeline() throws {
-        app.terminate()
-        try openAppRoute(URL(string: "aitextapp://quick-capture")!)
-
-        XCTAssertTrue(app.navigationBars["Quick Capture"].waitForExistence(timeout: 5))
-        let editor = app.textViews["quickCaptureEditor"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 2))
-        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2), "外部routeでも入力へfocusする")
-        editor.typeText("Widget route Thought")
-        app.buttons["quickCapturePostButton"].tap()
-
-        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
-        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Widget route Thought")).count, 1)
-        XCTAssertFalse(app.navigationBars["Quick Capture"].exists, "投稿後にrouteを消費してTimelineへ戻る")
-    }
-
-    func testExternalQuickCaptureRouteWhileForegroundCanBeDismissedAndConsumed() throws {
-        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars["Quick Capture"].exists, "通常起動ではQuick Captureを開かない")
-
-        try openAppRoute(URL(string: "aitextapp://quick-capture")!)
-        XCTAssertTrue(app.navigationBars["Quick Capture"].waitForExistence(timeout: 2))
-        app.buttons["quickCaptureCancelButton"].tap()
-
-        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.navigationBars["Quick Capture"].exists)
-    }
-
-    func testMalformedExternalRouteDoesNotOpenQuickCapture() throws {
-        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 5))
-
-        try openAppRoute(URL(string: "aitextapp://quick-capture?body=should-not-be-accepted")!)
-
-        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.navigationBars["Quick Capture"].exists)
-    }
-
-    func testQuickCaptureRejectsEmptyAndOverLimitDraft() {
-        app.buttons["quickCaptureButton"].tap()
-        let editor = app.textViews["quickCaptureEditor"]
-        let post = app.buttons["quickCapturePostButton"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 2))
-        editor.typeText("   ")
-        XCTAssertFalse(post.isEnabled, "空白だけのThoughtは投稿できない")
-        app.buttons["quickCaptureCancelButton"].tap()
-        app.alerts["入力中のThoughtを破棄しますか？"].buttons["破棄"].tap()
-        app.buttons["quickCaptureButton"].tap()
-        let reopenedEditor = app.textViews["quickCaptureEditor"]
-        let reopenedPost = app.buttons["quickCapturePostButton"]
-        XCTAssertTrue(reopenedEditor.waitForExistence(timeout: 2))
-        reopenedEditor.typeText(String(repeating: "あ", count: 141))
-        XCTAssertEqual(app.staticTexts["quickCaptureCharacterCount"].label, "文字数 141、上限 140")
-        XCTAssertFalse(reopenedPost.isEnabled, "141文字を超えるThoughtは投稿できない")
-    }
-
-    func testQuickCapturePostsExactly140Characters() {
-        let body = String(repeating: "a", count: 140)
-        app.buttons["quickCaptureButton"].tap()
-        let editor = app.textViews["quickCaptureEditor"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 2))
-        editor.typeText(body)
-        XCTAssertEqual(app.staticTexts["quickCaptureCharacterCount"].label, "文字数 140、上限 140")
-        XCTAssertTrue(app.buttons["quickCapturePostButton"].isEnabled)
-        app.buttons["quickCapturePostButton"].tap()
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "timelineThought_")).count, 1)
-    }
-
-    func testQuickCaptureConfirmsDiscardAndKeepsDraftWhenContinuing() {
-        app.buttons["quickCaptureButton"].tap()
-        let editor = app.textViews["quickCaptureEditor"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 2))
-        editor.typeText("破棄確認する入力")
-        app.buttons["quickCaptureCancelButton"].tap()
-
-        let alert = app.alerts["入力中のThoughtを破棄しますか？"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 2))
-        alert.buttons["続ける"].tap()
-        XCTAssertEqual(editor.value as? String, "破棄確認する入力")
-
-        app.buttons["quickCaptureCancelButton"].tap()
-        XCTAssertTrue(alert.waitForExistence(timeout: 2))
-        alert.buttons["破棄"].tap()
-        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.staticTexts["破棄確認する入力"].exists)
-    }
-
-    func testQuickCaptureCancelWithEmptyDraftClosesImmediately() {
-        app.buttons["quickCaptureButton"].tap()
-        XCTAssertTrue(app.navigationBars["Quick Capture"].waitForExistence(timeout: 2))
-        app.buttons["quickCaptureCancelButton"].tap()
-        XCTAssertTrue(app.navigationBars["Thoughts"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.alerts["入力中のThoughtを破棄しますか？"].exists)
-    }
-
-    func testQuickCaptureFailureKeepsDraftAndScreenOpen() {
-        app.terminate()
-        app = XCUIApplication()
-        app.launchArguments = ["--ui-testing-fail-posts"]
-        app.launch()
-        app.buttons["quickCaptureButton"].tap()
-        let editor = app.textViews["quickCaptureEditor"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 2))
-        editor.typeText("失敗しても保持")
-        app.buttons["quickCapturePostButton"].tap()
-
-        let alert = app.alerts["投稿できませんでした"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 2))
-        alert.buttons["OK"].tap()
-        XCTAssertTrue(app.navigationBars["Quick Capture"].exists)
-        XCTAssertEqual(editor.value as? String, "失敗しても保持")
-    }
-
     func testSearchOpensResultAndNavigatesToThoughtDetail() {
-        let composer = app.textViews["thoughtComposer"]
-        XCTAssertTrue(composer.waitForExistence(timeout: 5))
         for body in ["検索対象のThought", "別のメモ"] {
+            let composer = openComposer()
             composer.tap()
             composer.typeText(body)
             app.buttons["postButton"].tap()
         }
 
-        app.buttons["thoughtSearchButton"].tap()
-        XCTAssertTrue(app.navigationBars["Thought検索"].waitForExistence(timeout: 2))
+        app.tabBars.buttons["検索"].tap()
+        XCTAssertTrue(app.navigationBars["検索"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.descendants(matching: .any)["thoughtSearchInitialState"].waitForExistence(timeout: 2))
 
         let searchField = app.searchFields.firstMatch
@@ -313,10 +223,93 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["writeContinuationButton"].waitForExistence(timeout: 2))
     }
 
+    func testFiveTabsMentionsProfileAndSettingsNavigation() {
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 5))
+        for title in ["ホーム", "メンション", "検索", "振り返り", "プロフィール"] {
+            XCTAssertTrue(tabBar.buttons[title].exists, "\(title)タブを表示する")
+        }
+
+        let composer = openComposer()
+        composer.tap()
+        composer.typeText("@myself メンション確認")
+        app.buttons["postButton"].tap()
+
+        tabBar.buttons["メンション"].tap()
+        XCTAssertTrue(app.navigationBars["メンション"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["@myself メンション確認"].waitForExistence(timeout: 2))
+
+        tabBar.buttons["振り返り"].tap()
+        XCTAssertTrue(app.navigationBars["振り返り"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["insightsDailySummaryButton"].exists)
+        XCTAssertTrue(app.buttons["insightsAnalyticsButton"].exists)
+
+        tabBar.buttons["プロフィール"].tap()
+        XCTAssertTrue(app.navigationBars["プロフィール"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Display Name"].exists)
+        XCTAssertTrue(app.staticTexts["@myself"].exists)
+        XCTAssertFalse(app.staticTexts["Posts / 過去の発言"].exists)
+        app.buttons["settingsButton"].tap()
+        XCTAssertTrue(app.navigationBars["設定"].waitForExistence(timeout: 2))
+    }
+
+    func testHomeDraftSurvivesTabSwitch() {
+        let composer = openComposer()
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText("タブを移動しても残るDraft")
+        app.buttons["キャンセル"].tap()
+
+        app.tabBars.buttons["プロフィール"].tap()
+        XCTAssertTrue(app.navigationBars["プロフィール"].waitForExistence(timeout: 2))
+        app.tabBars.buttons["ホーム"].tap()
+
+        app.buttons["openComposerButton"].tap()
+        XCTAssertTrue(composer.waitForExistence(timeout: 2))
+        XCTAssertEqual(composer.value as? String, "タブを移動しても残るDraft")
+    }
+
+    func testFourThemesAcrossFiveTabsAndPersistence() {
+        app.terminate()
+        app.launchArguments.append("--ui-testing-theme-persistence")
+        app.launch()
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 5))
+
+        for theme in ["default", "dynamicAurora", "pulseNeon", "blueCosmos"] {
+            tabBar.buttons["プロフィール"].tap()
+            XCTAssertTrue(app.buttons["settingsButton"].waitForExistence(timeout: 2))
+            app.buttons["settingsButton"].tap()
+            app.buttons["appearanceThemeButton"].tap()
+
+            let option = app.buttons["themeOption_\(theme)"]
+            XCTAssertTrue(option.waitForExistence(timeout: 2))
+            option.tap()
+            XCTAssertEqual(option.value as? String, "選択中")
+            add(XCTAttachment(screenshot: app.screenshot(), quality: .medium).named("Theme-\(theme)-Appearance"))
+
+            app.navigationBars["外観とテーマ"].buttons.element(boundBy: 0).tap()
+            app.navigationBars["設定"].buttons["完了"].tap()
+
+            for tab in ["ホーム", "メンション", "検索", "振り返り", "プロフィール"] {
+                tabBar.buttons[tab].tap()
+                XCTAssertTrue(tabBar.buttons[tab].isSelected)
+                add(XCTAttachment(screenshot: app.screenshot(), quality: .medium).named("Theme-\(theme)-\(tab)"))
+            }
+        }
+
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["プロフィール"].tap()
+        app.buttons["settingsButton"].tap()
+        app.buttons["appearanceThemeButton"].tap()
+        XCTAssertEqual(app.buttons["themeOption_blueCosmos"].value as? String, "選択中")
+    }
+
     func testAddsTagShowsItOnTimelineAndOpensTaggedThoughtDetail() {
         let body = "タグUIフロー"
         let tagName = "仕事"
-        let composer = app.textViews["thoughtComposer"]
+        let composer = openComposer()
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         composer.tap()
         composer.typeText(body)
@@ -348,13 +341,6 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts[body].exists)
     }
 
-    private func openAppRoute(_ url: URL) throws {
-        guard #available(iOS 16.4, *) else {
-            throw XCTSkip("XCUIApplication.open requires iOS 16.4 or newer")
-        }
-        app.open(url)
-    }
-
     private func openThoughtMenuAndChooseDelete() {
         let menu = app.buttons.matching(identifier: "thoughtMenu").firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 2))
@@ -362,5 +348,22 @@ final class ThoughtFlowUITests: XCTestCase {
         let delete = app.buttons["削除"]
         XCTAssertTrue(delete.waitForExistence(timeout: 2))
         delete.tap()
+    }
+
+    private func openComposer() -> XCUIElement {
+        let button = app.buttons["openComposerButton"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        button.tap()
+        let composer = app.textViews["thoughtComposer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 2))
+        return composer
+    }
+}
+
+private extension XCTAttachment {
+    func named(_ name: String) -> XCTAttachment {
+        self.name = name
+        lifetime = .keepAlways
+        return self
     }
 }

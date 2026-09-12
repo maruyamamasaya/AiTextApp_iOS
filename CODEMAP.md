@@ -4,20 +4,17 @@
 
 ## Application Entry / UI
 
-- `AiTextApp/App/AiTextApp.swift` — SwiftUIエントリーポイント、scene-level `AppRoute.quickCapture`、UIテスト用composition。
-- `Shared/QuickCaptureRoute.swift` — app／Widget共通の外部URL定義と厳密な検証。
-- `AiTextApp/Info.plist` — `aitextapp` custom URL scheme登録。
-- `AiTextAppWidget/QuickCaptureWidget.swift` — 固定表示のsystemSmall Widgetと`widgetURL`。
-- `AiTextAppWidget/Info.plist` — WidgetKit Extension宣言。
-- `AiTextApp/App/QuickCaptureView.swift` — 集中入力、local draft、自動focus、投稿・破棄確認UI。
+- `AiTextApp/App/AiTextApp.swift` — SwiftUIエントリーポイント、UIテスト用composition。
+- `AiTextApp/App/AppTheme.swift` — Primitive／Semantic／Theme／Effect token、4テーマ、UserDefaults永続化、Reduce Motion対応background、共通Surface、テーマ選択Preview。
 - `AiTextApp/App/ThoughtAnalyticsView.swift` — ローカル分析のサマリーと日別／曜日／時間帯／タグ／Continuation表示。
-- `AiTextApp/App/DailySummaryView.swift` — 月カレンダー、日別詳細、構造化Summary、送信前プレビュー。
-- `AiTextApp/App/TimelineView.swift` — Composer、Lazy Timeline、`repliesTo`に基づく返信先Persona／本文付きTimeline、トップ右上の歯車から開く設定（プロフィール／Persona、Export、バックアップ）、Thought検索、本文に紐づくタグUI、Thought Detail、History、Continuation Composer、削除UI。独立したHistory Review／タグ一覧のトップバー導線は持たない。
+- `AiTextApp/App/DailySummaryView.swift` — Human Thoughtだけを示す月カレンダー、日別件数／継続件数、構造化Summary、Human限定の送信前プレビュー。
+- `AiTextApp/App/TimelineView.swift` — `MainTabView`（Home／Mentions／Search／Insights／Profile）、各タブの独立`NavigationStack`、Home右上の投稿Composerと投稿者フィルター、Mention／Reply一覧、検索、分析ハブ、投稿一覧を持たない共通Actor Profile、Profile右上から開くSettings、Thought Detail、History、Continuation Composer、削除UI。
 - `AiTextApp/App/TimelineView.swift`内`ProfileEditorView`／`PersonaIcon` — デフォルト人間の表示名、写真選択・縮小、丸型アイコン表示。
 - `AiTextApp/App/TimelineView.swift`内`PersonaManagementView`／`AIPersonaEditorView` — 複数AI Personaの一覧、追加、編集、無効化。
-- `AiTextApp/App/TimelineView.swift`内`AIPostRequestView`／`AIPostPreviewView` — AIへの依頼入力、Persona External Brainのroute／source確認、最終payload確認、明示送信。
+- `AiTextApp/App/TimelineView.swift`内`AIPersonaManagementView`／`ActorProfileView` — AI Persona一覧からプロフィールを開き、表示内容と設定を確認・編集する管理導線。
+- `AiTextApp/App/TimelineView.swift`内`AIPostRequestView`／`AIPostPreviewView` — Settingsの独立画面で投稿者AIを選択して依頼を入力し、Persona External Brainのroute／source、最終payloadを確認して明示送信する導線。
 - `AiTextApp/App/TimelineView.swift`内`AIReplyRequestView`／`AIReplyPreviewView` — メンション付きThoughtへのAI返信依頼、対象と最終payload確認、明示送信、Detail返信表示。
-- `AiTextApp/App/ThoughtStore.swift` — Timeline／Quick Capture共通投稿境界、本文検索／タグ／Review／History／Continuation UI stateとCoreの接続。
+- `AiTextApp/App/ThoughtStore.swift` — Timeline投稿境界、本文検索／タグ／Review／History／Continuation UI stateとCoreの接続。
 - `AiTextApp/App/ShareSheet.swift` — Exportファイルを標準Share Sheetへ渡すbridge。
 - `AiTextApp/App/ExternalBackupManager.swift` — security-scoped bookmark、外部backup／RestoreのUI state。
 - `AiTextApp/App/FolderPicker.swift` — iOS標準Filesフォルダpicker bridge。
@@ -27,7 +24,7 @@
 - `AiTextApp/App/TimelineView.swift`内`KnowledgeManagementView`／`KnowledgeDraftReviewView` — Draft一覧・検索・filter、Review編集、Approve／Reject、Promote確認、正式Knowledge一覧・詳細。
 - `AiTextApp/App/TimelineView.swift`内`KnowledgeQualityView`／`KnowledgeCompareView` — 手動Quality解析、候補一覧、比較、Dismiss、Merge Draft、Archive／Supersede、Knowledge利用状況。
 - `AiTextApp/AiTextApp.entitlements` — Release App Attestのproduction environment entitlement。
-- `AiTextApp.xcodeproj` — iPhone app、UI Test、埋め込み`AiTextAppWidget` Extension targetとshared scheme。
+- `AiTextApp.xcodeproj` — iPhone app、UI Testとshared scheme。
 
 Search: `@main|TimelineView|ThoughtStore|confirmationDialog`
 
@@ -44,10 +41,10 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 
 ## Persistence
 
-- `ThoughtCore/ThoughtRepository.swift` — CRUD・本文検索・日付範囲repository境界、今日／昨日／直近日数／今週／今月／指定日のReview期間計算、テスト用メモリ実装。
+- `ThoughtCore/ThoughtRepository.swift` — CRUD・本文検索・通常の日付範囲query・Daily Summary専用`fetchHumanThoughts(from:to:)`境界、Review期間計算、テスト用メモリ実装。
 - `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v14、Persona／投稿者／AI設定・生成来歴／メンション／AI返信Relation、Knowledge Review／Quality／usage、実カラム照合migration、各種query、旧JSON migration／2世代backup。
 - `ThoughtCore/ReviewSummary.swift` — AI要約model、immutable送信preview、通信／transport／保存protocol、中央provider／model設定、typed service error、対象準備／鮮度検証／生成・保存use case、Mock client。
-- `ThoughtCore/DailySummary.swift` — Human／AI・確定Humanタグ・AI Thought別タグ候補・時間帯・Relationを分離したv2 model、v1互換decode、prompt、stale対応preview、準備／生成use case。
+- `ThoughtCore/DailySummary.swift` — Human限定のv3 prompt、確定Humanタグ・時間帯・Human Relation、stale対応preview、準備／生成use case。既存v1／v2 modelの互換decodeは維持し、新規生成ではAI本文・`aiInteractions`を扱わない。
 - `ThoughtCore/ReviewSummaryExporter.swift` — 旧期間要約の互換コード。現在のUIからは利用せず、既存データを壊さないため保持する。
 - `ThoughtCore/ThoughtExporter.swift` — Repository経由のMarkdown／JSON生成。
 - `ThoughtCore/ExternalBackup.swift` — manifest、外部2世代backup、検証、pending Restore／rollback。

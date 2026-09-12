@@ -55,7 +55,7 @@ Windowsで実装済みだが、macOS／Swift／Xcode環境で未検証の項目�
 
 - [ ] Humanプロフィール名／画像の保存と既存Thoughtへの表示反映を確認する
 - [ ] AI Personaの作成、編集、無効化と、AI名義投稿の保存を確認する
-- [ ] Timeline Composer／Quick Captureで単一Mentionを保存し、Mentionだけでは通信しない
+- [ ] Timeline Composerで単一Mentionを保存し、Mentionだけでは通信しない
 - [ ] Mention付きThoughtから明示確認後だけAI Replyを生成する
 - [ ] Reply Thought、`repliesTo`、生成来歴がatomicに保存され、Detailへ複数返信が表示される
 - [ ] 生成中disable、cancel、失敗、再試行、空応答、141文字応答を確認する
@@ -121,16 +121,7 @@ Windowsで実装済みだが、macOS／Swift／Xcode環境で未検証の項目�
 - [ ] App Check拒否、offline、timeout、429／quota、その他API error、空応答を区別する
 - [ ] AI生成により対象外のThought／Tag／Continuationが変更されない
 
-## 10. Widget / Quick Capture
-
-- [ ] `AiTextAppWidget` targetがcompile／署名され、ThoughtCore／SQLite／Firebase／App Groupsへ依存しない
-- [ ] systemSmall Widget previewとホーム画面配置を確認する
-- [ ] cold launch／foregroundのcustom URLがQuick Captureを一度だけ開き、自動focusする
-- [ ] 通常起動はTimelineのままで、dismiss後にrouteが再表示されない
-- [ ] 空／140／141文字、trim、単一投稿、二重投稿防止、失敗時draft保持、入力中破棄確認を確認する
-- [ ] 投稿後にTimelineへ即時反映される
-
-## 11. UI Regression
+## 10. UI Regression
 
 - [ ] `AiTextAppUITests`をiPhone SE (3rd generation)と最新標準iPhone Simulatorで実行する
 - [ ] Timeline投稿／削除／検索／タグ／Detail／Continuation／Historyの主要flowを確認する
@@ -138,22 +129,21 @@ Windowsで実装済みだが、macOS／Swift／Xcode環境で未検証の項目�
 - [ ] 小型iPhoneでkeyboard、sheet、長いpayload、カレンダー、分析バーが崩れない
 - [ ] Light／Dark Modeで主要画面を目視確認する
 
-## 12. Accessibility
+## 11. Accessibility
 
 - [ ] Extra Extra Large以上のDynamic Typeで切れ・重なり・操作不能がない
 - [ ] VoiceOverでTimeline、Mention、Reply、Tag、History、Summary、Analytics、External Brain sourceを理解できる
 - [ ] 主要button／chipの操作領域が44pt以上で、focus順が視覚順と一致する
 - [ ] 色だけに依存せず、calendar／chart／状態をlabelでも判別できる
 
-## 13. Real Device
+## 12. Real Device
 
 - [ ] Debug実機build／起動／投稿／再起動後再読込を確認する
 - [ ] 写真選択、Share Sheet（Files／AirDrop）、security-scoped folder、外部backup／Restoreを確認する
 - [ ] GitHub同期、Keychain token、offline cache、Firebase Debug Provider実通信を確認する
-- [ ] Widget cold launch／foreground、keyboard、自動focusを確認する
 - [ ] timezone変更、日付境界、端末再起動後のDaily Summary／Analyticsを確認する
 
-## 14. Release / App Attest
+## 13. Release / App Attest
 
 - [ ] Release configurationだけにproduction App Attest entitlementが付く
 - [ ] Firebase ConsoleへApp Attest providerを登録する
@@ -162,7 +152,7 @@ Windowsで実装済みだが、macOS／Swift／Xcode環境で未検証の項目�
 - [ ] Debug token、API秘密情報、`GoogleService-Info.plist`、個人データがarchive／Git差分へ混入しない
 - [ ] bundle identifier、version／build番号、privacy表示、App icon、配布用署名を確認する
 
-## 15. Final Repository Checks
+## 14. Final Repository Checks
 
 - [ ] `git diff --check`
 - [ ] `git status --short`

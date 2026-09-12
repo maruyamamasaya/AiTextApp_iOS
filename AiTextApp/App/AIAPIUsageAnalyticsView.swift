@@ -13,14 +13,14 @@ struct AIAPIUsageAnalyticsView: View {
 
             if let value = store.aiUsageAnalytics {
                 Section("概要") {
-                    LabeledContent("今日のAPI Call", value: value.todayCallCount.formatted())
-                    LabeledContent("今週のAPI Call", value: value.sevenDayCallCount.formatted())
-                    LabeledContent("今月のAPI Call", value: value.monthCallCount.formatted())
-                    LabeledContent("API Call", value: value.callCount.formatted())
+                    LabeledContent("今日のAPI呼び出し", value: value.todayCallCount.formatted())
+                    LabeledContent("今週のAPI呼び出し", value: value.sevenDayCallCount.formatted())
+                    LabeledContent("今月のAPI呼び出し", value: value.monthCallCount.formatted())
+                    LabeledContent("API呼び出し", value: value.callCount.formatted())
                     LabeledContent("成功率", value: value.successRate.formatted(.percent.precision(.fractionLength(1))))
                     if let input = value.inputTokens, let output = value.outputTokens, value.tokenizedCallCount == value.callCount {
-                        LabeledContent("入力（実測）", value: "\(input.formatted()) tokens")
-                        LabeledContent("出力（実測）", value: "\(output.formatted()) tokens")
+                        LabeledContent("入力（実測）", value: "\(input.formatted()) トークン")
+                        LabeledContent("出力（実測）", value: "\(output.formatted()) トークン")
                     } else {
                         LabeledContent("入力文字数", value: value.inputCharacters.formatted())
                         LabeledContent("出力文字数", value: value.outputCharacters.formatted())
@@ -30,14 +30,14 @@ struct AIAPIUsageAnalyticsView: View {
                     LabeledContent("料金", value: "不明")
                 }
                 countSection("機能別", values: value.byFeature)
-                if !value.byPersona.isEmpty { countSection("Persona別", values: value.byPersona) }
-                countSection("Provider / Model別", values: value.byModel)
-                Section("External Brain") {
-                    LabeledContent("使用", value: "\(value.externalBrainCallCount) / \(value.callCount) calls")
+                if !value.byPersona.isEmpty { countSection("ペルソナ別", values: value.byPersona) }
+                countSection("プロバイダー／モデル別", values: value.byModel)
+                Section("外部ブレイン") {
+                    LabeledContent("使用", value: "\(value.externalBrainCallCount) / \(value.callCount) 回")
                     LabeledContent("使用率", value: value.externalBrainRate.formatted(.percent.precision(.fractionLength(1))))
-                    LabeledContent("平均取得", value: value.averageRetrievedChunkCount.map { String(format: "%.1f chunks", $0) } ?? "利用なし")
+                    LabeledContent("平均取得", value: value.averageRetrievedChunkCount.map { String(format: "%.1f 件", $0) } ?? "利用なし")
                 }
-                if !value.byError.isEmpty { countSection("Errors", values: value.byError) }
+                if !value.byError.isEmpty { countSection("エラー", values: value.byError) }
                 if !value.daily.isEmpty {
                     Section("日別推移") {
                         ForEach(value.daily) { day in
@@ -62,7 +62,7 @@ struct AIAPIUsageAnalyticsView: View {
         Section(title) {
             ForEach(values) { item in
                 VStack(alignment: .leading, spacing: 3) {
-                    LabeledContent(item.name, value: "\(item.calls) calls")
+                    LabeledContent(item.name, value: "\(item.calls) 回")
                     if item.failures > 0 { Text("成功 \(item.successes) / 失敗 \(item.failures)").font(.caption).foregroundStyle(.secondary) }
                 }
             }

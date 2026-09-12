@@ -12,6 +12,16 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ## 実装済み
 
+- Conversation中心のAI返信／投稿履歴。Human ThoughtでactiveなAI Personaを@メンションすると、元ThoughtとMentionを先に保存・表示してから各AIが自動返信する。生成中／失敗／再試行をTimelineとConversationへ表示し、失敗しても元Thoughtを保持する。AI返信は通常Thought＋author＋`repliesTo`＋生成metadataとして保存し、同一対象・同一AIの二重返信を拒否しつつ複数AI返信を許可する。
+- `continues`／`repliesTo`を統合する`LoadConversationThread`を追加し、root、nodes、edges、currentPath、leaves、最新leafをDBから再構築する。Thought DetailはConversation表示へ移行し、通常返信は選択Thoughtではなく最新leafへ、過去地点への返信は`…`内の「この投稿から返信を分岐」へ分離した。会話Primary Actionとタグ／Knowledge Draft／削除などの管理操作も分離した。
+
+- AI Persona追加を妨げていた旧`personas.account_id`単独UNIQUE制約をschema v18で非破壊補修する。旧実機DBはPersona tableをtransaction内で再構築し、Humanの`account_id`へ既存／新規AIを所属させる。Thought author、Mention、AI ConfigurationなどのPersona ID参照を維持し、handleの大文字小文字を無視した一意性は継続する。
+- ユーザー向け表示の日本語化。Home／Mentions／Search／Insights／Profileの5タブ、各画面タイトル、テーマ、AI使用状況、GitHub接続、外部ブレイン、ナレッジ下書きの主な表示を日本語に統一した。開発ドキュメントも日本語を基本とする。
+- 投稿後Navigation統一。Profile > Settings > AIの「AI返信の確認クッション」を任意でONにでき、初期値はOFF、選択は端末へ永続化する。OFFでは手動AI返信も生成からatomic投稿まで連続実行し、ONでは生成内容を確認してから投稿する。@メンションによるPersona AIの自動返信には承認を挟まない。生成・保存失敗時は画面と再試行導線を保持する。通常投稿、Human Reply、Continuation、AI Reply、Persona Postの成功は共通イベントでHome rootへ戻り、新規Thoughtを一時ハイライトする。
+- AI Persona管理とPersona Post依頼を分離。AI Personas一覧は各AIのプロフィール／編集へのリンクを中心とし、投稿操作はSettings > AIの独立した「AIに投稿を依頼」画面でPersonaを選択して依頼文を入力し、既存の送信前Previewへ進む。
+
+- UI演出プリセットとしてのTheme v1。Default／Dynamic Aurora／Pulse Neon／Blue Cosmosを`Primitive → Semantic → Theme → Effect`で解決し、Home／Mentions／Searchは静かな強度、Insights／Profileは強めの強度で同じ画面構造へ適用する。Profile > Settings > Appearance / Themeでライブプレビュー付き選択を行い、UserDefaultsへ永続化する。AI Thoughtは本文を発光させず専用Edge／Glowだけを加え、Reduce Motion時はambient animationを停止する。
+
 - @ID／Mention／Reply v1。HumanとAI Personaを不変UUIDの共通Actorとして扱い、3〜30文字の一意な小文字handleを設定できる。Composerの`@`候補はHuman／AIを表示し、保存時にActor ID・handle snapshot・UTF-16範囲をschema v16のRelationへ保存する。既存`repliesTo` chain、返信先preview、Actor Profileをhandle表示へ接続し、handle変更後もRelationを維持する。
 
 - GitHub Repository Settings v1。Settings > External Brainからowner／repository／branchを既存UserDefaultsへ、PATを既存Keychainへ分離保存し、Token置換・確認付き削除、Repository変更時のローカルKnowledge保持警告を提供する。既存GitHub Contents clientのread-only接続確認でAuthentication／Repository／Branchとpush権限由来のDraft／Knowledge capability、分類済み接続エラー、rate limit残数を表示する。Draft／Knowledge pathはdomain定義をread-only表示する。
@@ -23,22 +33,23 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - AI API Usage Analytics v1。設定の「AI」から使用状況Dashboardを開く。AI API Callをschema v12内の独立したローカルMetadataとして記録し、AI Reply／Daily Summary／Persona Post／Knowledge Draftを共通Recorderへ統合する。Knowledge Draftはsource typeも保持する。Persona／Feature／Provider／Model別件数、成功率、Error、Latency、日別推移を集計し、External Brain使用有無・取得chunk数も保持する。token usageはproviderから取得できる場合だけ実測保存し、現状はnilのまま文字数を常時記録する。prompt／response／Thought／External Brain本文はUsage DBへ保存せず、Telemetry保存失敗は既存AI機能を失敗させない。
 - Persona External Brain v1。単一GitHub RepositoryとPersona別AGENT.md／Retrieval Routeを使い、MarkdownをApplication SupportへSHA差分同期してheading単位のSQLite FTS5 indexから最大5チャンクを取得する。AI Reply送信前Previewで資料と最終payloadを確認できる。GitHubはread-only、tokenはKeychain保存で、障害時はcacheまたはExternal Brainなしで返信を継続する。
 
-- Timelineトップ右上の歯車から開く設定画面。プロフィール／AI Persona、Markdown／JSON Export、外部バックアップを設定内へ集約し、トップの主要導線と分離する。
+- `TabView`によるHome／Mentions／Search／Insights／Profileの5タブ。各タブは独立した`NavigationStack`を持ち、Home右上の鉛筆から投稿Composerを開き、隣のフィルターから投稿者単位でTimelineを絞り込む。MentionsはHuman／AI Persona宛てのMention・Reply、Searchは本文検索、InsightsはDaily Summary／Analytics、Profileは投稿一覧を持たない共通Actor Profile UIを表示する。SettingsはProfile右上へ集約する。
 - ローカルの単一人間Persona基盤。SQLite schema v6の`personas`／`thought_authors`で既存・新規Thoughtを固定のデフォルト人間へ紐づけ、表示名と512px以下へ正方形化したJPEGアイコンをSQLite内へ保存する。
 - Timelineの投稿者名・丸型アイコン表示と、写真選択／削除／表示名編集を行うプロフィール画面。未設定時は標準人物アイコンを表示し、プロフィール変更を既存Thoughtへ一括反映する。
 - 複数AI Personaの作成・編集・無効化UIと、投稿ごとの実Persona表示。任意Persona IDでThoughtを原子的に保存でき、通信はユーザーの明示操作時だけ行う。
 - AI Personaごとの役割・指示設定と、明示的な「投稿を依頼」導線。ユーザー依頼と最終payloadをプレビューし、確定後だけFirebase AI Logicを呼び、140文字以内の成功応答だけをAI Persona名義でTimelineへ保存する。
 - SQLite schema v7の`ai_persona_configurations`／`ai_post_generations`。AI設定と生成来歴をThought本文から分離し、Thought・投稿者・provider／model／prompt version／ユーザー依頼を同一transactionで保存する。自動投稿は行わない。
-- AI Personaへの単一メンションv1。Timeline Composer／Quick CaptureでactiveなAIを選択し、schema v8の`thought_mentions`へ本文と同じtransactionでPersona IDを保存する。Timelineは現在のPersona名を`@名前`で表示し、メンションだけではAI通信を開始しない。
+- AI Personaへの単一メンションv1。Timeline ComposerでactiveなAIを選択し、schema v8の`thought_mentions`へ本文と同じtransactionでPersona IDを保存する。Timelineは現在のPersona名を`@名前`で表示し、メンションだけではAI通信を開始しない。
 - メンション付きThoughtから明示的に依頼するAI返信v1。送信前にAI、対象Thought、役割、指示、最終payload、provider／modelを確認し、対象Thoughtだけを送る。成功した140文字以内の応答はAI名義Thought、`repliesTo` Relation、返信先を含む生成来歴としてschema v9へatomic保存する。同一Thoughtへの複数返信を許可し、Detailで返信一覧を確認できる。
 - AI Reply Context v1。対象Thoughtから`repliesTo`だけを遡る直近最大5件を、Human／AI投稿者付き・古い順で送信前previewとpromptへ含める。削除済み本文、Continuation、重複、cycleを除外し、送信直前のContext再取得でThought・Relation・投稿者・対象が変わっていればAIを呼ばない。Mentionだけでは通信しない。AI Replyへの人間返信は相手AIを自動メンションして同じReply chainへatomic保存する。
+- AI Persona Reply v2。HumanがAI ThoughtへReplyすると相手AIをRelationから引き継ぎ、Reply Thread、Role／Instructions、同Personaの直近5発言、任意のExternal Brainで既存AI Reply promptを組み立てる。同一Human ReplyへのAI生成済みReplyはCore／SQLite双方で拒否する。Persona別`Auto Reply`はschema v17へ永続化し、既定ON。ONではHumanの@メンションを起点に承認なしで生成・atomic投稿する。AI投稿を起点にしないためAI同士の自動連鎖は行わない。
 - Timeline Reply Context。Human／AI双方の返信を通常Timelineへ独立Thoughtとして表示し、`repliesTo`から取得した返信先Personaと本文を最大2行の文脈として添える。Human／AI返信の保存が成功したらDetailを閉じてTimelineへ戻り、失敗時は入力と画面を保持する。返信先本文は複製保存せず、削除済みの場合もRelationを保持してplaceholderを表示する。schema v15は`user_version`だけ進んで旧`continues`限定制約が残ったDBを実定義から検知・非破壊補修し、起動時DB health checkでその他の破損・必須schema欠落を即時検知する。
-- Daily Summary v2。`thought_authors`でHumanを主分析、AI投稿／Replyを「AIとの対話」へ分離し、Human Thoughtだけを既存タグ別に分類する。時刻・共通`TimeOfDay`・`continues`／`repliesTo`を補助情報としてpromptへ渡すが、少数データでは時間帯を断定しない。typedなタグ別／AI対話／任意時間帯Insight、送信前の構造化preview、Thought・時刻・投稿者・Tag・Relationのstale防止を提供する。v1 JSONは新fieldを空配列として読める。
+- Daily Summary v3。`ThoughtRepository.fetchHumanThoughts(from:to:)`が`thought_authors`と`personas.kind`をRepository／SQLite JOINで判定し、期間内・未削除のHuman Thoughtだけを取得する。AI投稿／自動返信／返信／フリートーク本文はprompt・件数・タグ・テーマ・思考の流れ・Continuation集計から完全に除外する。Mention先は判定に影響しない。既存v1／v2 Summaryと`aiInteractions`は削除せず後方互換で読めるが、新規v3生成では`aiInteractions`を要求・保存しない。AI側の活動は将来の独立したAI Summaryの責務とする。
 - AI Tag Suggestions。Daily SummaryがHuman Thoughtのprompt連番単位でタグ名・理由を提案し、生成後に有効なHuman indexだけを内部Thought IDへ解決する。確定タグ分析とは分離し、不正indexとAI Thought候補を除外する。Detailの「追加」を押した場合だけ既存`ThoughtTagRepository`の独立transactionで確定タグにする。
 - 振り返り導線をDaily Summaryへ統一。TimelineのHistory Review入口と画面、旧期間AI要約UIを外し、既存の`review_summaries`はデータ互換のためSQLite内に保持する。
 - Timelineトップバーの独立タグ一覧ボタンを外し、Thoughtに付いたタグは`tag.fill`と名前を組み合わせて文脈内で識別しやすく表示する。
 
-- 端末Calendar／timezoneの1日境界で明示生成するAI Daily Summary v2。月カレンダーで要約済み／Thoughtあり未要約／Thoughtなしと今日を区別し、過去日の日別詳細、送信前Thought／payloadプレビュー、Human中心の構造化結果の表示と再読込を提供する。
+- 端末Calendar／timezoneの1日境界で明示生成するDaily Summary v3。月カレンダーで要約済み／Human Thoughtあり未要約／Human Thoughtなしと今日を区別し、過去日の日別詳細、Human Thoughtだけの送信前preview、構造化結果の表示と再読込を提供する。
 - SQLite schema v5の`daily_summaries`。Thought原文と分離した1日1件の正式Summaryとして構造化結果と生成メタデータを保存し、AI候補からタグ／Thought／Continuationを自動変更しない。
 - タグチップ、タグ追加、タグ編集ボタンの操作領域を44pt以上へ拡大。
 
@@ -47,8 +58,8 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - UUIDと作成・更新・削除日時を持つThought原文モデル。
 - Application Support配下のSQLiteを正本にしたローカル保存、query順序、ソフトデリート。
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
-- `PRAGMA user_version`によるschema version管理（現在v14）。v11はKnowledge Draft生成元source type、v12はKnowledge Draft／Knowledge Document／Review eventとDraft FTS、v13はKnowledge status／supersede／archive／retrieval usage／quality candidate、v14は`PRAGMA table_info`で実カラムを照合して不足カラムだけを補修する。
-- 画面下部に固定し、入力中だけ枠内右端に投稿ボタンを表示するコンパクトなComposer。
+- `PRAGMA user_version`によるschema version管理（現在v18）。v14は実カラム補修、v15はReply Relation制約補修、v16はActor handle／Mention snapshot、v17はAI Persona Auto Reply、v18は旧`account_id`単独UNIQUE制約の非破壊補修を行う。
+- Home右上の鉛筆アイコンから開き、入力へ自動focusする投稿Composer。投稿操作はNavigation bar右上に置き、空入力や140文字超過時は無効化する。
 - Lazy Timeline、自然な相対日時、メニュー内削除、Empty State。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。
 - iOS 16以降用SwiftUIアプリ、Xcode project/shared scheme。
@@ -85,16 +96,9 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - Thought原文と分離した`ThoughtTag`／`ThoughtTagRepository`、SQLite schema v4の`tags`／`thought_tags`。正規化名と複合主キーでタグ名・付与の重複を防止。
 - Thought Detailのタグ確認・編集、既存タグ付与、新規タグ作成、個別解除。Timeline／本文検索結果の最大2件＋省略表示、タグ一覧、タグ別Thought一覧、既存Detailへの遷移。
 - タグ追加／解除transaction、deleted Thoughtを除外するタグ一覧・タグ別query、v1〜v3から既存Thoughtを保持するmigration経路。
-- Timelineから1操作で開き、本文入力へ自動focusするQuick Capture。本文、140文字、文字数、投稿、キャンセルだけに絞り、既存Timeline Composerを維持。
-- Timeline ComposerとQuick Captureが`ThoughtStore.post(_:)`から既存`ThoughtTimeline.post`を共用する投稿境界。Quick専用Repository API、タグ入力、自動draft保存は追加しない。
-- Quick Capture表示中だけ保持する独立draft、入力中キャンセルの破棄確認、interactive dismiss抑止、投稿中の再入防止、失敗時の画面・draft保持、成功時dismissとTimeline即時反映。
-- scene直下の`AppRoute.quickCapture`。Widgetのcustom URLは検証後にこのrouteへ変換し、将来のApp Shortcut／Action Buttonも同じ表示routeを要求できる構成。
-- iOS 16対応の小型Quick Capture Widget。固定文言だけを表示し、全体タップの`widgetURL`から`aitextapp://quick-capture`を開く。
-- app／Widgetで共有する厳密な外部route契約と、SwiftUI `onOpenURL`から既存`AppRoute.quickCapture`へ変換するcold launch／foreground共通導線。
-- `AiTextAppWidget` Extension targetとappへの埋め込み設定。WidgetはSQLite、Repository、Firebase、Thought本文へ依存せず、App Group／entitlement／schema変更を行わない。
 - Timelineから開くローカル分析画面。今日／過去7日／過去30日、活動日数、1活動日平均、30日の日別カレンダー（件数・濃淡・今日の枠線）、曜日別・時間帯別分布、上位5タグ、Continuationを持つThought数を表示。
 - typed分析model、端末Calendarから30日の日／時間帯境界を構築する`LoadThoughtAnalytics`、CRUDから分離したread-only `ThoughtAnalyticsRepository`。
-- AI Daily Summary v2: Calendar日境界、Human／AI分離、Humanタグ分類、任意時間帯Insight、構造化Gemini応答、独立SQLite保存、月間カレンダー、日別詳細、Timeline統合。
+- Daily Summary v3: Calendar日境界、RepositoryでのHuman限定取得、Humanタグ／Relation／時間帯分析、構造化Gemini応答、既存Summary互換の独立SQLite保存、月間カレンダー、日別詳細、Timeline統合。AI Summaryは未実装で別責務。
 - SQLiteの境界CTE＋`COUNT`／`GROUP BY`、タグJOIN集計、activeな期間内親子のRelation集計。原文全件をViewへ取得せず、deleted／期間外ThoughtをSQLで除外する。
 
 ## 未実装
@@ -127,8 +131,6 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - Phase 3-AのSwift Testing、Xcode build、XCUITest、Light／Dark Mode、Dynamic Type、VoiceOverの実機／Simulator確認はWindows環境のため未実行です。
 - Phase 3-Bのschema v4 migration、タグunit test、XCUITest、Light／Dark Mode、Dynamic Type、VoiceOverの実機／Simulator確認はWindows環境のため未実行です。
 - Phase 3-Cの期間境界、期間＋タグquery、Review概要・日別表示、AI対象差、XCUITest、各アクセシビリティ表示はWindows環境のため未実行です。
-- Phase 3-E-1の自動focus、140／141文字、二重投稿防止、失敗時draft保持、破棄確認、小型iPhone keyboard layout、XCUITest、VoiceOverはWindows環境のため未実行です。
-- Phase 3-E-2のXcode project読込、app／Widget compile・署名、Widget preview、SimulatorへのWidget配置、cold launch／foreground URL route XCUITest、iOS 16／17以降の背景表示、Dynamic Type／Dark Mode／VoiceOverはWindows環境のため未実行です。
 - Phase 3-DのSwift Testing、SQLite集計SQL、timezone／時間帯境界、分析画面XCUITest、小型iPhoneでのバー表示、Dynamic Type／Dark Mode／VoiceOverはWindows環境のため未実行です。
 
 ## 次に行うこと
@@ -144,12 +146,10 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 1. Phase 3-A: Thought検索 v1 — コード実装済み／Mac確認待ち。
 2. Phase 3-B: Thoughtタグ v1 — コード実装済み／Mac確認待ち。
 3. Phase 3-C: History Review強化 v1 — 撤回。振り返り導線はDaily Summaryへ統一済み。
-4. Phase 3-E-1: Quick Capture v1 — コード実装済み／Mac確認待ち。
-5. Phase 3-E-2: Widget／外部起動導線 v1 — コード実装済み／Mac確認待ち。WidgetはQuick Captureを開くだけで、データ共有・直接投稿を行わない。
-6. Phase 3-E-3候補: 「Thoughtを書く」App Shortcut／App Intent — 既存外部routeを再利用できるが、WidgetのMac検証後に必要性を判断する。
-7. Phase 3-D: ローカル分析 v1 — コード実装済み／Mac確認待ち。SQLite集計基盤と直近30日の小さな分析画面まで。
+4. Phase 3-E: Quick Capture／Widget — 通常投稿Composerとの重複を理由に削除済み。将来、未整理メモ用Inboxなど用途が明確に異なる場合は別機能として再設計する。
+5. Phase 3-D: ローカル分析 v1 — コード実装済み／Mac確認待ち。SQLite集計基盤と直近30日の小さな分析画面まで。
 
-Phase 3の機能追加は一度止め、次はMac検証を最優先する。3-A〜3-E-2と3-Dにcompile／Simulator未確認が蓄積し、特にWidget targetとSQLite分析SQLは実環境確認が完了条件になるためである。検証と実利用後、入力導線の不足が明確なら3-E-3 App Shortcut、分析画面で具体的な意思決定が不足する場合だけ分析v2を検討する。根拠がなければPhase 4の別テーマを決める。
+Phase 3の機能追加は一度止め、次はMac検証を最優先する。3-A〜3-Dにcompile／Simulator未確認が蓄積しているためである。検証と実利用後、分析画面で具体的な意思決定が不足する場合だけ分析v2を検討する。根拠がなければPhase 4の別テーマを決める。
 
 #### AIロードマップ
 

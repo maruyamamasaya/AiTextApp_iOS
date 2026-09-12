@@ -10,7 +10,7 @@ UI非依存のドメイン／永続化／ExportはSwift PackageとしてLinux/ma
 swift test
 ```
 
-入力境界、SQLite、Persona、AI Reply／Context、タグ、ローカル分析、backup、Export、Historyに加え、Actor handleの正規化・一意性・ID維持、Human／AI Mention snapshotと範囲、Daily Summary v2のHuman／AI分類、Humanタグ限定、AIタグ候補のHuman index解決／不正index除外／生成時非保存／明示追加、複数AI、Relation、共通時間帯とtimezone境界、空Insight、v1 decode／v2 round-trip、SQLite再読込、stale previewを検証します。
+入力境界、SQLite、Persona、AI Reply／Context、タグ、ローカル分析、backup、Export、Historyに加え、Actor handleの正規化・一意性・ID維持、Human／AI Mention snapshotと範囲、Conversation Treeの両Relation統合・branch・currentPath・最新leaf、同一対象への複数AI各1返信、Daily Summary v2のHuman／AI分類、Humanタグ限定、AIタグ候補のHuman index解決／不正index除外／生成時非保存／明示追加、複数AI、Relation、共通時間帯とtimezone境界、空Insight、v1 decode／v2 round-trip、SQLite再読込、stale previewを検証します。
 
 Persona External Brain／External Brain Routing v1はAGENT.md解析、`{current_project}`展開、unsafe path拒否、Markdown front matter／heading chunk／draft除外、SHA差分同期・削除・offline cache、FTS route／metadata優先、最大件数、0件、AI Reply／Persona Post promptの参考資料境界とUsage metadataを`ExternalBrainTests.swift`で検証します。
 
@@ -26,7 +26,9 @@ AI API Usage Analyticsは`AIAPIUsageTests.swift`で現行schema v15上の保存�
 
 ## UI Test
 
-`AiTextAppUITests`は既存Timeline Composerに加え、Quick Captureの起動、空draft、自動focus、trim投稿、Timeline即時反映、単一投稿、空／141文字拒否、空キャンセル、入力中破棄確認・継続時保持、投稿失敗時の画面・draft保持を検証します。custom URLのcold launch／foreground受信、通常起動ではTimelineのままであること、route dismiss後の消費も検証対象です。本文検索、Thoughtに紐づくタグ、Continuation、Daily Summaryのflowも維持します。
+`AiTextAppUITests`はHome／Mentions／Search／Insights／Profileの5タブ、Home Composerの投稿、Mention表示、`@mio`の自動返信、Conversation表示、最新leafへの通常返信、本文検索、InsightsのDaily Summary／Analytics入口、共通Profile表示、Profile右上からSettingsへの導線を検証します。Thoughtに紐づくタグ、Continuation、Daily Summaryなどの主要flowも維持します。
+
+Theme UI testは4テーマを順に選択し、Home／Mentions／Search／Insights／ProfileとTab Barの各組み合わせをScreenshot attachmentへ保存します。最後に再起動して選択状態が維持されることを確認します。AI Thought固有Surfaceは共通`ThoughtRow`のactor kind分岐だけで適用し、本文自体へGlowを付けないことをコードレビュー対象とします。
 
 ローカル分析UIは「Timelineで1件投稿 → 分析を開く → 今日／7日／30日／活動日／活動日平均 → 日別カレンダーの今日が1件」をXCUITestで確認します。日別カレンダーの配置・濃淡・今日の枠線、locale曜日、時間帯、タグEmpty State、Continuation説明はSimulatorで目視とVoiceOver確認も行います。
 
@@ -47,8 +49,6 @@ xcodebuild -project AiTextApp.xcodeproj -scheme AiTextApp \
 ```
 
 最新標準iPhone名は`xcrun simctl list devices available`で確認してdestinationへ指定します。
-
-WidgetはXcodeで`AiTextAppWidget` targetのcompile／署名、systemSmall preview、ホーム画面への配置を確認します。Widget全体タップからcold launch／foregroundの両方でQuick Captureが開き、入力欄がfocusされることを確認します。ExtensionのSources／Link Binary With LibrariesにThoughtCore、SQLite、Firebaseが含まれず、App Groups entitlementがないことも確認します。
 
 ## Firebase Integration / Device
 

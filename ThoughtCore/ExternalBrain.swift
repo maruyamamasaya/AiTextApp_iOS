@@ -368,11 +368,19 @@ public enum KnowledgeDraftSource: String, CaseIterable, Codable, Sendable {
     case dailySummary = "daily-summary"
     case manual
     case mergeDraft = "merge-draft"
-    public var displayName: String { switch self { case .aiReply: "AI Reply"; case .personaPost: "Persona Post"; case .dailySummary: "Daily Summary"; case .manual: "Manual"; case .mergeDraft: "Merge Draft" } }
+    public var displayName: String { switch self { case .aiReply: "AIからの返信"; case .personaPost: "AIペルソナの投稿"; case .dailySummary: "デイリーサマリー"; case .manual: "手動"; case .mergeDraft: "統合下書き" } }
 }
 
 public enum KnowledgeDraftReviewStatus: String, CaseIterable, Codable, Sendable { case unreviewed, approved, promoted, rejected }
 public enum KnowledgeGitHubSyncStatus: String, Codable, Sendable { case localOnly = "local-only", synced, failed }
+
+public extension KnowledgeDraftReviewStatus {
+    var displayName: String { switch self { case .unreviewed: "未レビュー"; case .approved: "承認済み"; case .promoted: "昇格済み"; case .rejected: "却下" } }
+}
+
+public extension KnowledgeGitHubSyncStatus {
+    var displayName: String { switch self { case .localOnly: "ローカルのみ"; case .synced: "同期済み"; case .failed: "同期失敗" } }
+}
 public struct KnowledgeDraftProvenance: Codable, Equatable, Sendable {
     public var sourceID: String?, personaID: UUID?, conversationID: UUID?, dailySummaryDate: Date?
     public var sourceKnowledgeIDs: [UUID]?, sourcePaths: [String]?
@@ -383,7 +391,7 @@ public struct KnowledgeDraftProvenance: Codable, Equatable, Sendable {
 public enum KnowledgeDraftType: String, CaseIterable, Codable, Sendable {
     case decision, knowledge, memory
     case projectNote = "project-note"
-    public var displayName: String { switch self { case .decision: "Decision"; case .knowledge: "Knowledge"; case .memory: "Memory"; case .projectNote: "Project Note" } }
+    public var displayName: String { switch self { case .decision: "意思決定"; case .knowledge: "ナレッジ"; case .memory: "メモリ"; case .projectNote: "プロジェクトメモ" } }
 }
 
 public struct KnowledgeDraftInput: Equatable, Sendable {

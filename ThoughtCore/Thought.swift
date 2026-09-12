@@ -109,10 +109,11 @@ public struct AIPersonaConfiguration: Equatable, Sendable {
     public let personaID: UUID
     public var role: String
     public var instructions: String
+    public var autoReplyEnabled: Bool
     public var updatedAt: Date
 
-    public init(personaID: UUID, role: String, instructions: String, updatedAt: Date = Date()) {
-        self.personaID = personaID; self.role = role; self.instructions = instructions; self.updatedAt = updatedAt
+    public init(personaID: UUID, role: String, instructions: String, autoReplyEnabled: Bool = true, updatedAt: Date = Date()) {
+        self.personaID = personaID; self.role = role; self.instructions = instructions; self.autoReplyEnabled = autoReplyEnabled; self.updatedAt = updatedAt
     }
 }
 
@@ -164,6 +165,7 @@ public protocol AIThoughtReplyRepository: AIReplyContextRepository {
     func fetchAIReplies(to thoughtID: UUID) throws -> [Thought]
     func fetchReplyTargets(for thoughtIDs: [UUID]) throws -> [UUID: UUID]
     func fetchAIPostGeneration(for thoughtID: UUID) throws -> AIPostGeneration?
+    func fetchRecentAIStatements(personaID: UUID, limit: Int) throws -> [Thought]
 }
 
 public struct AIThoughtReplyPreview: Identifiable, Equatable, Sendable {
@@ -174,13 +176,14 @@ public struct AIThoughtReplyPreview: Identifiable, Equatable, Sendable {
     public let userRequest: String
     public let context: AIReplyContext
     public let externalBrain: ExternalBrainContext?
+    public let personaStatements: [Thought]
     public let request: ReviewSummaryRequest
 }
 
 public enum AIThoughtReplyPrompt {
     public static let version = 2
     public static let maximumContextEntries = 5
-    public static func prepare(persona: Persona, configuration: AIPersonaConfiguration, targetThought: Thought, userRequest: String, context: AIReplyContext, externalBrain: ExternalBrainContext? = nil) throws -> AIThoughtReplyPreview {
+    public static func prepare(persona: Persona, configuration: AIPersonaConfiguration, targetThought: Thought, userRequest: String, context: AIReplyContext, externalBrain: ExternalBrainContext? = nil, personaStatements: [Thought] = []) throws -> AIThoughtReplyPreview {
         guard persona.kind == .ai, persona.deletedAt == nil else { throw AIPostError.inactivePersona }
         guard targetThought.deletedAt == nil else { throw AIPostError.invalidRequest }
         guard !targetThought.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AIPostError.invalidRequest }
@@ -197,6 +200,7 @@ public enum AIThoughtReplyPrompt {
         let targetKind = target.author.kind == .human ? "Human" : "AI"
         let externalRole = externalBrain.map { "\nExternal Brain上のRole: \($0.role)" } ?? ""
         let brainSection = externalBrain?.promptSection ?? "--- External Brain ---\n利用なし"
+        let statements = personaStatements.isEmpty ? "（過去の発言なし）" : personaStatements.map { "- \($0.body)" }.joined(separator: "\n")
         let prompt = """
         --- Persona Role / Instructions ---
         あなたはプライベートなThought Timelineへ参加するAI Personaです。
@@ -206,6 +210,9 @@ public enum AIThoughtReplyPrompt {
         project固有のdecision、local rule、user固有情報は、一般論より優先してください。
 
         \(brainSection)
+
+        --- Persona自身の最近の発言 ---
+        \(statements)
 
         --- Reply Context ---
         \(contextText)
@@ -220,8 +227,17 @@ public enum AIThoughtReplyPrompt {
         --- Output Rules ---
         このThoughtに対する返信を日本語140文字以内で返してください。前置き、引用符、Markdown、文字数説明は不要です。
         """
-        return AIThoughtReplyPreview(persona: persona, configuration: configuration, targetThought: targetThought, userRequest: normalizedRequest, context: context, externalBrain: externalBrain, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .thoughtReply, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0)))
+        return AIThoughtReplyPreview(persona: persona, configuration: configuration, targetThought: targetThought, userRequest: normalizedRequest, context: context, externalBrain: externalBrain, personaStatements: personaStatements, request: ReviewSummaryRequest(prompt: prompt, usageContext: .init(feature: .thoughtReply, personaID: persona.id, externalBrainUsed: externalBrain != nil, retrievedChunkCount: externalBrain?.chunks.count ?? 0)))
     }
+}
+
+public struct AIThoughtReplyDraft: Identifiable, Equatable, Sendable {
+    public let id = UUID()
+    public let preview: AIThoughtReplyPreview
+    public let body: String
+    public let provider: String
+    public let model: String
+    public init(preview: AIThoughtReplyPreview, body: String, provider: String, model: String) { self.preview = preview; self.body = body; self.provider = provider; self.model = model }
 }
 
 public struct GenerateAIThoughtReply: Sendable {
@@ -229,22 +245,31 @@ public struct GenerateAIThoughtReply: Sendable {
     private let repository: any AIThoughtReplyRepository
     private let usage: AIAPIUsageRecorder?
     public init(client: any ReviewSummaryClient, repository: any AIThoughtReplyRepository, usageRepository: (any AIAPIUsageRepository)? = nil) { self.client = client; self.repository = repository; usage = usageRepository.map { AIAPIUsageRecorder(repository: $0) } }
-    public func callAsFunction(preview: AIThoughtReplyPreview, now: Date = Date(), thoughtID: UUID = UUID(), relationID: UUID = UUID()) async throws -> Thought {
+    public func generate(preview: AIThoughtReplyPreview) async throws -> AIThoughtReplyDraft {
         guard try repository.fetchActiveAIReplyPersona(id: preview.persona.id) == preview.persona else { throw AIPostError.inactivePersona }
+        for reply in try repository.fetchAIReplies(to: preview.targetThought.id) {
+            if let generation = try repository.fetchAIPostGeneration(for: reply.id), generation.kind == .reply, generation.personaID == preview.persona.id { throw AIPostError.duplicateReply }
+        }
         let currentContext = try repository.loadAIReplyContext(targetThoughtID: preview.targetThought.id, maximumEntries: AIThoughtReplyPrompt.maximumContextEntries)
         guard currentContext == preview.context else { throw ReviewSummaryError.stalePreview }
-        let finish: @Sendable (ReviewSummaryResponse) async throws -> Thought = { response in
-        let body = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { throw AIPostError.emptyResponse }
-        guard body.count <= ThoughtDraft.characterLimit else { throw AIPostError.responseTooLong }
-        let thought = Thought(id: thoughtID, body: body, createdAt: now)
-        let generation = AIPostGeneration(thoughtID: thoughtID, personaID: preview.persona.id, userRequest: preview.userRequest, provider: response.provider, model: response.model, promptVersion: AIThoughtReplyPrompt.version, generatedAt: now, kind: .reply, replyTargetThoughtID: preview.targetThought.id)
-        try repository.saveGeneratedReply(thought, authorPersonaID: preview.persona.id, targetThoughtID: preview.targetThought.id, generation: generation, relationID: relationID)
-        return thought
+        let finish: @Sendable (ReviewSummaryResponse) async throws -> AIThoughtReplyDraft = { response in
+            let body = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !body.isEmpty else { throw AIPostError.emptyResponse }
+            guard body.count <= ThoughtDraft.characterLimit else { throw AIPostError.responseTooLong }
+            return AIThoughtReplyDraft(preview: preview, body: body, provider: response.provider, model: response.model)
         }
         if let usage { return try await usage.call(client: client, request: preview.request, finish: finish) }
-        let response = try await client.generateSummary(preview.request)
-        return try await finish(response)
+        return try await finish(try await client.generateSummary(preview.request))
+    }
+    public func publish(draft: AIThoughtReplyDraft, now: Date = Date(), thoughtID: UUID = UUID(), relationID: UUID = UUID()) throws -> Thought {
+        guard try repository.fetchActiveAIReplyPersona(id: draft.preview.persona.id) == draft.preview.persona else { throw AIPostError.inactivePersona }
+        let thought = Thought(id: thoughtID, body: draft.body, createdAt: now)
+        let generation = AIPostGeneration(thoughtID: thoughtID, personaID: draft.preview.persona.id, userRequest: draft.preview.userRequest, provider: draft.provider, model: draft.model, promptVersion: AIThoughtReplyPrompt.version, generatedAt: now, kind: .reply, replyTargetThoughtID: draft.preview.targetThought.id)
+        try repository.saveGeneratedReply(thought, authorPersonaID: draft.preview.persona.id, targetThoughtID: draft.preview.targetThought.id, generation: generation, relationID: relationID)
+        return thought
+    }
+    public func callAsFunction(preview: AIThoughtReplyPreview, now: Date = Date(), thoughtID: UUID = UUID(), relationID: UUID = UUID()) async throws -> Thought {
+        try publish(draft: try await generate(preview: preview), now: now, thoughtID: thoughtID, relationID: relationID)
     }
 }
 
@@ -258,7 +283,7 @@ public struct AIPostPreview: Identifiable, Equatable, Sendable {
 }
 
 public enum AIPostError: Error, LocalizedError, Equatable {
-    case invalidRequest, inactivePersona, missingConfiguration, emptyResponse, responseTooLong
+    case invalidRequest, inactivePersona, missingConfiguration, emptyResponse, responseTooLong, duplicateReply
     public var errorDescription: String? {
         switch self {
         case .invalidRequest: "AIへの依頼を入力してください。"
@@ -266,6 +291,7 @@ public enum AIPostError: Error, LocalizedError, Equatable {
         case .missingConfiguration: "AI Personaの役割と指示を設定してください。"
         case .emptyResponse: "AIから空の応答が返されました。"
         case .responseTooLong: "AIの応答が140文字を超えたため投稿しませんでした。"
+        case .duplicateReply: "このReplyへのAI返信は生成済みです。"
         }
     }
 }

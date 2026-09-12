@@ -10,7 +10,7 @@ struct DailySummarySections: View {
             Section("タグ別（確定タグ）") { ForEach(summary.content.tagGroups, id: \.tagName) { group in VStack(alignment: .leading, spacing: 4) { Text("#\(group.tagName)").font(.headline); Text(group.summary); if !group.themes.isEmpty { Text(group.themes.joined(separator: "、")).font(.caption).foregroundStyle(.secondary) }; Text("\(group.thoughtCount)件").font(.caption2).foregroundStyle(.secondary) } } }
         }
         if !summary.content.aiInteractions.isEmpty {
-            Section("AIとの対話") { ForEach(summary.content.aiInteractions, id: \.personaName) { interaction in VStack(alignment: .leading, spacing: 4) { Text(interaction.personaName).font(.headline); Text(interaction.summary); if !interaction.topics.isEmpty { Text(interaction.topics.joined(separator: "、")).font(.caption).foregroundStyle(.secondary) } } } }
+            Section("AIとの対話（旧仕様の保存内容）") { ForEach(summary.content.aiInteractions, id: \.personaName) { interaction in VStack(alignment: .leading, spacing: 4) { Text(interaction.personaName).font(.headline); Text(interaction.summary); if !interaction.topics.isEmpty { Text(interaction.topics.joined(separator: "、")).font(.caption).foregroundStyle(.secondary) } } } }
         }
         valueSection("思考パターン", summary.content.thoughtPatterns)
         valueSection("深掘りしていた内容", summary.content.deepDives)
@@ -46,7 +46,8 @@ struct DailySummarySections: View {
         Section("生成情報") {
             LabeledContent("生成日時", value: summary.createdAt.formatted())
             LabeledContent("生成元", value: "\(summary.provider) / \(summary.model)")
-            LabeledContent("対象", value: "\(summary.thoughtCount) Thoughts")
+            LabeledContent("対象", value: "\(summary.thoughtCount)件の思考メモ")
+            LabeledContent("仕様", value: summary.promptVersion >= 3 ? "Human Thoughtのみ" : "旧仕様")
         }
     }
 
@@ -118,7 +119,7 @@ struct DailySummaryCalendarView: View {
                 .padding(.horizontal)
             }
         }
-        .navigationTitle("Daily Summary")
+        .navigationTitle("デイリーサマリー")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -162,7 +163,7 @@ struct DailySummaryCalendarView: View {
 
     private func status(for day: Date) -> (icon: String, color: Color, text: String) {
         if store.dailySummaries.contains(where: { calendar.isDate($0.dayStart, inSameDayAs: day) }) { return ("checkmark.circle.fill", .green, "要約済み") }
-        if store.thoughts.contains(where: { calendar.isDate($0.createdAt, inSameDayAs: day) }) { return ("circle.fill", .orange, "Thoughtあり、未要約") }
+        if store.thoughts.contains(where: { store.isHumanAuthored($0) && calendar.isDate($0.createdAt, inSameDayAs: day) }) { return ("circle.fill", .orange, "あなたのThoughtあり、未要約") }
         return ("circle", .secondary, "Thoughtなし")
     }
 
@@ -178,9 +179,10 @@ private struct DailySummaryDetailView: View {
 
     var body: some View {
         List {
+            Section { Text("あなたのThoughtをもとに生成").font(.subheadline).foregroundStyle(.secondary) }
             Section {
-                LabeledContent("Thought", value: "\(store.dailySummaryDayThoughts.count)件")
-                LabeledContent("Continuation", value: "\(store.dailySummaryDayContinuationCount)件")
+                LabeledContent("あなたのThought", value: "\(store.dailySummaryDayThoughts.count)件")
+                LabeledContent("あなたの継続Thought", value: "\(store.dailySummaryDayContinuationCount)件")
                 LabeledContent("既存タグ", value: store.dailySummaryDayTags.isEmpty ? "なし" : store.dailySummaryDayTags.joined(separator: "、"))
             }
             if let summary = store.dailySummary {
@@ -216,14 +218,17 @@ private struct DailySummaryPreviewView: View {
         NavigationStack {
             List {
                 Section("送信内容") {
-                    LabeledContent("対象", value: "\(preview.thoughts.count) Thoughts")
+                    Text("あなたのThoughtだけを送信します。AI Personaの本文は含みません。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    LabeledContent("対象", value: "\(preview.thoughts.count)件のHuman Thought")
                     LabeledContent("payload", value: "\(preview.request.prompt.count)文字")
                     LabeledContent("Continuation", value: "\(preview.continuationCount)件")
                 }
                 Section("対象Thought") { ForEach(preview.thoughts) { Text($0.body) } }
-                Section("構造化された送信対象") {
+                Section("Human Thoughtとして送信") {
                     ForEach(preview.inputs, id: \.thought.id) { input in
-                        HStack(alignment: .top, spacing: 10) { PersonaIcon(persona: input.author, size: 32); VStack(alignment: .leading, spacing: 3) { Text(input.author.displayName).font(.subheadline.weight(.semibold)); Text(input.author.kind == .human ? "Human" : "AI").font(.caption2).foregroundStyle(.secondary); if input.author.kind == .human, !input.tags.isEmpty { Text(input.tags.map { "#\($0.name)" }.joined(separator: " ")).font(.caption).foregroundStyle(.tint) }; Text(input.thought.body) } }
+                    HStack(alignment: .top, spacing: 10) { PersonaIcon(persona: input.author, size: 32); VStack(alignment: .leading, spacing: 3) { Text(input.author.displayName).font(.subheadline.weight(.semibold)); Text(input.author.kind == .human ? "人間" : "AI").font(.caption2).foregroundStyle(.secondary); if input.author.kind == .human, !input.tags.isEmpty { Text(input.tags.map { "#\($0.name)" }.joined(separator: " ")).font(.caption).foregroundStyle(.tint) }; Text(input.thought.body) } }
                     }
                 }
                 Section("最終payload") { Text(preview.request.prompt).font(.caption).textSelection(.enabled) }

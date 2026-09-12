@@ -7,10 +7,12 @@ HumanとAI Personaは`Persona`（公開上は`Actor` alias）という単一モ�
 ## System Overview
 
 ```text
-Quick Capture Widget -> custom URL -> SwiftUI onOpenURL -> AppRoute.quickCapture
-SwiftUI AppRoute -> TimelineView / QuickCaptureView
-  TimelineView -> DailySummaryCalendarView / ThoughtDetailView / Continuation Composer
-  TimelineView -> ThoughtAnalyticsView / ThoughtSearchView
+SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
+  Home (TimelineView) -> ThoughtDetailView / Continuation Composer
+  MentionsView -> Mention・Reply一覧 -> ThoughtDetailView
+  SearchTabView -> ThoughtSearchView -> ThoughtDetailView
+  InsightsView -> DailySummaryCalendarView / ThoughtAnalyticsView
+  ProfileTabView -> ActorProfileView -> SettingsView
   SettingsView -> AIAPIUsageAnalyticsView -> LoadAIAPIUsageAnalytics
   -> ThoughtStore (presentation state)
     -> ThoughtTimeline (validation/order/delete use cases)
@@ -36,23 +38,29 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 
 ## Main Components
 
-- `TimelineView`: placeholder付きComposer、Lazy Timeline、Quick Capture／Detail／Thought検索／Daily SummaryへのNavigation、相対日時、操作メニュー、削除確認、Empty State、エラー表示。タグはThoughtの文脈内で`tag.fill`と名前を表示し、独立したトップバー入口は置かない。
-- `AppRoute` / `QuickCaptureView`: scene直下のQuick Capture表示routeと、独立draft、自動focus、文字数、投稿、破棄確認だけを持つ集中入力画面。将来の外部起動元は同じrouteを要求する。
-- `QuickCaptureWidget` / `QuickCaptureRoute`: systemSmallの固定表示Widgetと、app／Extension間で共有する外部URL契約。Widgetは`widgetURL`だけを発行し、appの`onOpenURL`が既存`AppRoute.quickCapture`へ変換する。
+- `AppTheme` / `ThemeController` / `ThemeHost`: raw color・radius・durationのPrimitive、用途別Semantic、4種のTheme preset、画面強度とReduce Motionを解決するEffect境界を分離する。選択はUserDefaultsへ保存し、全5タブは同じView構造のままEnvironmentのresolved tokenを消費する。常駐Effectは少数のSwiftUI Shape、静的な決定論的star、transform／opacity中心の長周期animationに限定する。
+
+- `MainTabView`: 標準`TabView`で5つの主要導線を構成し、タブごとの`NavigationStack`とHomeのTimeline状態を保持する。
+- 投稿成功Navigationは`ThoughtStore.PostNavigationRequest`へ集約する。Rootの`MainTabView`がHomeを選択して各タブのNavigation rootを再生成し、`TimelineView`が作成されたThoughtへスクロールして短時間ハイライトする。キャンセルや生成・保存失敗では成功イベントを発行せず、現在のSheetと入力を保持する。
+- `TimelineView`: Home専用。右上の鉛筆から開く投稿Composer、投稿者フィルター、Lazy Timeline、Detail、相対日時、操作メニュー、削除確認、Empty State、エラー表示。検索・振り返り・設定の重複Toolbar導線は持たない。
+- `MentionsView`: 保存済みMention relationと`repliesTo` relationから、Human／AI Persona宛ての受信項目を新しい順で表示する。
+- `SearchTabView`: 現在はThought本文検索を提供し、将来Persona／Tag／Knowledge検索を追加できる独立タブ境界。
+- `InsightsView`: Daily Summary CalendarとThought Analyticsをまとめ、週次・月次分析を追加できる分析ハブ。
+- `ActorProfileView`: Human／AI共通のプロフィール表示。自分のProfileタブでは編集とSettingsへのToolbar導線を追加する。
 - `ThoughtAnalyticsView`: 直近30日の基本サマリー、日別／曜日別／時間帯別分布、上位タグ、Continuation件数を標準SwiftUIの縦Sectionと簡易バーで表示する完全ローカル画面。
 - `AIAPIUsageAnalyticsView`: 今日／7日／30日／全期間のAI Call、成功率、文字数または完全な実測token、Feature／Persona／Provider・Model／Error、Latency、External Brain、日別推移をSQLiteだけで表示する。
 - `DailySummaryCalendarView`: 月単位で要約済み／Thoughtあり未要約／Thoughtなしを表示し、日別詳細と明示生成の送信前プレビューへ遷移する。
-- `DailySummaryContent` / `PrepareDailySummary`: Human Thoughtを主データ、AI投稿を対話補助として分離し、Humanタグ、共通時間帯、日内Relationをtyped previewへ固定する。v1保存JSONは追加fieldを空配列として後方互換decodeする。
+- `DailySummaryContent` / `PrepareDailySummary`: `fetchHumanThoughts(from:to:)`から期間内・未削除のHuman Thoughtだけを取得し、Humanタグ、共通時間帯、Human同士の日内Relationをtyped previewへ固定する。AI本文は取得・prompt化せず、新規v3応答の`aiInteractions`も保存前に空へ矯正する。v1／v2保存JSONは後方互換decodeし、将来のAI Summaryは別model／画面の責務とする。
 - `DailySummaryThoughtTagSuggestion`: AI応答のprompt連番をPreview内のHuman Thought IDへ検証付きで解決する提案モデル。生成時はTagを変更せず、Detailの明示的な追加操作だけが既存Tag repositoryを呼ぶ。
 - `ReviewSummaryClient`: MockとFirebase AI Logic clientを差し替える通信境界。通常起動はFirebase、UIテスト／CoreテストはMockを使用。
 - `ReviewSummaryGeneratingTransport`: Firebase SDK importをapp layerへ閉じ込め、request変換、応答変換、空応答、typed errorを外部通信なしでテストする境界。
-- `ThoughtDetailView`: 現在Thought、縦型History、削除済みplaceholder、「続きを書く」Composerを表示。
+- `ThoughtDetailView`: 選択Thoughtの投稿者・本文・タグと、`continues`／`repliesTo`を統合したConversation Treeを表示する。通常の「返信を書く」は全Conversationの最新leafへ接続し、選択した過去Thoughtへの返信は「この投稿から返信を分岐」で明示する。タグ、Knowledge Draft、削除は`…`へ分離する。
 - `ThoughtStore`: Timeline／本文検索／タグ／Continuation draftとHistory画面状態を各use caseへ接続。
 - `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
 - `Thought` / `ThoughtDraft`: 原文モデルと140文字ルール。
 - `Persona` / `PersonaRepository` / `AuthoredThoughtRepository`: 人間／AIに共通する投稿者モデル、複数Personaの管理、任意Persona IDとThoughtを同一transactionで保存する境界。固定IDの人間Personaは無効化できない。
 - `AIPersonaConfiguration` / `GenerateAIPost`: Personaごとの役割・指示、ユーザー依頼からimmutableな送信前previewを作り、明示確定後の応答だけをAI名義で投稿する。140文字を超える応答や空応答は保存しない。
-- `AIThoughtReplyPrompt` / `GenerateAIThoughtReply`: メンション対象AIと対象Thoughtだけからimmutableな返信previewを作り、成功応答をAI名義Thought、`repliesTo` Relation、reply生成来歴として同一transactionで保存する。
+- `AIThoughtReplyPrompt` / `GenerateAIThoughtReply`: Reply先から解決したAI、対象Thought、直近Reply chain、Persona設定、同Personaの直近発言、任意のExternal Brainからimmutable requestを作る。モデル応答はまず未保存`AIThoughtReplyDraft`として返し、手動AI返信では「AI返信の確認クッション」がONならHumanの「投稿する」後、OFFなら生成直後にAI名義Thought、`repliesTo` Relation、reply生成来歴を同一transactionで保存する。設定はUserDefaultsへ保存し、既定はOFF。Humanの@メンションで起動するPersona AI自動返信は確認を挟まず生成・投稿する。
 - `ExternalBrainCache` / `ExternalBrainIndex` / `ExternalBrainRetriever`: 単一GitHub RepositoryのMarkdownをSHA差分同期し、front matterを解析してheading単位に分割した派生cacheをSQLite FTS5で検索する。PersonaのAGENT.mdからrouteとrulesを解決し、最大5件をAI Replyまたは独立Persona Postの参考資料としてimmutable previewへ固定する。Personaを持たないDaily Summaryにはrouteしない。
 - `ExternalBrainManager` / `GitHubExternalBrainRemote`: Repository設定とPersona別設定、同期状態を管理するapp層。GitHub tokenはKeychainへ保存し、GitHub APIはtree／contentsのGETだけを使う。
 - `KnowledgeDraft` / `GenerateKnowledgeDraft`: AI Reply、Persona Post、Daily Summaryを明示操作後に再利用可能なMarkdown候補へ変換する。ローカルFTSの関連候補は最大3件で追加AI Callを使わず、生成Usageだけを`Knowledge Draft`として記録する。
@@ -68,8 +76,8 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 - `ThoughtRelation`: Thought本文から独立した文脈モデル。sourceは新しいThought、targetは元のThoughtで、`continues`と`repliesTo`を区別する。
 - `ThoughtRelationRepository`: Relation作成、source／target方向の1ステップ取得境界。
 - `ThoughtContinuationRepository`: 新規Thoughtと`continues` Relationを同一transactionで作成する境界。
-- `ThoughtHistory`: 現在Thoughtからrootを求め、Relation APIだけで分岐を安定順に取得するuse case。
-- `SQLiteThoughtRepository`: schema v15、Thought／Persona／Mention／Tag／Relation／AI生成情報／Daily Summary／AI Usage metadata、Knowledge Review／Quality／usage metadataとDraft FTS query、旧JSON importと2世代backupを所有する正本実装。version値だけでなく実table／column／Relation制約を照合し、安全に補修可能な不足列と旧Relation制約は非破壊で補修する。旧期間要約tableは既存データ互換のため維持する。
+- `LoadConversationThread`: 現在Thoughtから両Relationを遡ってrootを求め、全node／edge、選択地点までのcurrent path、leaf、最新leafを再構築する。`ThoughtHistory`は旧Continuation表示との互換用に保持する。
+- `SQLiteThoughtRepository`: schema v18、Thought／Persona／Mention／Tag／Relation／AI生成情報／Persona別Auto Reply／Daily Summary／AI Usage metadata、Knowledge Review／Quality／usage metadataとDraft FTS query、旧JSON importと2世代backupを所有する正本実装。version値だけでなく実table／column／Relation制約を照合し、安全に補修可能な不足列、旧Relation制約、旧`account_id`単独UNIQUE制約は非破壊で補修する。旧期間要約tableは既存データ互換のため維持する。
 - `ThoughtExporter`: Repositoryから未削除Thoughtを取得し、Markdown／JSONを生成。
 - `ShareSheet`: ExportファイルをiOS標準共有UIへ渡すUIKit bridge。
 - `ExternalBackupManager`: Filesフォルダpicker、security-scoped bookmark、バックアップ状態と確認UIのpresentation境界。
@@ -78,11 +86,9 @@ SwiftUI AppRoute -> TimelineView / QuickCaptureView
 
 ## Data Flow
 
-Timeline入力はBindingで140 Character以内に制限し、Quick Captureは超過を文字数表示して投稿不可にします。どちらも投稿時に前後空白を除去します。use caseはrepositoryへ1件を追加し、SQLiteが非削除レコードを作成日時・IDの降順で返し、SwiftUIが即時再描画します。
+Timeline入力はBindingで140 Character以内に制限し、投稿時に前後空白を除去します。投稿とMention relationを先にatomic保存してTimelineへ即時反映し、activeかつ自動返信ONのAI Personaだけを非同期生成します。Human mentionは生成せず、AI生成Thoughtから自動生成を開始しません。生成中／失敗は元Thought配下の一時UI stateとして表示し、成功時は通常Thought、author、`repliesTo`、生成metadataを既存transactionで保存します。同じ対象にはPersona単位で一度だけ返信でき、複数AIの各1返信を許可します。
 
-Timeline Composerは従来のStore draftを、Quick Captureは表示中だけのView-local draftを所有します。両方とも`ThoughtStore.post(_:)`を経由して同じ`ThoughtTimeline.post`へ渡すため、validation、trim、UUID／日時生成、SQLite保存、Timeline再読込を重複させません。Storeの再入guardとQuick Captureの送信中disableで二重投稿を防ぎ、成功時だけ呼び出し側がdraftを破棄します。失敗時はQuick Captureを閉じず、入力と画面内エラーを保持します。
-
-Timelineは`ScrollView`と`LazyVStack`で構成します。Composerは画面下部に固定したコンパクトな入力バーとし、有効な文字入力中だけ枠内右端に投稿ボタンを表示します。投稿成功時だけ入力とfocusを解除し、Timeline scrollではキーボードをinteractiveに閉じます。行は本文を主役にし、日時と削除メニューを補助情報として表示します。
+Timelineは`ScrollView`と`LazyVStack`で構成します。Home右上の鉛筆アイコンから投稿Composerをsheet表示し、入力欄へ自動focusします。Navigation barの投稿ボタンは有効な文字入力時だけ有効になり、投稿成功時だけsheetを閉じます。行は本文を主役にし、日時と削除メニューを補助情報として表示します。
 
 Thought DetailはrootからContinuationをdepth-firstで並べた静かな縦型Historyです。現在位置を控えめな背景とlabelで示し、削除済みThoughtはRelationを切らず「削除されたThought」と表示します。Continuation成功後は新Thoughtを現在位置にし、同じThoughtをTimelineにも即時反映します。
 
@@ -94,7 +100,7 @@ Thought検索はtrim後の空文字をUI stateで初期状態として扱い、�
 
 タグは表示名を前後trimしてUnicode正規合成し、POSIX localeの小文字表現を`normalized_name`として一意化します。Thought Detailからの追加は、タグの`INSERT OR IGNORE`と`thought_tags`付与を同一transactionで行います。解除も中間行だけをtransaction内で削除し、Thought本文とタグmasterは変更しません。Timeline／本文検索は本文queryと分離したタグ取得を表示に合成し、タグ絞り込みは`ThoughtTagRepository`の独立queryを使います。
 
-Daily SummaryはHumanの概要・テーマ・思考と、既存Humanタグ別、AI Persona別対話、任意の時間帯Insightを分けた構造化結果をThought原文と別に1日1件保存します。Preview後は本文・時刻・投稿者・Humanタグ・日内Relationを再取得し、一致したpayloadだけを明示送信します。schema v9の`content_json`を使うためDB migrationはありません。
+Daily SummaryはHumanの概要・テーマ・思考、既存Humanタグ別、任意の時間帯InsightをThought原文と別に1日1件保存します。SQLiteはThought・投稿者Relation・PersonaをJOINしてHumanだけを一括取得し、AI本文をCoreへ渡しません。Preview後も同じHuman限定queryで本文・時刻・投稿者・タグ・Human同士の日内Relationを再取得し、一致したpayloadだけを明示送信します。prompt versionはv3で、既存`content_json`と保存済みv1／v2 Summaryを維持するためDB migrationはありません。
 
 ## Persistence
 
@@ -104,13 +110,11 @@ Knowledge Draftは生成成功時にReview用SQLiteへ永続化し、編集可�
 
 schema v9の`personas`と`thought_authors`は既存Thoughtを固定のデフォルト人間Personaへ移行し、新規Thought／Continuationの作成と投稿者関連を同一transactionで保存します。`ai_post_generations`は生成種別と返信先Thought IDも保持し、`thought_relations`はContinuationとAI返信を区別します。`thought_mentions`は投稿とAI Personaの関連を保存します。
 
-Widget Extensionは永続化層をリンクせず、固定表示とQuick Capture URLだけを持ちます。App Group、共有container、SQLite path変更はなく、既存appだけがApplication Support内の正本DBを読み書きします。
-
 `Application Support/ThoughtTimeline/thought-timeline.sqlite3`が正本です。日時はUnix epoch秒の`REAL`、UUIDは`TEXT`で保存し、削除は`deleted_at`を設定するsoft deleteです。schema v9はPersona、AI設定・生成来歴、メンション、`continues`／`repliesTo` Relationを保持します。既存の独立AI投稿は`standalone`として移行し、返信は`reply`と返信先IDを保存します。soft deleteでは中間行を保持し、通常queryがdeleted Thoughtを除外します。
 
 初期化成功後とcreate／soft delete成功後にSQLite Online Backup APIでスナップショットを作り、`.backup.1`と`.backup.2`だけを保持します。バックアップ失敗は成功済み投稿を失敗扱いにせずログへ記録し、破損時の自動巻き戻しは行いません。
 
-Repository初期化はmigration後、バックアップ更新前に`PRAGMA quick_check`、`PRAGMA foreign_key_check`、必須table／column、`thought_relations`の`repliesTo`対応制約を検査します。`user_version`が最新でも実schemaが不整合なら検知します。安全な既知パターンだけをmigrationで補修し、それ以外の欠落・破損は正本DBを上書きせず初期化を中止して、Consoleに詳細、UIに削除せず復元する案内を表示します。
+Repository初期化はmigration後、バックアップ更新前に`PRAGMA quick_check`、`PRAGMA foreign_key_check`、必須table／column、`thought_relations`の`repliesTo`対応制約を検査します。`user_version`が最新でも実schemaが不整合なら検知します。schema v18は過去版の`personas.account_id`単独UNIQUE制約をindex実定義から検知し、Foreign Keyを一時停止したtransaction内でPersona IDと内容を保持したままtableを再構築します。`account_id`は単一ローカルアカウントへの所属情報であり、デフォルトHumanと複数AIで共有できます。Actor handleは引き続き`COLLATE NOCASE`のグローバルUNIQUEです。安全な既知パターンだけをmigrationで補修し、それ以外の欠落・破損は正本DBを上書きせず初期化を中止して、Consoleに詳細、UIに削除せず復元する案内を表示します。
 
 外部完全バックアップは選択されたFilesフォルダ配下の`AiText Backup/latest`と`previous`に、SQLite全体と`manifest.json`を保存します。作成中はUUID付き一時directoryを使い、integrity、schema、サイズ、SHA-256を検証できた新snapshotだけをlatestへ切り替えます。Restoreは外部ファイルを直接正本にせずApplication Supportへcopy・再検証してpendingにし、次回起動時にSQLite connection生成前に正本・WAL・SHMをrollback用へ退避して適用します。適用後のSQLite確認が失敗すれば元の組を戻します。
 

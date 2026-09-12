@@ -287,7 +287,7 @@ struct ThoughtTagTests {
         try fixture.writeV3Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 16)
+        #expect(SQLiteThoughtRepository.schemaVersion == 18)
         #expect(try repository.fetchByID(original.id) == original)
         guard case .added(let tag) = try repository.addTag(named: "移行後", to: original.id) else { return }
         #expect(try repository.fetchTags(for: original.id) == [tag])
@@ -297,6 +297,43 @@ struct ThoughtTagTests {
 
 @Suite("Thought history", .serialized)
 struct ThoughtHistoryTests {
+    @Test func conversationCombinesRepliesAndContinuationsSelectsLatestLeafAndKeepsBranches() throws {
+        let repository = MemoryThoughtRepository()
+        let root = Thought(body: "Root", createdAt: Date(timeIntervalSince1970: 1))
+        try repository.create(root)
+        let continuation = try #require(try repository.createContinuation(body: "自分の続き", parentThoughtID: root.id, now: Date(timeIntervalSince1970: 2)))
+        let branch = try #require(try repository.createHumanReply(body: "会話の分岐", targetThoughtID: root.id, mentionedPersonaID: nil, now: Date(timeIntervalSince1970: 3), thoughtID: UUID(), relationID: UUID()))
+        let leaf = try #require(try repository.createHumanReply(body: "最新返信", targetThoughtID: branch.id, mentionedPersonaID: nil, now: Date(timeIntervalSince1970: 4), thoughtID: UUID(), relationID: UUID()))
+
+        let thread = try LoadConversationThread(thoughts: repository, relations: repository)(containing: continuation.id)
+        #expect(thread.root == root)
+        #expect(Set(thread.nodes.map(\.id)) == Set([root.id, continuation.id, branch.id, leaf.id]))
+        #expect(thread.edges.map(\.type).contains(.continues))
+        #expect(thread.edges.map(\.type).contains(.repliesTo))
+        #expect(thread.currentPath.map(\.id) == [root.id, continuation.id])
+        #expect(Set(thread.leaves.map(\.id)) == Set([continuation.id, leaf.id]))
+        #expect(thread.lastThought == leaf)
+        #expect(thread.nodes.first { $0.id == root.id }?.hasBranches == true)
+    }
+
+    @Test func conversationTreeRebuildsFromSQLiteAfterRepositoryReopen() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let root = Thought(body: "永続Root", createdAt: Date(timeIntervalSince1970: 1))
+        let replyID: UUID
+        do {
+            let repository = try fixture.repository()
+            try repository.create(root)
+            let reply = try #require(try repository.createHumanReply(body: "永続Reply", targetThoughtID: root.id, mentionedPersonaID: nil, now: Date(timeIntervalSince1970: 2), thoughtID: UUID(), relationID: UUID()))
+            replyID = reply.id
+        }
+        let reopened = try fixture.repository()
+        let thread = try LoadConversationThread(thoughts: reopened, relations: reopened)(containing: replyID)
+        #expect(thread.root.id == root.id)
+        #expect(thread.currentPath.map(\.id) == [root.id, replyID])
+        #expect(thread.edges.map(\.type) == [.repliesTo])
+        #expect(thread.lastThought.id == replyID)
+    }
+
     @Test func createsAndFetchesContinuationInBothDirections() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
@@ -427,7 +464,7 @@ struct ThoughtHistoryTests {
         try fixture.writeV1Database(thought: original)
 
         let repository = try fixture.repository()
-        #expect(SQLiteThoughtRepository.schemaVersion == 16)
+        #expect(SQLiteThoughtRepository.schemaVersion == 18)
         #expect(try repository.fetchAll() == [original])
         #expect(try repository.fetchBySourceThoughtID(original.id).isEmpty)
     }
@@ -1076,7 +1113,7 @@ struct ExternalBackupTests {
         #expect(analytics.dailyCounts.first?.count == 1)
         #expect(analytics.dailyCounts.last?.count == 2)
         #expect(try repository.fetchAll() == before)
-        #expect(SQLiteThoughtRepository.schemaVersion == 16)
+        #expect(SQLiteThoughtRepository.schemaVersion == 18)
     }
 
     @Test func emptyLocalAnalyticsReturnsZeroFilledDistributions() throws {
@@ -1223,6 +1260,90 @@ struct PersonaTests {
         }
     }
 
+    @Test func aiPersonaCreateReportsPersonaUniqueConstraintAndRollsBack() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let first = Persona(displayName: "First", handle: "same_handle", kind: .ai)
+        try repository.createAIPersona(first, configuration: .init(personaID: first.id, role: "整理", instructions: "短く"))
+        let duplicate = Persona(displayName: "Duplicate", handle: "SAME_HANDLE", kind: .ai)
+
+        do {
+            try repository.createAIPersona(duplicate, configuration: .init(personaID: duplicate.id, role: "整理", instructions: "短く"))
+            Issue.record("UNIQUE制約違反が成功扱いになりました")
+        } catch let error as AIPersonaPersistenceError {
+            guard case .personaInsert(let message) = error else {
+                Issue.record("Persona INSERT以外の段階として報告されました: \(error)")
+                return
+            }
+            #expect(message.contains("UNIQUE constraint failed: personas.handle"))
+        }
+        #expect(!(try repository.fetchPersonas(includeInactive: true)).contains { $0.id == duplicate.id })
+        #expect(try repository.fetchAIConfigurations()[duplicate.id] == nil)
+    }
+
+    @Test func aiPersonaCreateReportsConfigurationForeignKeyAndRollsBackPersona() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let persona = Persona(displayName: "Mismatch", handle: "mismatch_ai", kind: .ai)
+
+        do {
+            try repository.createAIPersona(persona, configuration: .init(personaID: UUID(), role: "整理", instructions: "短く"))
+            Issue.record("Foreign Key制約違反が成功扱いになりました")
+        } catch let error as AIPersonaPersistenceError {
+            guard case .configurationUpsert(let message) = error else {
+                Issue.record("AI Configuration UPSERT以外の段階として報告されました: \(error)")
+                return
+            }
+            #expect(message.contains("FOREIGN KEY constraint failed"))
+        }
+        #expect(!(try repository.fetchPersonas(includeInactive: true)).contains { $0.id == persona.id })
+    }
+
+    @Test func migratesLegacyUniqueAccountWithoutLosingPersonasConfigurationsMentionsOrAuthors() throws {
+        let fixture = try Fixture(); defer { fixture.remove() }
+        let existingAI = Persona(displayName: "Navi", handle: "navi", kind: .ai)
+        let mentionedThought = Thought(body: "@navi 確認")
+        do {
+            let repository = try fixture.repository()
+            try repository.createAIPersona(existingAI, configuration: .init(personaID: existingAI.id, role: "案内", instructions: "簡潔に"))
+            try repository.create(mentionedThought, authorPersonaID: Persona.defaultHumanID, mentions: [
+                .init(thoughtID: mentionedThought.id, personaID: existingAI.id, handleSnapshot: "navi", rangeLocation: 0, rangeLength: 5)
+            ])
+        }
+        try fixture.installLegacyUniquePersonaAccountSchema()
+
+        do {
+            let migrated = try fixture.repository()
+            let mio = Persona(displayName: "Mio", handle: "mio_ai", kind: .ai)
+            let vespera = Persona(displayName: "Vespera", handle: "vespera", kind: .ai)
+            try migrated.createAIPersona(mio, configuration: .init(personaID: mio.id, role: "対話", instructions: "短く"))
+            try migrated.createAIPersona(vespera, configuration: .init(personaID: vespera.id, role: "洞察", instructions: "短く"))
+
+            #expect(try fixture.personaAccountIDs() == Set(["user-001"]))
+            #expect(try migrated.fetchAIConfigurations().keys.count == 3)
+            #expect(try migrated.fetchMentionedPersonas(for: [mentionedThought.id])[mentionedThought.id]?.id == existingAI.id)
+            #expect(try migrated.fetchPersona(for: mentionedThought.id)?.id == Persona.defaultHumanID)
+
+            var edited = mio
+            edited.displayName = "Mio Updated"
+            edited.handle = "mio_updated"
+            try migrated.updatePersona(edited)
+            #expect(try migrated.fetchPersonas(includeInactive: false).contains { $0.id == mio.id && $0.handle == "mio_updated" })
+            #expect(try migrated.deactivatePersona(id: vespera.id, at: Date()))
+
+            #expect(throws: SQLiteThoughtRepositoryError.self) {
+                try migrated.createPersona(Persona(displayName: "Duplicate", handle: "NAVI", kind: .ai))
+            }
+        }
+
+        let reopened = try fixture.repository()
+        #expect(try reopened.fetchPersonas(includeInactive: true).count == 4)
+        #expect(try reopened.fetchPersonas(includeInactive: false).count == 3)
+        #expect(try reopened.fetchAIConfigurations()[existingAI.id]?.role == "案内")
+        #expect(try fixture.sqliteUserVersion() == SQLiteThoughtRepository.schemaVersion)
+        #expect(try fixture.hasUniquePersonaAccountIndex() == false)
+    }
+
     @Test func humanAndAIMentionsPersistSnapshotsRangesAndSurviveHandleChange() throws {
         let fixture = try Fixture(); defer { fixture.remove() }
         let repository = try fixture.repository()
@@ -1320,6 +1441,7 @@ struct PersonaTests {
             #expect(try fixture.tableColumns("ai_post_generations").isSuperset(of: ["thought_id", "persona_id", "user_request", "provider", "model", "prompt_version", "generated_at", "generation_kind", "reply_target_thought_id"]))
             #expect(try fixture.tableColumns("ai_api_usage").isSuperset(of: ["id", "started_at", "finished_at", "feature", "persona_id", "provider", "model", "status", "input_characters", "output_characters", "input_tokens", "output_tokens", "total_tokens", "latency_milliseconds", "external_brain_used", "retrieved_chunk_count", "error_category", "source_type"]))
             #expect(try fixture.tableColumns("knowledge_documents").isSuperset(of: ["status", "superseded_by_knowledge_id", "superseded_at", "archived_at", "retrieval_count", "last_retrieved_at"]))
+            #expect(try repaired.fetchAIConfigurations()[persona.id]?.autoReplyEnabled == true)
             let generation = try repaired.fetchAIPostGeneration(for: thoughtID)
             #expect(generation?.kind == .standalone)
             #expect(generation?.replyTargetThoughtID == nil)
@@ -1421,7 +1543,7 @@ struct PersonaTests {
         #expect(try repository.fetchTimeline().count == 1)
     }
 
-    @Test func generatedRepliesPersistRelationMetadataAndAllowMultipleReplies() async throws {
+    @Test func generatedReplyPersistsRelationMetadataAndRejectsDuplicateForSameHumanReply() async throws {
         let fixture = try Fixture(); defer { fixture.remove() }
         let repository = try fixture.repository()
         let personaDate = Date(timeIntervalSince1970: 900)
@@ -1433,14 +1555,34 @@ struct PersonaTests {
         let context = try repository.loadAIReplyContext(targetThoughtID: target.id, maximumEntries: 5)
         #expect(context.entries.last?.thought == target)
         let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: configuration, targetThought: target, userRequest: "返信して", context: context)
-        let firstID = UUID(), secondID = UUID()
+        let firstID = UUID()
         _ = try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "一つ目の返信"), repository: repository)(preview: preview, now: Date(timeIntervalSince1970: 10), thoughtID: firstID)
-        _ = try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "二つ目の返信"), repository: repository)(preview: preview, now: Date(timeIntervalSince1970: 20), thoughtID: secondID)
-        #expect(try repository.fetchAIReplies(to: target.id).map(\.id) == [firstID, secondID])
+        await #expect(throws: AIPostError.duplicateReply) { try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "二つ目の返信"), repository: repository)(preview: preview) }
+        #expect(try repository.fetchAIReplies(to: target.id).map(\.id) == [firstID])
         #expect(try repository.fetchBySourceThoughtID(firstID).first?.type == .repliesTo)
         let generation = try repository.fetchAIPostGeneration(for: firstID)
         #expect(generation?.kind == .reply); #expect(generation?.replyTargetThoughtID == target.id); #expect(generation?.personaID == persona.id)
         #expect(try repository.fetchContinuations(of: target.id).isEmpty)
+    }
+
+    @Test func differentAIPersonasCanReplyOnceEachToTheSameThought() async throws {
+        let repository = MemoryThoughtRepository()
+        let mio = Persona(displayName: "Mio", handle: "mio", kind: .ai)
+        let navi = Persona(displayName: "Navi", handle: "navi", kind: .ai)
+        try repository.createAIPersona(mio, configuration: .init(personaID: mio.id, role: "対話", instructions: "簡潔に"))
+        try repository.createAIPersona(navi, configuration: .init(personaID: navi.id, role: "案内", instructions: "簡潔に"))
+        let target = Thought(body: "@mio @navi どう思う？")
+        try repository.create(target, authorPersonaID: Persona.defaultHumanID, mentions: [
+            .init(thoughtID: target.id, personaID: mio.id, handleSnapshot: "mio", rangeLocation: 0, rangeLength: 4),
+            .init(thoughtID: target.id, personaID: navi.id, handleSnapshot: "navi", rangeLocation: 5, rangeLength: 5)
+        ])
+        for persona in [mio, navi] {
+            let context = try repository.loadAIReplyContext(targetThoughtID: target.id, maximumEntries: 5)
+            let preview = try AIThoughtReplyPrompt.prepare(persona: persona, configuration: try #require(repository.fetchAIConfigurations()[persona.id]), targetThought: target, userRequest: "返信", context: context)
+            _ = try await GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "\(persona.displayName)の返信"), repository: repository)(preview: preview)
+        }
+        #expect(try repository.fetchAIReplies(to: target.id).count == 2)
+        #expect(try repository.fetchMentions(for: [target.id])[target.id]?.count == 2)
     }
 
     @Test func replyGenerationStopsWhenTargetWasDeletedAfterPreview() async throws {
@@ -1529,6 +1671,25 @@ struct PersonaTests {
         #expect(context.entries.map(\.author.kind) == [.human, .ai, .human])
         #expect(try repository.fetchMentionedPersonas(for: [humanReply.id])[humanReply.id]?.id == ai.id)
         #expect(try repository.fetchContinuations(of: aiReply.id).isEmpty)
+    }
+
+    @Test func generatedReplyWaitsForPreviewPublicationAndSupportsAnotherHumanTurn() async throws {
+        let repository = MemoryThoughtRepository()
+        let ai = Persona(displayName: "Architect", kind: .ai)
+        let configuration = AIPersonaConfiguration(personaID: ai.id, role: "設計", instructions: "簡潔に", autoReplyEnabled: true)
+        try repository.createAIPersona(ai, configuration: configuration)
+        let firstHuman = Thought(body: "最初の質問")
+        try repository.create(firstHuman, authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: ai.id)
+        let preview = try AIThoughtReplyPrompt.prepare(persona: ai, configuration: configuration, targetThought: firstHuman, userRequest: "返信して", context: repository.loadAIReplyContext(targetThoughtID: firstHuman.id, maximumEntries: 5))
+        let generator = GenerateAIThoughtReply(client: MockReviewSummaryClient(text: "AIの返答"), repository: repository)
+        let draft = try await generator.generate(preview: preview)
+        #expect(try repository.fetchAIReplies(to: firstHuman.id).isEmpty)
+        let aiReply = try generator.publish(draft: draft)
+        let secondHuman = try repository.createHumanReply(body: "もう少し教えて", targetThoughtID: aiReply.id, mentionedPersonaID: ai.id, now: Date(), thoughtID: UUID(), relationID: UUID())!
+        let nextContext = try repository.loadAIReplyContext(targetThoughtID: secondHuman.id, maximumEntries: 5)
+        #expect(nextContext.entries.map(\.author.kind) == [.human, .ai, .human])
+        #expect(nextContext.entries.map(\.thought.body) == ["最初の質問", "AIの返答", "もう少し教えて"])
+        #expect((try repository.fetchAIConfigurations()[ai.id])?.autoReplyEnabled == true)
     }
 }
 
@@ -1681,6 +1842,63 @@ private struct Fixture {
         guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
             throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
         }
+    }
+
+    func installLegacyUniquePersonaAccountSchema() throws {
+        var database: OpaquePointer?
+        guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
+            throw SQLiteThoughtRepositoryError.open("test setup")
+        }
+        defer { sqlite3_close(database) }
+        let sql = """
+            UPDATE personas
+            SET account_id = CASE
+                WHEN id = '\(Persona.defaultHumanID.uuidString)' THEN 'user-001'
+                ELSE 'legacy-' || lower(substr(replace(id, '-', ''), 1, 8))
+            END;
+            CREATE UNIQUE INDEX personas_account_id_unique ON personas(account_id);
+            PRAGMA user_version = 17;
+            """
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
+        }
+    }
+
+    func personaAccountIDs() throws -> Set<String> {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let database else {
+            throw SQLiteThoughtRepositoryError.open("test setup")
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "SELECT DISTINCT account_id FROM personas", -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
+        }
+        defer { sqlite3_finalize(statement) }
+        var values = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let text = sqlite3_column_text(statement, 0) { values.insert(String(cString: text)) }
+        }
+        return values
+    }
+
+    func hasUniquePersonaAccountIndex() throws -> Bool {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let database else {
+            throw SQLiteThoughtRepositoryError.open("test setup")
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA index_list(personas)", -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw SQLiteThoughtRepositoryError.database(String(cString: sqlite3_errmsg(database)))
+        }
+        defer { sqlite3_finalize(statement) }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard sqlite3_column_int(statement, 2) != 0, let nameText = sqlite3_column_text(statement, 1) else { continue }
+            let name = String(cString: nameText)
+            if name.contains("account_id") { return true }
+        }
+        return false
     }
 
     func tableColumns(_ table: String) throws -> Set<String> {

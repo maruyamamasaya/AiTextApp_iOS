@@ -26,7 +26,7 @@ struct ThoughtAnalyticsView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "chart.bar.xaxis").font(.title2)
                         Text("分析を表示できません").font(.headline)
-                        Text("Timelineへ戻って、もう一度お試しください。")
+                        Text("タイムラインへ戻って、もう一度お試しください。")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -109,7 +109,7 @@ struct ThoughtAnalyticsView: View {
     }
 
     private func continuationSection(_ analytics: ThoughtAnalyticsSnapshot) -> some View {
-        Section("Continuation") {
+        Section("つづき") {
             metricRow(
                 "Continuationを持つThought",
                 value: "\(analytics.thoughtsWithContinuationsCount)件",

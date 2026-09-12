@@ -8,10 +8,10 @@ public enum AIAPIFeature: String, CaseIterable, Codable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .personaPost: "AI Persona Post"
-        case .thoughtReply: "AI Reply"
-        case .dailySummary: "Daily Summary"
-        case .knowledgeDraft: "Knowledge Draft"
+        case .personaPost: "AIペルソナの投稿"
+        case .thoughtReply: "AIからの返信"
+        case .dailySummary: "デイリーサマリー"
+        case .knowledgeDraft: "ナレッジ下書き"
         }
     }
 }

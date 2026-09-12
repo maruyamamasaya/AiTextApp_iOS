@@ -31,6 +31,15 @@ struct DailySummaryTests {
         }
     }
 
+    @Test func humanOnlyDayIncludesAllThreeThoughts() throws {
+        let start = calendar.startOfDay(for: Date()), repository = MemoryThoughtRepository()
+        let humans = (1...3).map { Thought(body: "Human \($0)", createdAt: start.addingTimeInterval(Double($0))) }
+        try humans.forEach { try repository.create($0) }
+        let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar)
+        #expect(preview.thoughts == humans)
+        #expect(preview.inputs.count == 3)
+    }
+
     @Test func savesOneFormalSummaryAndDoesNotApplyTagCandidates() async throws {
         let start = calendar.date(from: DateComponents(year: 2026, month: 9, day: 10))!
         let thought = Thought(body: "比較して次を決める", createdAt: start.addingTimeInterval(60), updatedAt: start)
@@ -51,12 +60,21 @@ struct DailySummaryTests {
         let start = calendar.startOfDay(for: Date())
         let thought = Thought(body: "保存確認", createdAt: start.addingTimeInterval(60), updatedAt: start)
         try first.create(thought)
+        let ai = Persona(displayName: "Mio", handle: "mio", kind: .ai)
+        try first.createPersona(ai)
+        let aiThought = Thought(body: "再起動後も除外", createdAt: start.addingTimeInterval(120), updatedAt: start)
+        try first.create(aiThought, authorPersonaID: ai.id)
         let preview = try PrepareDailySummary(thoughts: first, tags: first, relations: first, authors: first)(day: start, calendar: calendar)
+        #expect(preview.thoughts == [thought])
+        #expect(!preview.request.prompt.contains(aiThought.body))
         let json = #"{"overview":"保存済み","themes":[],"existingTagCandidates":[],"newTagCandidates":[],"thoughtPatterns":[],"deepDives":[],"concerns":[],"thoughtFlow":"","continuationCandidates":[],"carryOvers":[]}"#
         _ = try await GenerateDailySummary(client: MockReviewSummaryClient(text: json), repository: first)(preview: preview)
         let reopened = try SQLiteThoughtRepository(databaseURL: url)
         #expect(try reopened.fetchDailySummary(dayStart: start)?.content.overview == "保存済み")
-        #expect(SQLiteThoughtRepository.schemaVersion == 16)
+        let reopenedPreview = try PrepareDailySummary(thoughts: reopened, tags: reopened, relations: reopened, authors: reopened)(day: start, calendar: calendar)
+        #expect(reopenedPreview.thoughts == [thought])
+        #expect(!reopenedPreview.request.prompt.contains(aiThought.body))
+        #expect(SQLiteThoughtRepository.schemaVersion == 18)
     }
 
     @Test func v1ContentDecodesWithV2FieldsDefaulted() throws {
@@ -70,24 +88,78 @@ struct DailySummaryTests {
         #expect(try JSONDecoder().decode(DailySummaryContent.self, from: JSONEncoder().encode(content)) == content)
     }
 
-    @Test func previewSeparatesHumanAIAuthorsTagsRelationsAndTime() throws {
+    @Test func humanThreeAndAIFiveIncludesOnlyThreeHumanThoughts() throws {
         let start = calendar.date(from: DateComponents(year: 2026, month: 9, day: 10))!
         let repository = MemoryThoughtRepository()
-        let human = Thought(body: "設計を考える", createdAt: start.addingTimeInterval(8 * 3600 + 30 * 60)); try repository.create(human)
-        let architect = Persona(displayName: "Architect", kind: .ai), vespera = Persona(displayName: "Vespera", kind: .ai)
-        try repository.createPersona(architect); try repository.createPersona(vespera)
-        let aiReply = Thought(body: "責務を分ける提案", createdAt: start.addingTimeInterval(12 * 3600)); try repository.create(aiReply, authorPersonaID: architect.id)
-        let aiPost = Thought(body: "UI観点", createdAt: start.addingTimeInterval(20 * 3600)); try repository.create(aiPost, authorPersonaID: vespera.id)
-        _ = try repository.addTag(named: "開発", to: human.id); _ = try repository.addTag(named: "AIだけ", to: aiReply.id)
-        try repository.create(ThoughtRelation(sourceThoughtID: aiReply.id, targetThoughtID: human.id, type: .repliesTo))
-        try repository.create(ThoughtRelation(sourceThoughtID: aiPost.id, targetThoughtID: aiReply.id, type: .continues))
+        let humans = (1...3).map { Thought(body: "Human \($0)", createdAt: start.addingTimeInterval(Double($0 * 60))) }
+        try humans.forEach { try repository.create($0) }
+        let ai = Persona(displayName: "Mio", kind: .ai); try repository.createPersona(ai)
+        let aiThoughts = (1...5).map { Thought(body: "AI本文 \($0)", createdAt: start.addingTimeInterval(Double(300 + $0 * 60))) }
+        try aiThoughts.forEach { try repository.create($0, authorPersonaID: ai.id) }
+        _ = try repository.addTag(named: "開発", to: humans[0].id)
+        _ = try repository.addTag(named: "AIだけ", to: aiThoughts[0].id)
         let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar)
-        #expect(preview.inputs.map(\.author.kind) == [.human, .ai, .ai]); #expect(preview.existingTags == ["開発"])
-        #expect(preview.inputs[0].timeOfDay == .morning); #expect(preview.inputs[1].timeOfDay == .afternoon); #expect(preview.inputs[2].timeOfDay == .night)
-        #expect(preview.request.prompt.contains("Author: Human")); #expect(preview.request.prompt.contains("Author: AI: Architect")); #expect(preview.request.prompt.contains("AI: Vespera")); #expect(preview.request.prompt.contains("Tags: 開発")); #expect(!preview.request.prompt.contains("Tags: AIだけ")); #expect(preview.request.prompt.contains("repliesTo Thought 1")); #expect(preview.request.prompt.contains("continues Thought 2")); #expect(preview.request.prompt.contains("timeOfDayInsightsを空配列"))
+        #expect(preview.thoughts == humans)
+        #expect(preview.inputs.allSatisfy { $0.author.kind == .human })
+        #expect(preview.existingTags == ["開発"])
+        #expect(aiThoughts.allSatisfy { !preview.request.prompt.contains($0.body) })
+        #expect(!preview.request.prompt.contains("AIだけ"))
+        #expect(DailySummaryPrompt.version == 3)
     }
 
-    @Test func tagGroupsAreLimitedToActualHumanTagsAndAIInteractionsToActualPersonas() async throws {
+    @Test func conversationIncludesOnlyHumanBodies() throws {
+        let start = calendar.startOfDay(for: Date()), repository = MemoryThoughtRepository()
+        let ai = Persona(displayName: "Mio", kind: .ai); try repository.createPersona(ai)
+        let humanA = Thought(body: "Human A", createdAt: start.addingTimeInterval(60)); try repository.create(humanA)
+        let aiB = Thought(body: "AI B", createdAt: start.addingTimeInterval(120)); try repository.create(aiB, authorPersonaID: ai.id)
+        let humanC = Thought(body: "Human C", createdAt: start.addingTimeInterval(180)); try repository.create(humanC)
+        let aiD = Thought(body: "AI D", createdAt: start.addingTimeInterval(240)); try repository.create(aiD, authorPersonaID: ai.id)
+        try repository.create(ThoughtRelation(sourceThoughtID: aiB.id, targetThoughtID: humanA.id, type: .repliesTo))
+        try repository.create(ThoughtRelation(sourceThoughtID: humanC.id, targetThoughtID: aiB.id, type: .repliesTo))
+        try repository.create(ThoughtRelation(sourceThoughtID: aiD.id, targetThoughtID: humanC.id, type: .repliesTo))
+        let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar)
+        #expect(preview.thoughts == [humanA, humanC])
+        #expect(preview.request.prompt.contains("Human A")); #expect(preview.request.prompt.contains("Human C"))
+        #expect(!preview.request.prompt.contains("AI B")); #expect(!preview.request.prompt.contains("AI D"))
+    }
+
+    @Test func aiOnlyDayCannotPrepare() throws {
+        let start = calendar.startOfDay(for: Date()), repository = MemoryThoughtRepository()
+        let ai = Persona(displayName: "Mio", kind: .ai); try repository.createPersona(ai)
+        for index in 1...10 { try repository.create(Thought(body: "AI \(index)", createdAt: start.addingTimeInterval(Double(index))), authorPersonaID: ai.id) }
+        #expect(throws: ReviewSummaryError.noThoughts) {
+            try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar)
+        }
+    }
+
+    @Test func humanMentioningAIIsIncludedAndAIReplyIsExcluded() throws {
+        let start = calendar.startOfDay(for: Date()), repository = MemoryThoughtRepository()
+        let ai = Persona(displayName: "Mio", handle: "mio", kind: .ai); try repository.createPersona(ai)
+        let human = Thought(body: "@mio 今日の設計どう思う？", createdAt: start.addingTimeInterval(60))
+        try repository.create(human, authorPersonaID: Persona.defaultHumanID, mentionedPersonaID: ai.id)
+        let reply = Thought(body: "Conversation中心がよいです", createdAt: start.addingTimeInterval(120))
+        try repository.create(reply, authorPersonaID: ai.id)
+        try repository.create(ThoughtRelation(sourceThoughtID: reply.id, targetThoughtID: human.id, type: .repliesTo))
+        let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar)
+        #expect(preview.thoughts == [human])
+        #expect(preview.request.prompt.contains(human.body))
+        #expect(!preview.request.prompt.contains(reply.body))
+    }
+
+    @Test func continuationCountIncludesOnlyHumanToHumanRelations() throws {
+        let start = calendar.startOfDay(for: Date()), repository = MemoryThoughtRepository()
+        let ai = Persona(displayName: "Mio", kind: .ai); try repository.createPersona(ai)
+        let parent = Thought(body: "親", createdAt: start.addingTimeInterval(60)); try repository.create(parent)
+        let humanContinuation = Thought(body: "人間の続き", createdAt: start.addingTimeInterval(120)); try repository.create(humanContinuation)
+        let aiContinuation = Thought(body: "AIの続き", createdAt: start.addingTimeInterval(180)); try repository.create(aiContinuation, authorPersonaID: ai.id)
+        try repository.create(ThoughtRelation(sourceThoughtID: humanContinuation.id, targetThoughtID: parent.id, type: .continues))
+        try repository.create(ThoughtRelation(sourceThoughtID: aiContinuation.id, targetThoughtID: parent.id, type: .continues))
+        let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar)
+        #expect(preview.continuationCount == 1)
+        #expect(preview.relations.map(\.sourceThoughtID) == [humanContinuation.id])
+    }
+
+    @Test func tagGroupsAreLimitedToActualHumanTagsAndNewSummaryDropsAIInteractions() async throws {
         let start = calendar.startOfDay(for: Date()), repository = MemoryThoughtRepository()
         let first = Thought(body: "一つ目", createdAt: start.addingTimeInterval(60)), second = Thought(body: "二つ目", createdAt: start.addingTimeInterval(120)); try repository.create(first); try repository.create(second)
         _ = try repository.addTag(named: "開発", to: first.id); _ = try repository.addTag(named: "開発", to: second.id)
@@ -95,7 +167,7 @@ struct DailySummaryTests {
         let preview = try PrepareDailySummary(thoughts: repository, tags: repository, relations: repository, authors: repository)(day: start, calendar: calendar)
         let json = #"{"overview":"概要","themes":[],"existingTagCandidates":["開発"],"newTagCandidates":[],"humanThoughtPatterns":[],"deepDives":[],"concerns":[],"thoughtFlow":"","tagGroups":[{"tagName":"開発","summary":"開発","themes":[],"thoughtCount":99},{"tagName":"架空","summary":"誤り","themes":[],"thoughtCount":1}],"aiInteractions":[{"personaName":"Architect","topics":[],"summary":"提案"},{"personaName":"Unknown","topics":[],"summary":"誤り"}],"timeOfDayInsights":[],"continuationCandidates":[],"carryOvers":[]}"#
         let summary = try await GenerateDailySummary(client: MockReviewSummaryClient(text: json), repository: repository)(preview: preview)
-        #expect(summary.content.tagGroups.map(\.tagName) == ["開発"]); #expect(summary.content.tagGroups.first?.thoughtCount == 2); #expect(summary.content.aiInteractions.map(\.personaName) == ["Architect"]); #expect(summary.content.timeOfDayInsights.isEmpty)
+        #expect(summary.content.tagGroups.map(\.tagName) == ["開発"]); #expect(summary.content.tagGroups.first?.thoughtCount == 2); #expect(summary.content.aiInteractions.isEmpty); #expect(summary.content.timeOfDayInsights.isEmpty)
     }
 
     @Test func calendarTimezoneControlsDayAndTimeClassification() throws {
