@@ -12,7 +12,7 @@ swift test
 
 入力境界、SQLite、Persona、AI Reply／Context、タグ、ローカル分析、backup、Export、Historyに加え、Actor handleの正規化・一意性・ID維持、Human／AI Mention snapshotと範囲、Conversation Treeの両Relation統合・branch・currentPath・最新leaf、同一対象への複数AI各1返信、Daily Summary v2のHuman／AI分類、Humanタグ限定、AIタグ候補のHuman index解決／不正index除外／生成時非保存／明示追加、複数AI、Relation、共通時間帯とtimezone境界、空Insight、v1 decode／v2 round-trip、SQLite再読込、stale previewを検証します。
 
-Persona External Brain／External Brain Routing v1はAGENT.md解析、`{current_project}`展開、unsafe path拒否、Markdown front matter／heading chunk／draft除外、SHA差分同期・削除・offline cache、日本語自然文queryのtrigram検索、FTS route／metadata優先、最大件数、0件、AI Reply／Persona Post promptの参考資料境界とUsage metadataを`ExternalBrainTests.swift`で検証します。
+Persona External Brain／External Brain Routing v1はAGENT.md解析、`{current_project}`展開、unsafe path拒否、Markdown front matter／heading chunk／draft除外、SHA差分同期・削除・offline cache、日本語自然文queryのtrigram検索、長いchunkの一致箇所周辺excerpt、FTS route／metadata優先、最大件数、0件、AI Reply／Persona Post promptの参考資料境界とUsage metadataを`ExternalBrainTests.swift`で検証します。
 
 Knowledge Draft Pipelineは4種のtype、3種のsource、front matter、safe slugと`drafts/`path境界、source外の事実を追加しないprompt、Human／AI区別、ローカルFTS最大3件、0件、AI生成、`status: draft`のRetrieval除外を`ExternalBrainTests.swift`で検証します。GitHub Contents writeのtoken未設定、権限、offline、同名conflict、new-file-only、保存失敗時Draft保持はMac上のURLProtocol／実Repository検証対象です。
 

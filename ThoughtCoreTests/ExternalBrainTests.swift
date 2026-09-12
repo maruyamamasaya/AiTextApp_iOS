@@ -148,6 +148,23 @@ private func temporaryBrain() throws -> (URL, ExternalBrainCache) {
     #expect(result?.chunks.map(\.documentPath) == ["projects/aitextapp/storage.md"])
 }
 
+@Test func retrievalExcerptIncludesMatchedDetailBeyondDocumentPrefix() async throws {
+    let (url, cache) = try temporaryBrain(); defer { try? FileManager.default.removeItem(at: url) }
+    let detail = "固有識別子Cardinalの設定値は42です"
+    let remote = FakeExternalBrainRemote([
+        "personas/a/AGENT.md": ("1", "# Role\nArchitect\n# Retrieval Route\n1. projects/aitextapp/"),
+        "projects/aitextapp/long.md": ("1", "# 長い資料\n\(String(repeating: "前置きです。", count: 100))\n\(detail)")
+    ])
+    _ = try await cache.synchronize(remote: remote, configuration: .init(owner: "o", repository: "r"), token: "t")
+
+    let result = try ExternalBrainRetriever(cache: cache).retrieve(
+        configuration: .init(personaID: UUID(), enabled: true, agentPath: "personas/a/AGENT.md"),
+        query: "固有識別子Cardinalについて教えて"
+    )
+
+    #expect(result?.chunks.first?.excerpt.contains(detail) == true)
+}
+
 @Test func replyPromptBoundariesExternalBrainAsReference() throws {
     let persona = Persona(displayName: "Architect", kind: .ai)
     let thought = Thought(body: "SQLiteの保存を考える")

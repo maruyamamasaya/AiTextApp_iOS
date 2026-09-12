@@ -16,10 +16,11 @@ FTS5はtrigram tokenizerを使っている一方、検索queryは記号と空白
 - 日本語の依頼文から関連Knowledgeを取得する回帰テストを追加した。
 - prompt内で「資料提供済み」と「今回の検索が0件」を明示し、AIが0件を接続・同期失敗と誤認しないようにした。
 - 送信前Previewへ取得件数を表示し、0件時の意味を説明するようにした。
+- FTSで一致した語が長いheading chunkの後半にある場合、先頭固定ではなく一致箇所の周辺600文字をAIへ渡すようにした。
 
 ## 検証
 
-- `swift test --filter ExternalBrainTests`: 成功（21 tests）。
-- `swift test`: 成功（134 tests）。
+- `swift test --filter ExternalBrainTests`: 成功（22 tests）。
+- `swift test`: 成功（135 tests）。
 - iOS Simulator向けDebug build: 成功。取得件数表示を含むapp targetのcompileを確認した。
 - Simulator／XCUITestは実施していない。

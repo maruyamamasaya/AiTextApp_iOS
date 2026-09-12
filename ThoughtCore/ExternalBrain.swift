@@ -247,14 +247,15 @@ public final class ExternalBrainIndex: @unchecked Sendable {
     } }
     public func delete(documentPath: String) throws { let s = try prepare("DELETE FROM chunks WHERE document_path = ?"); defer { sqlite3_finalize(s) }; bind(documentPath, to: 1, in: s); guard sqlite3_step(s) == SQLITE_DONE else { throw ExternalBrainError.index("delete") } }
     public func search(query: String, routes: [String], project: String, maximum: Int) throws -> [ExternalBrainRetrievedChunk] { try lock.withLock {
-        guard let match = matchExpression(for: query), !routes.isEmpty else { return [] }
+        let terms = searchTerms(for: query)
+        guard let match = matchExpression(for: terms), !routes.isEmpty else { return [] }
         let s = try prepare("SELECT document_path,title,heading,content,project,status,priority,updated_at,bm25(chunks) FROM chunks WHERE chunks MATCH ?")
         defer { sqlite3_finalize(s) }; bind(match, to: 1, in: s)
         var found: [ExternalBrainRetrievedChunk] = []
         while sqlite3_step(s) == SQLITE_ROW {
             let path = text(s, 0), route = routes.firstIndex(where: { path == $0 || path.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") })
             guard let route else { continue }
-            let candidate = ExternalBrainRetrievedChunk(documentPath: path, title: text(s, 1), heading: text(s, 2), excerpt: String(text(s, 3).prefix(600)), routeRank: route, project: text(s, 4), status: text(s, 5), priority: text(s, 6), updated: text(s, 7), relevance: sqlite3_column_double(s, 8))
+            let candidate = ExternalBrainRetrievedChunk(documentPath: path, title: text(s, 1), heading: text(s, 2), excerpt: excerpt(from: text(s, 3), matching: terms), routeRank: route, project: text(s, 4), status: text(s, 5), priority: text(s, 6), updated: text(s, 7), relevance: sqlite3_column_double(s, 8))
             found.append(candidate)
         }
         return Array(found.sorted { a, b in
@@ -268,16 +269,17 @@ public final class ExternalBrainIndex: @unchecked Sendable {
         }.prefix(min(5, max(0, maximum))))
     } }
     public func searchRelated(query: String, maximum: Int = 3) throws -> [ExternalBrainRetrievedChunk] { try lock.withLock {
-        guard let match = matchExpression(for: query), maximum > 0 else { return [] }
+        let terms = searchTerms(for: query)
+        guard let match = matchExpression(for: terms), maximum > 0 else { return [] }
         let s = try prepare("SELECT document_path,title,heading,content,project,status,priority,updated_at,bm25(chunks) FROM chunks WHERE chunks MATCH ? ORDER BY bm25(chunks), document_path LIMIT ?")
         defer { sqlite3_finalize(s) }; bind(match, to: 1, in: s); sqlite3_bind_int(s, 2, Int32(min(3, maximum)))
         var found: [ExternalBrainRetrievedChunk] = []
         while sqlite3_step(s) == SQLITE_ROW {
-            found.append(.init(documentPath: text(s, 0), title: text(s, 1), heading: text(s, 2), excerpt: String(text(s, 3).prefix(600)), routeRank: 0, project: text(s, 4), status: text(s, 5), priority: text(s, 6), updated: text(s, 7), relevance: sqlite3_column_double(s, 8)))
+            found.append(.init(documentPath: text(s, 0), title: text(s, 1), heading: text(s, 2), excerpt: excerpt(from: text(s, 3), matching: terms), routeRank: 0, project: text(s, 4), status: text(s, 5), priority: text(s, 6), updated: text(s, 7), relevance: sqlite3_column_double(s, 8)))
         }
         return found
     } }
-    private func matchExpression(for query: String) -> String? {
+    private func searchTerms(for query: String) -> [String] {
         let rawTerms = query.split { !$0.isLetter && !$0.isNumber }.flatMap { segment -> [String] in
             let value = String(segment)
             guard value.count >= 3 else { return [] }
@@ -287,17 +289,27 @@ public final class ExternalBrainIndex: @unchecked Sendable {
         }
         var seen = Set<String>()
         let uniqueTerms = rawTerms.filter { seen.insert($0).inserted }
-        guard !uniqueTerms.isEmpty else { return nil }
-        let terms: [String]
         if uniqueTerms.count <= 12 {
-            terms = uniqueTerms
-        } else {
-            terms = (0..<12).map { offset in
-                let index = Int((Double(offset) * Double(uniqueTerms.count - 1) / 11.0).rounded())
-                return uniqueTerms[index]
-            }
+            return uniqueTerms
         }
+        return (0..<12).map { offset in
+            let index = Int((Double(offset) * Double(uniqueTerms.count - 1) / 11.0).rounded())
+            return uniqueTerms[index]
+        }
+    }
+    private func matchExpression(for terms: [String]) -> String? {
+        guard !terms.isEmpty else { return nil }
         return terms.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: " OR ")
+    }
+    private func excerpt(from content: String, matching terms: [String], maximum: Int = 600) -> String {
+        guard content.count > maximum else { return content }
+        let matchedOffset = terms.compactMap { term in
+            content.range(of: term, options: [.caseInsensitive, .diacriticInsensitive]).map {
+                content.distance(from: content.startIndex, to: $0.lowerBound)
+            }
+        }.min()
+        let startOffset = max(0, (matchedOffset ?? 0) - maximum / 3)
+        return String(content.dropFirst(startOffset).prefix(maximum))
     }
     private func insert(_ c: ExternalBrainChunk) throws { let s = try prepare("INSERT INTO chunks(document_path,filename,title,heading,tags,project,type,status,priority,updated_at,content) VALUES(?,?,?,?,?,?,?,?,?,?,?)"); defer { sqlite3_finalize(s) }; [c.documentPath, URL(fileURLWithPath: c.documentPath).lastPathComponent, c.title, c.heading, c.metadata.tags.joined(separator: " "), c.metadata.project ?? "", c.metadata.type ?? "", c.metadata.status ?? "", c.metadata.priority ?? "", c.metadata.updated ?? "", c.content].enumerated().forEach { bind($0.element, to: Int32($0.offset + 1), in: s) }; guard sqlite3_step(s) == SQLITE_DONE else { throw ExternalBrainError.index("insert") } }
     private func execute(_ sql: String) throws { guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { throw ExternalBrainError.index(sql) } }
