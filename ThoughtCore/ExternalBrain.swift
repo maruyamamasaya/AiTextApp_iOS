@@ -375,12 +375,12 @@ public final class ExternalBrainCache: @unchecked Sendable {
     public init(rootURL: URL) throws { self.rootURL = rootURL; filesURL = rootURL.appendingPathComponent("files", isDirectory: true); manifestURL = rootURL.appendingPathComponent("manifest.json"); try FileManager.default.createDirectory(at: filesURL, withIntermediateDirectories: true); index = try ExternalBrainIndex(url: rootURL.appendingPathComponent("index.sqlite3")) }
     public func manifest() -> ExternalBrainManifest { guard let data = try? Data(contentsOf: manifestURL), let value = try? JSONDecoder.externalBrain.decode(ExternalBrainManifest.self, from: data) else { return ExternalBrainManifest() }; return value }
     public func markdown(at path: String) throws -> String { guard ExternalBrainPath.isSafe(path) else { throw ExternalBrainError.unsafePath(path) }; let data = try Data(contentsOf: localURL(path)); guard let value = String(data: data, encoding: .utf8) else { throw ExternalBrainError.invalidMarkdown }; return value }
-    public func journalEntries(date: String) -> [ExternalBrainJournalEntry] {
+    public func journalEntries() -> [ExternalBrainJournalEntry] {
         manifest().files.keys.sorted().compactMap { path in
-            guard let markdown = try? markdown(at: path) else { return nil }
+            guard let markdown = try? self.markdown(at: path) else { return nil }
             let parsed = MarkdownFrontMatterParser.parse(markdown)
             guard parsed.metadata.type?.lowercased() == KnowledgeDraftType.journal.rawValue,
-                  (parsed.metadata.created ?? parsed.metadata.updated) == date else { return nil }
+                  let date = parsed.metadata.created ?? parsed.metadata.updated else { return nil }
             return ExternalBrainJournalEntry(
                 path: path,
                 title: parsed.metadata.title ?? URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent,
@@ -389,6 +389,9 @@ public final class ExternalBrainCache: @unchecked Sendable {
                 status: parsed.metadata.status ?? "未指定"
             )
         }
+    }
+    public func journalEntries(date: String) -> [ExternalBrainJournalEntry] {
+        journalEntries().filter { $0.date == date }
     }
     public func storePromotedKnowledge(path: String, sha: String, markdown: String, now: Date = Date()) throws {
         try KnowledgeDocumentPath.validate(path)
@@ -688,7 +691,6 @@ public enum KnowledgeDraftPrompt {
         - 既存確定情報を上書きせず、重複しうる点はRelatedに記す。
         - YAML front matterはアプリが付与するため出力しない。
         - Markdown見出しと本文だけを出力する。
-
         推奨構造: \(structure(for: type))
 
         Source context:
@@ -717,8 +719,8 @@ public struct GenerateKnowledgeDraft: Sendable {
         let finish: @Sendable (ReviewSummaryResponse) async throws -> KnowledgeDraft = { response in
             let body = KnowledgeDraftMarkdown.body(from: response.text)
             guard !body.isEmpty else { throw ReviewSummaryError.emptyResponse }
-            let firstHeading = body.components(separatedBy: .newlines).first { $0.hasPrefix("# ") }.map { String($0.dropFirst(2)) }
             let createdAt = type == .journal ? (input.provenance.journalDate ?? input.provenance.dailySummaryDate ?? now) : now
+            let firstHeading = body.components(separatedBy: .newlines).first { $0.hasPrefix("# ") }.map { String($0.dropFirst(2)) }
             return KnowledgeDraft(title: firstHeading ?? type.displayName, type: type, project: project, source: input.source, createdAt: createdAt, body: body, relatedDocuments: related, provenance: input.provenance)
         }
         if let usage { return try await usage.call(client: client, request: request, finish: finish) }

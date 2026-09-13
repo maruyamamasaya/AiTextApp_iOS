@@ -314,6 +314,7 @@ final class ThoughtFlowUITests: XCTestCase {
         tabBar.buttons["振り返り"].tap()
         XCTAssertTrue(app.navigationBars["振り返り"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["insightsSummaryLibraryButton"].exists)
+        XCTAssertTrue(app.buttons["insightsJournalButton"].exists)
         XCTAssertTrue(app.buttons["insightsDailySummaryButton"].exists)
         XCTAssertTrue(app.buttons["insightsAnalyticsButton"].exists)
         app.buttons["insightsSummaryLibraryButton"].tap()

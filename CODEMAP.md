@@ -7,7 +7,7 @@
 - `AiTextApp/App/AiTextApp.swift` — SwiftUIエントリーポイント、UIテスト用composition。
 - `AiTextApp/App/AppTheme.swift` — Primitive／Semantic／Theme／Effect token、4テーマ、UserDefaults永続化、Reduce Motion対応background、共通Surface、テーマ選択Preview。
 - `AiTextApp/App/ThoughtAnalyticsView.swift` — ローカル分析のサマリーと日別／曜日／時間帯／タグ／Continuation表示。
-- `AiTextApp/App/DailySummaryView.swift` — 生成済みサマリーの閲覧専用一覧／詳細、Human Thoughtだけを示す月カレンダー、日別件数／継続件数、構造化Summary、Human限定の送信前プレビュー、要約済み過去日の安全な再生成、その日のjournal Draft生成、同期済みGitHub日記の本文表示。
+- `AiTextApp/App/DailySummaryView.swift` — 生成済みサマリーの閲覧専用一覧／詳細、日本語表記の月カレンダー、日別件数／継続件数、構造化Summary、Human限定の送信前プレビュー、要約済み過去日の安全な再生成、その日のjournal Draft生成。独立した日本語表記の日記カレンダーと日別詳細では、同期済みGitHub日記のMarkdownを見出し・箇条書き・引用として読みやすく表示する。
 - `AiTextApp/App/TimelineView.swift` — `MainTabView`（Home／Mentions／AI機能／Insights／Profile）、各タブの独立`NavigationStack`、Home／Mentions末尾の追加読込、Home上部の本文検索、右上の返信2件目以降を畳む切替・投稿Composer・投稿者フィルター、Mention／Reply一覧、AI機能ハブ、サマリー閲覧／生成を分けた分析ハブ、投稿一覧を持たない共通Actor Profile、Profile右上から開く一般Settings、Thought Detail、History、Continuation Composer、削除UI。
 - `AiTextApp/App/TimelineView.swift`内`AIProviderSettingsView`／各Provider設定View — GeminiのFirebase設定検出、OpenAIの端末限定Keychain API key管理、Claude未対応表示と、色・文言を併用した設定状態一覧。
 - `AiTextApp/App/TimelineView.swift`内`ProfileEditorView`／`PersonaIcon` — デフォルト人間の表示名、写真選択・縮小、丸型アイコン表示。

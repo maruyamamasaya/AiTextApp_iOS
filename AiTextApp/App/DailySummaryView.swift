@@ -1,5 +1,18 @@
 import SwiftUI
 
+private enum JapaneseCalendarFormatting {
+    static let locale = Locale(identifier: "ja_JP")
+    static var calendar: Calendar { var value = Calendar.current; value.locale = locale; return value }
+    static func month(_ date: Date) -> String { format(date, template: "yyyyMMMM") }
+    static func day(_ date: Date) -> String { format(date, template: "MMMd") }
+    static func longDay(_ date: Date) -> String { format(date, template: "yyyyMMMMdEEEE") }
+    private static func format(_ date: Date, template: String) -> String {
+        let formatter = DateFormatter(); formatter.locale = locale; formatter.calendar = calendar; formatter.timeZone = .current
+        formatter.setLocalizedDateFormatFromTemplate(template)
+        return formatter.string(from: date)
+    }
+}
+
 struct DailySummarySections: View {
     let summary: DailySummary
     @ObservedObject var store: ThoughtStore
@@ -97,7 +110,7 @@ struct SummaryLibraryView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            Text(summary.dayStart.formatted(date: .long, time: .omitted))
+                            Text(JapaneseCalendarFormatting.longDay(summary.dayStart))
                                 .font(.headline)
                             Text(summary.content.overview)
                                 .font(.subheadline)
@@ -132,7 +145,7 @@ private struct SummaryReadOnlyDetailView: View {
         }
         .themedScrollableBackground()
         .themedScreen(.expressive)
-        .navigationTitle(summary.dayStart.formatted(date: .abbreviated, time: .omitted))
+        .navigationTitle(JapaneseCalendarFormatting.day(summary.dayStart))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { store.loadDailySummary(for: summary.dayStart) }
     }
@@ -152,7 +165,7 @@ struct DailySummaryCalendarView: View {
 
     @ObservedObject var store: ThoughtStore
     @State private var month = Calendar.current.dateInterval(of: .month, for: Date())!.start
-    private let calendar = Calendar.current
+    private let calendar = JapaneseCalendarFormatting.calendar
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
     var body: some View {
@@ -161,7 +174,7 @@ struct DailySummaryCalendarView: View {
                 HStack {
                     Button { moveMonth(-1) } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }
                     Spacer()
-                    Text(month.formatted(.dateTime.year().month(.wide))).font(.headline)
+                    Text(JapaneseCalendarFormatting.month(month)).font(.headline)
                     Spacer()
                     Button { moveMonth(1) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }
                 }
@@ -244,9 +257,187 @@ struct DailySummaryCalendarView: View {
         return ("circle", .secondary, "Thoughtなし")
     }
 
-    private func accessibilityText(_ day: Date) -> String { "\(day.formatted(date: .long, time: .omitted))、\(status(for: day).text)" }
+    private func accessibilityText(_ day: Date) -> String { "\(JapaneseCalendarFormatting.longDay(day))、\(status(for: day).text)" }
     private func moveMonth(_ value: Int) { if let next = calendar.date(byAdding: .month, value: value, to: month) { month = next } }
     private func legend(_ icon: String, _ text: String, _ color: Color) -> some View { Label(text, systemImage: icon).font(.subheadline).foregroundStyle(color) }
+}
+
+struct JournalCalendarView: View {
+    private enum GridCellID: Hashable { case weekday(Int), leadingSpacer(Int), day(Date) }
+    private struct GridCell<Value>: Identifiable { let id: GridCellID; let value: Value }
+
+    @ObservedObject var store: ThoughtStore
+    @State private var month = Calendar.current.dateInterval(of: .month, for: Date())!.start
+    @State private var entries: [ExternalBrainJournalEntry] = []
+    @State private var isSyncing = false
+    @State private var syncMessage: String?
+    private let calendar = JapaneseCalendarFormatting.calendar
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                HStack {
+                    Button { moveMonth(-1) } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }
+                    Spacer()
+                    Text(JapaneseCalendarFormatting.month(month)).font(.headline)
+                    Spacer()
+                    Button { moveMonth(1) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }
+                }
+                .padding(.horizontal)
+
+                LazyVGrid(columns: columns, spacing: 6) {
+                    ForEach(weekdayCells) { Text($0.value).font(.caption).foregroundStyle(.secondary) }
+                    ForEach(dayCells) { cell in
+                        if let day = cell.value {
+                            NavigationLink { JournalDayDetailView(day: day, entries: entries(for: day)) } label: { dayCell(day) }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(JapaneseCalendarFormatting.longDay(day))、日記\(entries(for: day).count)件")
+                        } else {
+                            Color.clear.frame(height: 52)
+                        }
+                    }
+                }
+                .padding(.horizontal, 8)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("日記あり", systemImage: "book.closed.fill").foregroundStyle(.purple)
+                    Label("日記なし", systemImage: "circle").foregroundStyle(.secondary)
+                    if let syncMessage { Text(syncMessage).font(.footnote).foregroundStyle(.secondary) }
+                    if !store.externalBrainManager.repository.isConfigured || !store.externalBrainManager.hasToken {
+                        Text("GitHub設定とTokenを保存すると同期できます。").font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+            }
+        }
+        .navigationTitle("日記")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { Task { await synchronize() } } label: {
+                    if isSyncing { ProgressView() } else { Label("同期", systemImage: "arrow.triangle.2.circlepath") }
+                }
+                .disabled(isSyncing || !store.externalBrainManager.repository.isConfigured || !store.externalBrainManager.hasToken)
+                .accessibilityIdentifier("journalSyncButton")
+            }
+        }
+        .onAppear { entries = store.externalBrainManager.journalEntries() }
+    }
+
+    private var weekdayCells: [GridCell<String>] {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        let index = calendar.firstWeekday - 1
+        return Array(symbols[index...] + symbols[..<index]).enumerated().map { GridCell(id: .weekday($0.offset), value: $0.element) }
+    }
+    private var dayCells: [GridCell<Date?>] {
+        guard let range = calendar.range(of: .day, in: .month, for: month),
+              let first = calendar.date(from: calendar.dateComponents([.year, .month], from: month)) else { return [] }
+        let leading = (calendar.component(.weekday, from: first) - calendar.firstWeekday + 7) % 7
+        let days = Array(repeating: Optional<Date>.none, count: leading) + range.compactMap { calendar.date(byAdding: .day, value: $0 - 1, to: first) }.map(Optional.some)
+        return days.enumerated().map { GridCell(id: $0.element.map { .day(calendar.startOfDay(for: $0)) } ?? .leadingSpacer($0.offset), value: $0.element) }
+    }
+    private func entries(for day: Date) -> [ExternalBrainJournalEntry] {
+        let value = KnowledgeDraftPath.dateString(day)
+        return entries.filter { $0.date == value }
+    }
+    private func dayCell(_ day: Date) -> some View {
+        let hasJournal = !entries(for: day).isEmpty
+        return VStack(spacing: 5) {
+            Text("\(calendar.component(.day, from: day))").font(.body.weight(calendar.isDateInToday(day) ? .bold : .regular))
+            Image(systemName: hasJournal ? "book.closed.fill" : "circle").font(.caption).foregroundStyle(hasJournal ? .purple : .secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .background(calendar.isDateInToday(day) ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+        .overlay { if calendar.isDateInToday(day) { RoundedRectangle(cornerRadius: 10).stroke(Color.accentColor, lineWidth: 1) } }
+        .contentShape(Rectangle())
+    }
+    private func moveMonth(_ value: Int) { if let next = calendar.date(byAdding: .month, value: value, to: month) { month = next } }
+    private func synchronize() async {
+        isSyncing = true; syncMessage = nil
+        await store.externalBrainManager.synchronize()
+        entries = store.externalBrainManager.journalEntries()
+        syncMessage = store.externalBrainManager.message
+        isSyncing = false
+    }
+}
+
+private struct JournalDayDetailView: View {
+    let day: Date
+    let entries: [ExternalBrainJournalEntry]
+
+    var body: some View {
+        List {
+            if entries.isEmpty {
+                Section { Text("この日の同期済み日記はありません。").foregroundStyle(.secondary) }
+            } else {
+                ForEach(entries) { entry in
+                    Section {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Label(entry.title, systemImage: "book.closed.fill").font(.headline).foregroundStyle(.primary)
+                                Spacer()
+                                Text(statusLabel(entry.status)).font(.caption.weight(.semibold)).foregroundStyle(.purple)
+                                    .padding(.horizontal, 9).padding(.vertical, 4).background(Color.purple.opacity(0.12), in: Capsule())
+                            }
+                            JournalMarkdownView(markdown: entry.body)
+                            DisclosureGroup("GitHub情報") {
+                                Text(entry.path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
+                            .font(.caption)
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+            }
+        }
+        .navigationTitle(JapaneseCalendarFormatting.day(day))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func statusLabel(_ status: String) -> String {
+        switch status.lowercased() { case "active": "正式"; case "draft": "下書き"; default: status }
+    }
+}
+
+private struct JournalMarkdownView: View {
+    let markdown: String
+    private var lines: [String] { markdown.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in row(line) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
+    }
+
+    @ViewBuilder private func row(_ line: String) -> some View {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("### ") {
+            Text(inline(String(trimmed.dropFirst(4)))).font(.subheadline.weight(.semibold)).padding(.top, 3)
+        } else if trimmed.hasPrefix("## ") {
+            Text(inline(String(trimmed.dropFirst(3)))).font(.headline).padding(.top, 6)
+        } else if trimmed.hasPrefix("# ") {
+            Text(inline(String(trimmed.dropFirst(2)))).font(.title3.weight(.bold)).padding(.bottom, 2)
+        } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+            HStack(alignment: .firstTextBaseline, spacing: 8) { Text("•").foregroundStyle(.purple); Text(inline(String(trimmed.dropFirst(2)))) }
+        } else if let range = trimmed.range(of: #"^\d+\.\s+"#, options: .regularExpression) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) { Text(String(trimmed[..<range.upperBound]).trimmingCharacters(in: .whitespaces)); Text(inline(String(trimmed[range.upperBound...]))) }
+        } else if trimmed.hasPrefix("> ") {
+            Text(inline(String(trimmed.dropFirst(2)))).italic().foregroundStyle(.secondary).padding(.leading, 10)
+                .overlay(alignment: .leading) { Rectangle().fill(Color.purple.opacity(0.45)).frame(width: 3) }
+        } else if trimmed == "---" {
+            Divider()
+        } else {
+            Text(inline(trimmed)).font(.body).lineSpacing(4)
+        }
+    }
+
+    private func inline(_ value: String) -> AttributedString {
+        (try? AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value)
+    }
 }
 
 private struct DailySummaryDetailView: View {
@@ -262,23 +453,6 @@ private struct DailySummaryDetailView: View {
                 LabeledContent("あなたのThought", value: "\(store.dailySummaryDayThoughts.count)件")
                 LabeledContent("あなたの継続Thought", value: "\(store.dailySummaryDayContinuationCount)件")
                 LabeledContent("既存タグ", value: store.dailySummaryDayTags.isEmpty ? "なし" : store.dailySummaryDayTags.joined(separator: "、"))
-            }
-            Section("GitHubの日記") {
-                if store.dailyJournalEntries.isEmpty {
-                    Text("この日の同期済み日記はありません。")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(store.dailyJournalEntries) { entry in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(entry.title).font(.headline)
-                        Text(entry.body).textSelection(.enabled)
-                        Text("\(entry.status) · \(entry.path)").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                Button(store.externalBrainManager.isSyncing ? "同期中…" : "GitHubから日記を同期") {
-                    Task { await store.synchronizeDailyJournal(for: day) }
-                }
-                .disabled(store.externalBrainManager.isSyncing || !store.externalBrainManager.hasToken || !store.externalBrainManager.repository.isConfigured)
             }
             if let summary = store.dailySummary {
                 DailySummarySections(summary: summary, store: store)
@@ -308,7 +482,7 @@ private struct DailySummaryDetailView: View {
             }
             if let error = store.dailySummaryError { Section { Text(error).foregroundStyle(.red) } }
         }
-        .navigationTitle(day.formatted(date: .abbreviated, time: .omitted))
+        .navigationTitle(JapaneseCalendarFormatting.day(day))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { store.loadDailySummary(for: day) }
         .sheet(item: Binding(get: { store.dailySummaryPreview }, set: { if $0 == nil { store.cancelDailySummaryPreview() } })) { preview in

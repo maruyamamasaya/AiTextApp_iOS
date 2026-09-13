@@ -976,6 +976,14 @@ private struct InsightsView: View {
                     }
                     .accessibilityIdentifier("insightsSummaryLibraryButton")
                 }
+                Section("日記") {
+                    NavigationLink {
+                        JournalCalendarView(store: store)
+                    } label: {
+                        Label("日記を見る", systemImage: "book.closed")
+                    }
+                    .accessibilityIdentifier("insightsJournalButton")
+                }
                 Section("作成") {
                     NavigationLink {
                         DailySummaryCalendarView(store: store)

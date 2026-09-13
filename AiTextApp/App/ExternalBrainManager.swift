@@ -219,6 +219,7 @@ final class ExternalBrainManager: ObservableObject {
     func journalEntries(for day: Date) -> [ExternalBrainJournalEntry] {
         cache?.journalEntries(date: KnowledgeDraftPath.dateString(day)) ?? []
     }
+    func journalEntries() -> [ExternalBrainJournalEntry] { cache?.journalEntries() ?? [] }
     func saveDraft(_ draft: KnowledgeDraft) async throws -> String {
         let path = draft.targetPath; try KnowledgeDraftPath.validate(path)
         guard let token = ExternalBrainTokenStore.load(), !token.isEmpty else { throw ExternalBrainDraftWriteError.tokenMissing }

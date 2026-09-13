@@ -64,7 +64,6 @@ final class ThoughtStore: ObservableObject {
     @Published private(set) var dailySummaryDayThoughts: [Thought] = []
     @Published private(set) var dailySummaryDayTags: [String] = []
     @Published private(set) var dailySummaryDayContinuationCount = 0
-    @Published private(set) var dailyJournalEntries: [ExternalBrainJournalEntry] = []
     @Published private(set) var searchResults: [Thought] = []
     @Published private(set) var hasSearchQuery = false
     @Published private(set) var tagsByThoughtID: [UUID: [ThoughtTag]] = [:]
@@ -490,7 +489,6 @@ final class ThoughtStore: ObservableObject {
 
     func loadDailySummary(for day: Date, calendar: Calendar = .current) {
         let start = calendar.startOfDay(for: day)
-        dailyJournalEntries = externalBrainManager.journalEntries(for: start)
         do {
             dailySummary = try dailySummaryRepository?.fetchDailySummary(dayStart: start)
             if let thoughtRepository, let tagRepository, let relationRepository, let personaRepository,
@@ -692,10 +690,6 @@ final class ThoughtStore: ObservableObject {
         )
     }
 
-    func synchronizeDailyJournal(for day: Date) async {
-        await externalBrainManager.synchronize()
-        dailyJournalEntries = externalBrainManager.journalEntries(for: day)
-    }
 
     func generateKnowledgeDraft(input: KnowledgeDraftInput, type: KnowledgeDraftType) async {
         guard !isGeneratingKnowledgeDraft else { return }

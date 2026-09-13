@@ -13,7 +13,8 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 ## 実装済み
 
 - デイリーサマリーなどから作るGitHub下書きの保存名に永続UUIDを追加。同日・同タイトルでも別下書きは衝突せず、保存済みの旧pathは維持する。既存ファイルの上書き禁止は継続する。未昇格Draftは詳細画面の確認付き削除から消せる。GitHub保存済みの場合はGitHub上のファイル削除に成功してからローカル記録も削除し、失敗時はローカル記録を保持する。
-- Daily Summaryの日別画面に「日記を作る」を追加し、その日のHuman Thoughtから日付を維持したjournal Draftを直接生成する。GitHub同期済みの`type: journal`は`created`日付で照合し、同じ画面で本文・状態・pathを読める。手動同期も日別画面から実行できる。
+- Daily Summaryの日別画面に「日記を作る」を追加し、その日のHuman Thoughtから日付を維持したjournal Draftを直接生成する。日記の閲覧はDaily Summaryから分離し、振り返りの独立した日記カレンダーで行う。GitHub同期済みの`type: journal`を`created`日付でカレンダーへ表示し、日別詳細で本文・状態・pathを読める。GitHub同期も日記カレンダーから実行できる。
+- デイリーサマリーと日記のカレンダーは、端末言語に依存せず月・曜日・日付を日本語で表示する。日記本文はGitHub上のMarkdownを変更せず、閲覧画面で見出し、箇条書き、引用、インライン強調を読みやすい表示へ変換し、GitHub pathは折りたたんで表示する。
 
 - AIプロバイダー設定の独立画面。AI機能タブからGemini／OpenAI／Claudeそれぞれの詳細へ進み、一覧のランプと「設定済み／未設定／未対応」の文言で状態を確認できる。OpenAI API keyの保存・置換・削除はOpenAI詳細へ移動し、既存の端末限定Keychain運用を維持する。Geminiはbundle内のFirebase設定検出、OpenAIはKeychain保存状態を表示し、どちらもAPI疎通済みとは区別する。Claudeは生成経路未実装のため設定入力を有効にせず「未対応」と明示する。
 - Gemini／OpenAIのAI Provider切替と用途別生成Profile。AI Personaごとの投稿・手動返信・自動返信はPersona設定でGemini／OpenAIを選択し、両Providerとも`low`、最大出力1,024 tokenで生成する。Daily SummaryはOpenAIの`medium`、最大8,192 tokenへ固定し、Knowledge DraftはSettingsでProviderを選択して`medium`、最大4,096 tokenで生成する。個人所有端末だけへXcodeから導入する暫定運用として、OpenAI API keyは`WhenUnlockedThisDeviceOnly`のKeychainへ保存し、Responses APIへ直接送る。schema v19でPersona設定にproviderを非破壊追加し、生成開始時のprovider／model／generation profileをrequestへ固定する。TestFlight／App Store／第三者配布へ進む前に、API keyを端末から除去してバックエンド＋Secret管理へ移行する。

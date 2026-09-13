@@ -54,7 +54,7 @@ xcodebuild -project AiTextApp.xcodeproj -scheme AiTextApp \
 
 Daily SummaryはThoughtがある日／ない日、要約済み状態、過去月移動、送信前payload、構造化各Section、再起動後の復元を確認します。要約済みの日は再生成ボタンから同じPreviewへ進み、失敗時は旧Summaryを保持し、成功時だけ同日の1件を置き換えることを確認します。実通信ではJSON応答が保存され、タグ／Thought／Continuationが変更されないことを確認します。
 
-日記はDaily Summaryの日別画面で、要約の有無にかかわらずHuman Thoughtがある日に「日記を作る」が有効になること、選択日付のjournal Draftプレビューが開くこと、GitHub同期済みの同日journal本文・状態・pathだけが表示されることを確認します。
+日記はDaily Summaryの日別画面で、要約の有無にかかわらずHuman Thoughtがある日に「日記を作る」が有効になり、選択日付のjournal Draftプレビューが開くことを確認します。閲覧は振り返りの独立した日記カレンダーを開き、日記のある日だけ識別表示されること、GitHub同期済みの同日journal本文・状態・pathだけが日別詳細に表示されること、カレンダーから同期できることを確認します。デイリーサマリー／日記カレンダーの月・曜日・日付が日本語であること、日記Markdownの見出し・箇条書き・引用・強調が本文を変更せず読みやすく描画されることをSimulatorで目視確認します。
 
 XcodeでFirebase package resolveとapp targetのcompileを行った後、Debug Providerを登録したSimulator、App Attestを登録した実機の順で明示送信を確認します。成功時のSQLite provider／model、未設定plist、未登録Debug token、App Check拒否、offline、429／quota、その他API、空応答を確認します。Console設定や実APIを必要とする検証は通常のUnit Testへ組み込みません。
 
