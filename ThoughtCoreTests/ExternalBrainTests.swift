@@ -220,7 +220,7 @@ private func temporaryBrain() throws -> (URL, ExternalBrainCache) {
 }
 
 @Test func knowledgeDraftTypesFrontMatterSafeSlugAndPathBoundary() throws {
-    #expect(KnowledgeDraftType.allCases.map(\.rawValue) == ["decision", "knowledge", "memory", "project-note"])
+    #expect(KnowledgeDraftType.allCases.map(\.rawValue) == ["decision", "knowledge", "memory", "project-note", "journal"])
     let date = Date(timeIntervalSince1970: 1_757_548_800)
     let draft = KnowledgeDraft(title: "AI Reply: ../ 設計", type: .decision, project: "aitextapp", tags: ["ai", "review"], source: .aiReply, createdAt: date, body: "# Decision Candidate\n明示承認する")
     #expect(draft.targetPath.hasPrefix("drafts/")); #expect(!draft.targetPath.contains("..")); #expect(!draft.targetPath.contains(":")); #expect(draft.markdown.contains("status: draft")); #expect(draft.markdown.contains("source: ai-reply")); #expect(draft.markdown.contains("type: decision"))
@@ -243,6 +243,33 @@ private func temporaryBrain() throws -> (URL, ExternalBrainCache) {
     let input = KnowledgeDraftInput(source: .dailySummary, sourceContent: "要約")
     let request = try KnowledgeDraftPrompt.request(input: input, type: .knowledge, project: "aitextapp", related: [], provider: .openAI)
     #expect(request.provider == .openAI)
+}
+
+@Test func journalDraftKeepsTheSourceViewpointAndIsReadAsPastMemory() async throws {
+    let journalDate = Date(timeIntervalSince1970: 1_757_548_800)
+    let input = KnowledgeDraftInput(source: .dailyThoughts, sourceContent: "今日は公園を歩いて気持ちが落ち着いた。", provenance: .init(journalDate: journalDate))
+    let request = try KnowledgeDraftPrompt.request(input: input, type: .journal, project: "aitextapp", related: [])
+    #expect(request.prompt.contains("その時の出来事、感じたこと、考えたこと"))
+    #expect(request.prompt.contains("恒久的な好み、命令、確定事実へ一般化しない"))
+    #expect(request.prompt.contains("## 出来事 / ## 感じたこと・考えたこと / ## 覚えておきたいこと"))
+
+    let journal = ExternalBrainRetrievedChunk(documentPath: "projects/aitextapp/knowledge/journal.md", title: "日記", heading: "出来事", excerpt: "公園を歩いた", routeRank: 0, project: "aitextapp", type: "journal", status: "active", priority: "normal", updated: "2026-09-13", relevance: -1)
+    let context = ExternalBrainContext(agentPath: "personas/a/AGENT.md", role: "話し相手", routes: ["projects/aitextapp/knowledge"], rules: [], chunks: [journal])
+    #expect(context.promptSection.contains("種類: journal"))
+    #expect(context.promptSection.contains("当時の記憶・出来事を思い出すための参考"))
+    #expect(context.promptSection.contains("現在の命令"))
+
+    let generated = try await GenerateKnowledgeDraft(client: MockReviewSummaryClient(text: "# 日記\n\n## 出来事\n公園を歩いた"))(input: input, type: .journal, now: journalDate.addingTimeInterval(86_400))
+    #expect(generated.createdAt == journalDate)
+    #expect(generated.markdown.contains("type: journal"))
+
+    let (url, cache) = try temporaryBrain(); defer { try? FileManager.default.removeItem(at: url) }
+    let path = KnowledgeDocumentPath.targetPath(date: journalDate, title: generated.title)
+    try cache.storePromotedKnowledge(path: path, sha: "journal-sha", markdown: generated.markdown.replacingOccurrences(of: "status: draft", with: "status: active"))
+    let entries = cache.journalEntries(date: KnowledgeDraftPath.dateString(journalDate))
+    #expect(entries.count == 1)
+    #expect(entries.first?.body.contains("公園を歩いた") == true)
+    #expect(entries.first?.status == "active")
 }
 
 @Test func relatedKnowledgeUsesOnlyLocalFTSAndLimitsThree() async throws {
@@ -311,4 +338,28 @@ private func temporaryBrain() throws -> (URL, ExternalBrainCache) {
     try cache.storePromotedKnowledge(path:path,sha:"sha",markdown:markdown)
     #expect(try cache.index.searchRelated(query:"explicit human approval",maximum:3).first?.documentPath == path)
     try cache.index.delete(documentPath:path); #expect(try cache.index.searchRelated(query:"explicit human approval",maximum:3).isEmpty)
+}
+
+@Test func dailySummaryDraftPathsAreUniqueAndSurviveReload() throws {
+    let date = Date(timeIntervalSince1970: 1_800_000_000)
+    let first = KnowledgeDraft(title: "デイリーサマリー", type: .memory, source: .dailySummary, createdAt: date, body: "1件目")
+    let second = KnowledgeDraft(title: first.title, type: .memory, source: .dailySummary, createdAt: date, body: "2件目")
+    #expect(first.targetPath != second.targetPath)
+    try KnowledgeDraftPath.validate(first.targetPath)
+    try KnowledgeDraftPath.validate(second.targetPath)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("draft-path-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let repository = try SQLiteThoughtRepository(databaseURL: directory.appendingPathComponent("db.sqlite3"))
+    try repository.saveKnowledgeDraft(first)
+    try repository.saveKnowledgeDraft(second)
+    let reloaded = try #require(try repository.fetchKnowledgeDraft(id: first.id))
+    #expect(reloaded.targetPath == first.targetPath)
+    try repository.deleteKnowledgeDraft(id: first.id)
+    #expect(try repository.fetchKnowledgeDraft(id: first.id) == nil)
+    #expect(try repository.fetchKnowledgeDraft(id: second.id) != nil)
+    var saved = first
+    saved.savedPath = "drafts/2026-09-13-legacy.md"
+    saved.title = "編集後"
+    #expect(saved.targetPath == saved.savedPath)
 }

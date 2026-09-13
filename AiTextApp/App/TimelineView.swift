@@ -126,6 +126,9 @@ struct TimelineView: View {
                                 Divider().padding(.leading, 16)
                             }
                         }
+                        if !store.hasSearchQuery {
+                            TimelineLoadMoreView(store: store)
+                        }
                     }
                     }
                 }
@@ -421,8 +424,11 @@ private struct NewThoughtComposerView: View {
                             HStack(spacing: 10) {
                                 PersonaIcon(persona: persona, size: 30)
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(persona.displayName)
-                                        .font(.subheadline.weight(.medium))
+                                    HStack(spacing: 5) {
+                                        Text(persona.displayName)
+                                            .font(.subheadline.weight(.medium))
+                                        ExternalBrainBadge(store: store, persona: persona)
+                                    }
                                     Text("@\(persona.handle)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -521,12 +527,23 @@ private struct SettingsView: View {
 
 private struct AIFeaturesView: View {
     @ObservedObject var store: ThoughtStore
-    @State private var openAIAPIKey = ""
-    @State private var confirmsOpenAIAPIKeyRemoval = false
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("AI接続") {
+                    NavigationLink {
+                        AIProviderSettingsView(store: store)
+                    } label: {
+                        Label("AIプロバイダー設定", systemImage: "network")
+                    }
+                    .accessibilityIdentifier("aiProviderSettingsButton")
+
+                    Text("Gemini、OpenAIなど、AIサービスごとに接続設定と利用状態を確認できます。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("AIペルソナ") {
                     NavigationLink {
                         AIPostRequestView(store: store)
@@ -598,39 +615,11 @@ private struct AIFeaturesView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Section("OpenAI API key") {
-                    LabeledContent("状態", value: store.hasOpenAIAPIKey ? "Keychainに設定済み" : "未設定")
-                    SecureField("新しいOpenAI API key", text: $openAIAPIKey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .privacySensitive()
-                        .accessibilityIdentifier("openAIAPIKeyField")
-                    Button("OpenAI API keyを保存") {
-                        if store.saveOpenAIAPIKey(openAIAPIKey) { openAIAPIKey = "" }
-                    }
-                    .disabled(openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("saveOpenAIAPIKeyButton")
-                    if store.hasOpenAIAPIKey {
-                        Button("OpenAI API keyを削除", role: .destructive) {
-                            confirmsOpenAIAPIKeyRemoval = true
-                        }
-                    }
-                    if let message = store.openAIAPIKeyMessage {
-                        Text(message).font(.footnote).foregroundStyle(.secondary)
-                    }
-                    Text("自分の端末だけで使う暫定構成です。キーはこの端末限定のKeychainへ保存されますが、配布用アプリでは安全なバックエンドへ移行してください。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
             }
             .themedScrollableBackground()
             .themedScreen(.expressive)
             .navigationTitle("AI機能")
             .navigationBarTitleDisplayMode(.inline)
-            .confirmationDialog("OpenAI API keyを削除しますか？", isPresented: $confirmsOpenAIAPIKeyRemoval, titleVisibility: .visible) {
-                Button("削除", role: .destructive) { store.removeOpenAIAPIKey() }
-                Button("キャンセル", role: .cancel) {}
-            }
         }
     }
 
@@ -638,6 +627,202 @@ private struct AIFeaturesView: View {
         guard store.externalBrainManager.repository.isConfigured else { return "未設定" }
         guard let capabilities = store.externalBrainManager.connectionCapabilities else { return "設定済み" }
         return capabilities.issue == nil ? "接続済み" : "設定済み"
+    }
+}
+
+private struct AIProviderSettingsView: View {
+    @ObservedObject var store: ThoughtStore
+
+    private var hasGeminiConfiguration: Bool {
+        Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil
+    }
+
+    var body: some View {
+        Form {
+            Section("プロバイダー") {
+                NavigationLink {
+                    GeminiProviderSettingsView(isConfigured: hasGeminiConfiguration)
+                } label: {
+                    AIProviderSettingsRow(
+                        name: "Gemini",
+                        detail: hasGeminiConfiguration ? "設定済み" : "未設定",
+                        state: hasGeminiConfiguration ? .configured : .notConfigured
+                    )
+                }
+                .accessibilityIdentifier("geminiProviderSettingsButton")
+
+                NavigationLink {
+                    OpenAIProviderSettingsView(store: store)
+                } label: {
+                    AIProviderSettingsRow(
+                        name: "OpenAI",
+                        detail: store.hasOpenAIAPIKey ? "設定済み" : "未設定",
+                        state: store.hasOpenAIAPIKey ? .configured : .notConfigured
+                    )
+                }
+                .accessibilityIdentifier("openAIProviderSettingsButton")
+
+                NavigationLink {
+                    ClaudeProviderSettingsView()
+                } label: {
+                    AIProviderSettingsRow(name: "Claude", detail: "未対応", state: .unavailable)
+                }
+                .accessibilityIdentifier("claudeProviderSettingsButton")
+            }
+
+            Section {
+                Text("緑のランプは、この端末で必要な設定を検出できたことを示します。実際のAPI接続を確認した表示ではありません。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .themedScrollableBackground()
+        .themedScreen(.expressive)
+        .navigationTitle("AIプロバイダー設定")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct AIProviderSettingsRow: View {
+    enum State {
+        case configured
+        case notConfigured
+        case unavailable
+
+        var color: Color {
+            switch self {
+            case .configured: .green
+            case .notConfigured: .orange
+            case .unavailable: .secondary
+            }
+        }
+    }
+
+    let name: String
+    let detail: String
+    let state: State
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(state.color)
+                .frame(width: 10, height: 10)
+                .accessibilityHidden(true)
+            Text(name)
+            Spacer()
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(name)、\(detail)")
+    }
+}
+
+private struct GeminiProviderSettingsView: View {
+    let isConfigured: Bool
+
+    var body: some View {
+        Form {
+            Section("状態") {
+                AIProviderSettingsRow(
+                    name: "Gemini",
+                    detail: isConfigured ? "設定済み" : "未設定",
+                    state: isConfigured ? .configured : .notConfigured
+                )
+                LabeledContent("接続方式", value: "Firebase AI Logic")
+                LabeledContent("Model", value: ReviewSummaryAIConfiguration.geminiModelName)
+            }
+
+            Section("設定方法") {
+                Text(isConfigured
+                    ? "GoogleService-Info.plistを検出しました。APIの疎通とApp Checkの有効性は、実際の生成時に確認されます。"
+                    : "XcodeプロジェクトのルートへGoogleService-Info.plistを配置すると、ビルド時にアプリへ取り込まれます。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .themedScrollableBackground()
+        .themedScreen(.expressive)
+        .navigationTitle("Gemini")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct OpenAIProviderSettingsView: View {
+    @ObservedObject var store: ThoughtStore
+    @State private var apiKey = ""
+    @State private var confirmsRemoval = false
+
+    var body: some View {
+        Form {
+            Section("状態") {
+                AIProviderSettingsRow(
+                    name: "OpenAI",
+                    detail: store.hasOpenAIAPIKey ? "設定済み" : "未設定",
+                    state: store.hasOpenAIAPIKey ? .configured : .notConfigured
+                )
+                LabeledContent("接続方式", value: "OpenAI Responses API")
+                LabeledContent("Model", value: ReviewSummaryAIConfiguration.openAIModelName)
+            }
+
+            Section("API key") {
+                SecureField("新しいOpenAI API key", text: $apiKey)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .privacySensitive()
+                    .accessibilityIdentifier("openAIAPIKeyField")
+                Button(store.hasOpenAIAPIKey ? "API keyを置き換える" : "API keyを保存") {
+                    if store.saveOpenAIAPIKey(apiKey) { apiKey = "" }
+                }
+                .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("saveOpenAIAPIKeyButton")
+                if store.hasOpenAIAPIKey {
+                    Button("API keyを削除", role: .destructive) {
+                        confirmsRemoval = true
+                    }
+                }
+                if let message = store.openAIAPIKeyMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Text("自分の端末だけで使う暫定構成です。キーはこの端末限定のKeychainへ保存されます。緑のランプはキーの保存状態を示し、APIの疎通確認ではありません。配布用アプリでは安全なバックエンドへ移行してください。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .themedScrollableBackground()
+        .themedScreen(.expressive)
+        .navigationTitle("OpenAI")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("OpenAI API keyを削除しますか？", isPresented: $confirmsRemoval, titleVisibility: .visible) {
+            Button("削除", role: .destructive) { store.removeOpenAIAPIKey() }
+            Button("キャンセル", role: .cancel) {}
+        }
+    }
+}
+
+private struct ClaudeProviderSettingsView: View {
+    var body: some View {
+        Form {
+            Section("状態") {
+                AIProviderSettingsRow(name: "Claude", detail: "未対応", state: .unavailable)
+            }
+
+            Section {
+                Text("Claude APIは現在の生成経路へまだ接続されていません。API keyを保存しても利用できないため、設定欄は有効にしていません。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .themedScrollableBackground()
+        .themedScreen(.expressive)
+        .navigationTitle("Claude")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -697,6 +882,7 @@ private struct MentionsView: View {
                                 }
                             }
                         }
+                        TimelineLoadMoreView(store: store)
                     }
                 }
             }
@@ -746,6 +932,33 @@ private struct MentionsView: View {
             get: { store.deletionCandidate != nil },
             set: { if !$0 { store.cancelDeletion() } }
         )
+    }
+}
+
+private struct TimelineLoadMoreView: View {
+    @ObservedObject var store: ThoughtStore
+
+    var body: some View {
+        Group {
+            if let message = store.timelinePaginationError {
+                VStack(spacing: 8) {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("再読み込み") { store.loadMoreTimelineThoughts() }
+                        .buttonStyle(.bordered)
+                }
+                .padding(.vertical, 16)
+            } else if store.hasMoreTimelineThoughts {
+                ProgressView("過去のThoughtを読み込み中…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 16)
+                    .onAppear { store.loadMoreTimelineThoughts() }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityIdentifier("timelineLoadMore")
     }
 }
 
@@ -1382,6 +1595,7 @@ private struct ThoughtRow: View {
                         Text(persona.displayName).font(.subheadline.weight(.semibold))
                     }
                     .buttonStyle(.plain)
+                    ExternalBrainBadge(store: store, persona: persona)
                     NavigationLink { ActorProfileView(store: store, persona: persona) } label: {
                         Text("@\(persona.handle)").font(.caption).foregroundStyle(.secondary)
                     }
@@ -1569,13 +1783,16 @@ private struct ExternalBrainSettingsView: View {
 struct KnowledgeDraftFlowView: View {
     @ObservedObject var store: ThoughtStore
     let input: KnowledgeDraftInput
-    @State private var type: KnowledgeDraftType = .knowledge
+    @State private var type: KnowledgeDraftType
     @Environment(\.dismiss) private var dismiss
+    init(store: ThoughtStore, input: KnowledgeDraftInput, initialType: KnowledgeDraftType = .knowledge) {
+        self.store = store; self.input = input; _type = State(initialValue: initialType)
+    }
     var body: some View {
         NavigationStack {
             Form {
                 Section("生成元") { LabeledContent("種類", value: input.source.displayName); Text(input.sourceContent).lineLimit(8) }
-                Section("下書きの種類") { Picker("種類", selection: $type) { ForEach(KnowledgeDraftType.allCases, id: \.self) { Text($0.displayName).tag($0) } } }
+                Section("下書きの種類") { Picker("種類", selection: $type) { ForEach(KnowledgeDraftType.allCases, id: \.self) { Text($0.displayName).tag($0) } }; Text(type.guidance).font(.footnote).foregroundStyle(.secondary) }
                 Section { Text("生成を押すまでAI通信は行いません。生成後のPreview確認とGitHub保存は別操作です。").font(.footnote).foregroundStyle(.secondary) }
                 if let error = store.knowledgeDraftError { Section { Text(error).foregroundStyle(.red) } }
             }
@@ -1682,8 +1899,10 @@ private struct KnowledgeCompareView: View {
 private struct KnowledgeDraftReviewView: View {
     @ObservedObject var store: ThoughtStore
     let draftID: UUID
+    @Environment(\.dismiss) private var dismiss
     @State private var edited: KnowledgeDraft?
     @State private var confirmsPromotion=false
+    @State private var confirmsDeletion=false
     private var current: KnowledgeDraft? { edited ?? store.knowledgeDrafts.first { $0.id == draftID } }
     var body: some View {
         Form {
@@ -1691,10 +1910,11 @@ private struct KnowledgeDraftReviewView: View {
                 Section("Review") { TextField("Title",text:Binding(get:{ edited?.title ?? draft.title },set:{ edited = edited ?? draft; edited?.title=$0 })); Picker("Type",selection:Binding(get:{ edited?.type ?? draft.type },set:{ edited = edited ?? draft; edited?.type=$0 })) { ForEach(KnowledgeDraftType.allCases,id:\.self) { Text($0.displayName).tag($0) } }; TextField("Project",text:Binding(get:{ edited?.project ?? draft.project },set:{ edited = edited ?? draft; edited?.project=$0 })); TextField("Tags（カンマ区切り）",text:Binding(get:{ (edited?.tags ?? draft.tags).joined(separator:", ") },set:{ edited = edited ?? draft; edited?.tags=$0.split(separator:",").map { $0.trimmingCharacters(in:.whitespacesAndNewlines) }.filter { !$0.isEmpty } })); TextEditor(text:Binding(get:{ edited?.body ?? draft.body },set:{ edited = edited ?? draft; edited?.body=$0 })).frame(minHeight:240).disabled(draft.reviewStatus == .promoted); if edited != nil && draft.reviewStatus != .promoted { Button("編集を保存") { if let edited { store.updateKnowledgeDraft(edited); self.edited=nil } } } }
                 Section("Metadata") { LabeledContent("Source",value:draft.source.displayName); LabeledContent("Status",value:draft.reviewStatus.rawValue); LabeledContent("GitHub",value:draft.syncStatus.rawValue); LabeledContent("Draft path",value:draft.savedPath ?? "local"); if let path=draft.knowledgePath { LabeledContent("Knowledge path",value:path) }; LabeledContent("Created",value:draft.createdAt.formatted()); LabeledContent("Updated",value:draft.updatedAt.formatted()); if let id=draft.provenance.sourceID { LabeledContent("Source ID",value:id) }; if let persona=draft.provenance.personaID { LabeledContent("Persona ID",value:persona.uuidString) } }
                 Section("Related Knowledge") { if draft.relatedDocuments.isEmpty { Text("なし") }; ForEach(Array(draft.relatedDocuments.enumerated()),id:\.offset) { Text("\($0.element.documentPath) > \($0.element.heading)") } }
-                if draft.reviewStatus != .promoted { Section("Actions") { if draft.reviewStatus == .unreviewed || draft.reviewStatus == .rejected { Button("Approve") { store.reviewKnowledgeDraft(edited ?? draft,status:.approved); edited=nil } }; if draft.reviewStatus == .unreviewed || draft.reviewStatus == .approved { Button("Reject",role:.destructive) { store.reviewKnowledgeDraft(edited ?? draft,status:.rejected); edited=nil } }; if draft.reviewStatus == .approved { Button("Promote to Knowledge") { confirmsPromotion=true } } } }
+                if draft.reviewStatus != .promoted { Section("Actions") { if draft.reviewStatus == .unreviewed || draft.reviewStatus == .rejected { Button("Approve") { store.reviewKnowledgeDraft(edited ?? draft,status:.approved); edited=nil } }; if draft.reviewStatus == .unreviewed || draft.reviewStatus == .approved { Button("Reject",role:.destructive) { store.reviewKnowledgeDraft(edited ?? draft,status:.rejected); edited=nil } }; if draft.reviewStatus == .approved { Button("Promote to Knowledge") { confirmsPromotion=true } }; Button(store.isDeletingKnowledgeDraft ? "削除中…" : "Draftを削除",role:.destructive) { confirmsDeletion=true }.disabled(store.isDeletingKnowledgeDraft) } }
                 if let message=store.knowledgeDraftMessage { Section { Text(message).foregroundStyle(.green) } }; if let error=store.knowledgeDraftError { Section { Text(error).foregroundStyle(.red) } }
             }
         }.navigationTitle("Draft Review").onAppear { store.loadKnowledge() }.confirmationDialog("正式Knowledgeへ昇格しますか？",isPresented:$confirmsPromotion,titleVisibility:.visible) { Button("Promote") { if let current { Task { await store.promoteKnowledgeDraft(current) } } }; Button("キャンセル",role:.cancel) {} } message: { if let current { Text("Title: \(current.title)\nDestination: \(KnowledgeDocumentPath.targetPath(date:Date(),title:current.title))\nSource: \(current.source.displayName)") } }
+        .confirmationDialog("このDraftを削除しますか？",isPresented:$confirmsDeletion,titleVisibility:.visible) { Button("削除",role:.destructive) { if let current { Task { if await store.deleteKnowledgeDraft(current) { dismiss() } } } }; Button("キャンセル",role:.cancel) {} } message: { if let current { Text(current.savedPath == nil ? "ローカルのDraftを削除します。" : "GitHubのファイルとローカルのDraftを削除します。\n\(current.savedPath ?? "")") } }
     }
 }
 
@@ -1813,6 +2033,29 @@ struct PersonaIcon: View {
     }
 }
 
+private struct ExternalBrainBadge: View {
+    @ObservedObject private var manager: ExternalBrainManager
+    let persona: Persona
+
+    init(store: ThoughtStore, persona: Persona) {
+        manager = store.externalBrainManager
+        self.persona = persona
+    }
+
+    var body: some View {
+        if persona.kind == .ai, manager.connectionStatus(for: persona.id) == .verified {
+            Image(systemName: "medal.fill")
+                .font(.caption.weight(.semibold))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(Color.yellow, Color.orange)
+                .padding(4)
+                .background(Color.orange.opacity(0.13), in: Circle())
+                .accessibilityLabel("外部ブレイン接続済み")
+                .accessibilityIdentifier("externalBrainConnectedBadge_\(persona.id.uuidString)")
+        }
+    }
+}
+
 private struct ActorProfileView: View {
     @ObservedObject var store: ThoughtStore
     let persona: Persona
@@ -1826,8 +2069,11 @@ private struct ActorProfileView: View {
             Section {
                 VStack(spacing: 12) {
                     PersonaIcon(persona: persona, size: 104)
-                    Text(persona.displayName)
-                        .font(.title2.weight(.bold))
+                    HStack(spacing: 7) {
+                        Text(persona.displayName)
+                            .font(.title2.weight(.bold))
+                        ExternalBrainBadge(store: store, persona: persona)
+                    }
                     Text("@\(persona.handle)")
                         .font(.subheadline.monospaced())
                         .foregroundStyle(.secondary)
@@ -2058,7 +2304,13 @@ private struct AIPersonaManagementView: View {
     private func personaRow(_ persona: Persona) -> some View {
         HStack(spacing: 12) {
             PersonaIcon(persona: persona, size: 44)
-            VStack(alignment: .leading) { Text(persona.displayName).foregroundStyle(.primary); Text(persona.kind == .human ? "人間" : "AI").font(.caption).foregroundStyle(.secondary) }
+            VStack(alignment: .leading) {
+                HStack(spacing: 5) {
+                    Text(persona.displayName).foregroundStyle(.primary)
+                    ExternalBrainBadge(store: store, persona: persona)
+                }
+                Text(persona.kind == .human ? "人間" : "AI").font(.caption).foregroundStyle(.secondary)
+            }
             Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
         }.contentShape(Rectangle())
     }
@@ -2203,7 +2455,10 @@ private struct AIPostRequestView: View {
                         HStack(spacing: 12) {
                             PersonaIcon(persona: persona, size: 44)
                             VStack(alignment: .leading) {
-                                Text(persona.displayName).font(.headline)
+                                HStack(spacing: 5) {
+                                    Text(persona.displayName).font(.headline)
+                                    ExternalBrainBadge(store: store, persona: persona)
+                                }
                                 Text(store.aiConfigurations[persona.id]?.role ?? "")
                                     .font(.caption).foregroundStyle(.secondary)
                             }

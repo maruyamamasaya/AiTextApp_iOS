@@ -253,6 +253,7 @@ private struct DailySummaryDetailView: View {
     @ObservedObject var store: ThoughtStore
     let day: Date
     @State private var draftInput: KnowledgeDraftInput?
+    @State private var draftType: KnowledgeDraftType = .knowledge
 
     var body: some View {
         List {
@@ -261,6 +262,23 @@ private struct DailySummaryDetailView: View {
                 LabeledContent("あなたのThought", value: "\(store.dailySummaryDayThoughts.count)件")
                 LabeledContent("あなたの継続Thought", value: "\(store.dailySummaryDayContinuationCount)件")
                 LabeledContent("既存タグ", value: store.dailySummaryDayTags.isEmpty ? "なし" : store.dailySummaryDayTags.joined(separator: "、"))
+            }
+            Section("GitHubの日記") {
+                if store.dailyJournalEntries.isEmpty {
+                    Text("この日の同期済み日記はありません。")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(store.dailyJournalEntries) { entry in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(entry.title).font(.headline)
+                        Text(entry.body).textSelection(.enabled)
+                        Text("\(entry.status) · \(entry.path)").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Button(store.externalBrainManager.isSyncing ? "同期中…" : "GitHubから日記を同期") {
+                    Task { await store.synchronizeDailyJournal(for: day) }
+                }
+                .disabled(store.externalBrainManager.isSyncing || !store.externalBrainManager.hasToken || !store.externalBrainManager.repository.isConfigured)
             }
             if let summary = store.dailySummary {
                 DailySummarySections(summary: summary, store: store)
@@ -272,7 +290,10 @@ private struct DailySummaryDetailView: View {
                     Text("送信前プレビューで内容を確認します。新しい生成が成功した場合だけ、現在のSummaryを置き換えます。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Button("外部脳に残す") { draftInput = store.knowledgeDraftInput(for: summary) }
+                    Button("日記を作る") { openJournalDraft() }
+                        .disabled(store.dailySummaryDayThoughts.isEmpty)
+                        .accessibilityIdentifier("createJournalDraftButton")
+                    Button("サマリーを外部脳に残す") { draftType = .knowledge; draftInput = store.knowledgeDraftInput(for: summary) }
                 }
             } else {
                 Section {
@@ -280,6 +301,9 @@ private struct DailySummaryDetailView: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .disabled(store.dailySummaryDayThoughts.isEmpty)
                         .accessibilityIdentifier("prepareDailySummaryButton")
+                    Button("日記を作る") { openJournalDraft() }
+                        .disabled(store.dailySummaryDayThoughts.isEmpty)
+                        .accessibilityIdentifier("createJournalDraftButton")
                 }
             }
             if let error = store.dailySummaryError { Section { Text(error).foregroundStyle(.red) } }
@@ -290,9 +314,13 @@ private struct DailySummaryDetailView: View {
         .sheet(item: Binding(get: { store.dailySummaryPreview }, set: { if $0 == nil { store.cancelDailySummaryPreview() } })) { preview in
             DailySummaryPreviewView(store: store, preview: preview)
         }
-        .sheet(isPresented: Binding(get: { draftInput != nil }, set: { if !$0 { draftInput = nil } })) { if let input = draftInput { KnowledgeDraftFlowView(store: store, input: input) } }
+        .sheet(isPresented: Binding(get: { draftInput != nil }, set: { if !$0 { draftInput = nil } })) { if let input = draftInput { KnowledgeDraftFlowView(store: store, input: input, initialType: draftType) } }
     }
 
+    private func openJournalDraft() {
+        draftType = .journal
+        draftInput = store.journalDraftInput(for: day)
+    }
 }
 
 private struct DailySummaryPreviewView: View {

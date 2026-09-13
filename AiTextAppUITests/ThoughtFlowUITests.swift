@@ -281,6 +281,12 @@ final class ThoughtFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["aiPersonasButton"].exists)
         XCTAssertTrue(app.buttons["aiUsageAnalyticsButton"].exists)
         XCTAssertTrue(app.buttons["externalBrainSettingsButton"].exists)
+        app.buttons["aiProviderSettingsButton"].tap()
+        XCTAssertTrue(app.navigationBars["AIプロバイダー設定"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["geminiProviderSettingsButton"].exists)
+        XCTAssertTrue(app.buttons["openAIProviderSettingsButton"].exists)
+        XCTAssertTrue(app.buttons["claudeProviderSettingsButton"].exists)
+        app.navigationBars["AIプロバイダー設定"].buttons.firstMatch.tap()
         tabBar.buttons["ホーム"].tap()
 
         let composer = openComposer()

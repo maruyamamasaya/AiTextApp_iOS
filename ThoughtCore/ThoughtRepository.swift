@@ -3,6 +3,9 @@ import Foundation
 public protocol ThoughtRepository: Sendable {
     func create(_ thought: Thought) throws
     func fetchTimeline() throws -> [Thought]
+    /// 任意cursorより前の未削除ThoughtをTimeline降順で返す。
+    /// 実装は`(createdAt, id)`を安定したkeyset cursorとして扱う。
+    func fetchTimelinePage(limit: Int, before cursor: Thought?) throws -> [Thought]
     /// Searches active Thought bodies using a literal, trimmed substring.
     /// An empty normalized query returns no results.
     func search(query: String) throws -> [Thought]
@@ -138,6 +141,22 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
     public func fetchTimeline() throws -> [Thought] {
         lock.withLock {
             records.filter { $0.deletedAt == nil }.sorted(by: Thought.timelineOrder)
+        }
+    }
+
+    public func fetchTimelinePage(limit: Int, before cursor: Thought?) throws -> [Thought] {
+        guard limit > 0 else { return [] }
+        return lock.withLock {
+            records
+                .filter { thought in
+                    guard thought.deletedAt == nil else { return false }
+                    guard let cursor else { return true }
+                    return thought.createdAt < cursor.createdAt ||
+                        (thought.createdAt == cursor.createdAt && thought.id.uuidString < cursor.id.uuidString)
+                }
+                .sorted(by: Thought.timelineOrder)
+                .prefix(limit)
+                .map { $0 }
         }
     }
 

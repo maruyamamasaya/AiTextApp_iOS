@@ -349,6 +349,10 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         let delete = try prepare("DELETE FROM knowledge_drafts_fts WHERE id = ?"); defer { sqlite3_finalize(delete) }; try bind(draft.id.uuidString,to:1,in:delete); try stepDone(delete)
         let index = try prepare("INSERT INTO knowledge_drafts_fts(id,title,body,tags,source_type) VALUES(?,?,?,?,?)"); defer { sqlite3_finalize(index) }; try bind(draft.id.uuidString,to:1,in:index); try bind(draft.title,to:2,in:index); try bind(draft.body,to:3,in:index); try bind(draft.tags.joined(separator:" "),to:4,in:index); try bind(draft.source.rawValue,to:5,in:index); try stepDone(index)
     }
+    public func deleteKnowledgeDraft(id: UUID) throws { try lock.withLock { try transaction {
+        let deleteIndex = try prepare("DELETE FROM knowledge_drafts_fts WHERE id = ?"); defer { sqlite3_finalize(deleteIndex) }; try bind(id.uuidString,to:1,in:deleteIndex); try stepDone(deleteIndex)
+        let deleteDraft = try prepare("DELETE FROM knowledge_drafts WHERE id = ?"); defer { sqlite3_finalize(deleteDraft) }; try bind(id.uuidString,to:1,in:deleteDraft); try stepDone(deleteDraft)
+    } } }
     public func fetchKnowledgeDrafts() throws -> [KnowledgeDraft] { try lock.withLock { try queryKnowledgeDrafts("SELECT id,title,body,draft_type,project,tags_json,source_type,provenance_json,review_status,sync_status,github_path,created_at,updated_at,approved_at,promoted_at,rejected_at,knowledge_path,knowledge_sha,related_json FROM knowledge_drafts ORDER BY updated_at DESC,id DESC") } }
     public func fetchKnowledgeDraft(id: UUID) throws -> KnowledgeDraft? { try lock.withLock { try queryKnowledgeDrafts("SELECT id,title,body,draft_type,project,tags_json,source_type,provenance_json,review_status,sync_status,github_path,created_at,updated_at,approved_at,promoted_at,rejected_at,knowledge_path,knowledge_sha,related_json FROM knowledge_drafts WHERE id = ?", bind: { try self.bind(id.uuidString, to: 1, in: $0) }).first } }
     public func searchKnowledgeDrafts(query: String) throws -> [KnowledgeDraft] { try lock.withLock {
@@ -473,6 +477,35 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 FROM thoughts WHERE deleted_at IS NULL
                 ORDER BY created_at DESC, id DESC
                 """)
+        }
+    }
+
+    public func fetchTimelinePage(limit: Int, before cursor: Thought?) throws -> [Thought] {
+        guard limit > 0 else { return [] }
+        return try lock.withLock {
+            if let cursor {
+                return try query("""
+                    SELECT id, body, created_at, updated_at, deleted_at
+                    FROM thoughts
+                    WHERE deleted_at IS NULL
+                      AND (created_at, id) < (?, ?)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """, bind: { statement in
+                        try self.bind(cursor.createdAt.timeIntervalSince1970, to: 1, in: statement)
+                        try self.bind(cursor.id.uuidString, to: 2, in: statement)
+                        try self.bind(Int32(limit), to: 3, in: statement)
+                    })
+            }
+            return try query("""
+                SELECT id, body, created_at, updated_at, deleted_at
+                FROM thoughts
+                WHERE deleted_at IS NULL
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """, bind: { statement in
+                    try self.bind(Int32(limit), to: 1, in: statement)
+                })
         }
     }
 

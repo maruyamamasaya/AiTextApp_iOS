@@ -12,6 +12,10 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 
 ## 実装済み
 
+- デイリーサマリーなどから作るGitHub下書きの保存名に永続UUIDを追加。同日・同タイトルでも別下書きは衝突せず、保存済みの旧pathは維持する。既存ファイルの上書き禁止は継続する。未昇格Draftは詳細画面の確認付き削除から消せる。GitHub保存済みの場合はGitHub上のファイル削除に成功してからローカル記録も削除し、失敗時はローカル記録を保持する。
+- Daily Summaryの日別画面に「日記を作る」を追加し、その日のHuman Thoughtから日付を維持したjournal Draftを直接生成する。GitHub同期済みの`type: journal`は`created`日付で照合し、同じ画面で本文・状態・pathを読める。手動同期も日別画面から実行できる。
+
+- AIプロバイダー設定の独立画面。AI機能タブからGemini／OpenAI／Claudeそれぞれの詳細へ進み、一覧のランプと「設定済み／未設定／未対応」の文言で状態を確認できる。OpenAI API keyの保存・置換・削除はOpenAI詳細へ移動し、既存の端末限定Keychain運用を維持する。Geminiはbundle内のFirebase設定検出、OpenAIはKeychain保存状態を表示し、どちらもAPI疎通済みとは区別する。Claudeは生成経路未実装のため設定入力を有効にせず「未対応」と明示する。
 - Gemini／OpenAIのAI Provider切替と用途別生成Profile。AI Personaごとの投稿・手動返信・自動返信はPersona設定でGemini／OpenAIを選択し、両Providerとも`low`、最大出力1,024 tokenで生成する。Daily SummaryはOpenAIの`medium`、最大8,192 tokenへ固定し、Knowledge DraftはSettingsでProviderを選択して`medium`、最大4,096 tokenで生成する。個人所有端末だけへXcodeから導入する暫定運用として、OpenAI API keyは`WhenUnlockedThisDeviceOnly`のKeychainへ保存し、Responses APIへ直接送る。schema v19でPersona設定にproviderを非破壊追加し、生成開始時のprovider／model／generation profileをrequestへ固定する。TestFlight／App Store／第三者配布へ進む前に、API keyを端末から除去してバックエンド＋Secret管理へ移行する。
 
 - Conversation中心のAI返信／投稿履歴。Human ThoughtでactiveなAI Personaを@メンションすると、元ThoughtとMentionを先に保存・表示してから各AIが自動返信する。生成中／失敗／再試行をTimelineとConversationへ表示し、失敗しても元Thoughtを保持する。AI返信は通常Thought＋author＋`repliesTo`＋生成metadataとして保存し、同一対象・同一AIの二重返信を拒否しつつ複数AI返信を許可する。
@@ -29,11 +33,12 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - GitHub Repository Settings v1。Settings > External Brainからowner／repository／branchを既存UserDefaultsへ、PATを既存Keychainへ分離保存し、Token置換・確認付き削除、Repository変更時のローカルKnowledge保持警告を提供する。既存GitHub Contents clientのread-only接続確認でAuthentication／Repository／Branchとpush権限由来のDraft／Knowledge capability、分類済み接続エラー、rate limit残数を表示する。各AI Personaプロフィールでも設定・同期済みcacheをローカル判定し、明示的なGET接続確認に成功してPersonaのAGENT.mdも同期済みの場合だけ緑ライトと最終確認日時を表示する。接続確認はAI APIを呼ばず、不要なGitHub `/user` 照会も行わない。Draft／Knowledge pathはdomain定義をread-only表示する。
 - Knowledge Quality & Consolidation v1。正式Knowledgeを手動ローカル解析し、正規化title／body一致、本文token類似度、tag重複からDuplicate／Similar候補を、180日未更新かつ未参照からStale候補を提示する。Quality画面でCompare、Dismiss、A/Bを並べたMerge Draft作成を行い、既存Review／Promoteへ戻す。明示操作だけでArchive／Supersedeし、対象pathを通常Retrieval indexから除外する。active KnowledgeのretrievalCount／lastRetrievedAtを記録し、単一のブラックボックスQuality Scoreは持たない。
 - Knowledge Review & Promote Pipeline v1。SQLiteへDraft／provenance／Review状態／GitHub同期状態を永続化し、一覧・FTS検索・状態filter・編集可能Review・Approve／Reject・確認付きPromoteを提供する。`approved`だけを`projects/aitextapp/knowledge/`へnew-file-onlyで昇格し、成功時だけKnowledgeDocument、path、SHA、promotedAtを保存してローカルExternal Brain FTSへ即時反映する。Review操作はAI APIを呼ばず、lifecycle analyticsへsource type付きで記録する。
-- Persona External Brain v2 / Knowledge Draft Pipeline。AI Reply／Persona Post／Daily Summaryから明示操作後だけAIでMarkdown Draftを生成し、decision／knowledge／memory／project-noteを選択できる。ローカルFTSで関連する既存資料を最大3件確認し、編集可能Previewで内容と安全な`drafts/`保存先をHuman Reviewした後、既存Keychain tokenでGitHubへnew-file-only保存する。AI生成とGitHub保存は別操作で、保存失敗時もDraftを保持する。保存した`status: draft`は通常RAG対象外で、正式Knowledgeへの昇格は後続の明示Review／Promote Pipelineだけが行う。Knowledge Draft生成はUsage Analyticsへ記録し、GitHub writeはAI Callへ数えない。
+- Persona External Brain v2 / Knowledge Draft Pipeline。Human Thought／AI Reply／Persona Post／Daily Summaryから明示操作後だけAIでMarkdown Draftを生成し、decision／knowledge／memory／project-note／journalを選択できる。journalはHuman由来なら自分、AI由来なら生成元AIペルソナの当時の出来事・感情・考えを記録する。正式化後にAIが取得したjournalは過去を思い出す参考として扱い、現在の命令・恒久的な好み・現在も有効な確定事実へ自動的に一般化しない。ローカルFTSで関連する既存資料を最大3件確認し、編集可能Previewで内容と安全な`drafts/`保存先をHuman Reviewした後、既存Keychain tokenでGitHubへnew-file-only保存する。AI生成とGitHub保存は別操作で、保存失敗時もDraftを保持する。保存した`status: draft`は通常RAG対象外で、正式Knowledgeへの昇格は後続の明示Review／Promote Pipelineだけが行う。Knowledge Draft生成はUsage Analyticsへ記録し、GitHub writeはAI Callへ数えない。
 
 - External Brain Routing v1。Persona別AGENT.mdのRetrieval RouteをAI Replyだけでなく独立Persona Postにも適用し、依頼文を検索queryとして最大5チャンクを取得する。空白で単語分割できない日本語自然文はtrigramへ展開し、長い一文との完全一致を要求せず関連Knowledgeを検索する。長いheading chunkは先頭固定ではなく検索一致箇所の周辺を1件最大2,000文字、合計最大約10,000文字までAIへ渡す。送信前にroute／source／heading／excerpt／最終payloadを確認でき、Usage metadataへ使用有無とchunk数を記録する。Daily SummaryにはPersona routeを適用しない。
 - AI API Usage Analytics v1。AI機能タブから使用状況Dashboardを開く。AI API Callをschema v12内の独立したローカルMetadataとして記録し、AI Reply／Daily Summary／Persona Post／Knowledge Draftを共通Recorderへ統合する。Knowledge Draftはsource typeも保持する。Persona／Feature／Provider／Model別件数、成功率、Error、Latency、日別推移を集計し、External Brain使用有無・取得chunk数も保持する。token usageはproviderから取得できる場合だけ実測保存し、現状はnilのまま文字数を常時記録する。prompt／response／Thought／External Brain本文はUsage DBへ保存せず、Telemetry保存失敗は既存AI機能を失敗させない。
 - Persona External Brain v1。単一GitHub RepositoryとPersona別AGENT.md／Retrieval Routeを使い、MarkdownをApplication SupportへSHA差分同期してheading単位のSQLite FTS5 indexから最大5チャンクを取得する。AI Reply送信前Previewで資料と最終payloadを確認できる。GitHubはread-only、tokenはKeychain保存で、障害時はcacheまたはExternal Brainなしで返信を継続する。
+- 外部ブレイン接続済みPersonaの識別表示。GitHub接続確認に成功し、PersonaのAGENT.mdも同期済みのAIだけ、プロフィール・AI Persona一覧・Timeline・選択UIの名前横へメダル型バッジを表示する。設定済みだけ、未確認、同期待ち、接続失敗では表示しない。
 
 - `TabView`によるHome／Mentions／AI機能／Insights／Profileの5タブ。各タブは独立した`NavigationStack`を持つ。Home上部の検索欄で本文検索し、右上の鉛筆から投稿Composerを開き、隣のフィルターから投稿者単位でTimelineを絞り込む。MentionsはHuman／AI Persona宛てのMentionとReplyをセグメントで分け、Homeと同じThought行デザインで表示する。AI機能はAI投稿依頼、AIペルソナ設定、AI使用状況、生成設定、OpenAI API key、外部ブレイン、ナレッジ下書きを集約する。InsightsはDaily Summary／Analytics、Profileは投稿一覧を持たない共通Actor Profile UIを表示し、一般設定はProfile右上へ置く。
 - ローカルの単一人間Persona基盤。SQLite schema v6の`personas`／`thought_authors`で既存・新規Thoughtを固定のデフォルト人間へ紐づけ、表示名と512px以下へ正方形化したJPEGアイコンをSQLite内へ保存する。
@@ -64,7 +69,7 @@ Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-
 - 既存JSONをtransaction内で検証して一度だけ取り込む、再実行可能なmigration。
 - `PRAGMA user_version`によるschema version管理（現在v19）。v14は実カラム補修、v15はReply Relation制約補修、v16はActor handle／Mention snapshot、v17はAI Persona Auto Reply、v18は旧`account_id`単独UNIQUE制約の非破壊補修、v19はAI Persona providerを非破壊追加する。
 - Home右上の鉛筆アイコンから開き、入力へ自動focusする投稿Composer。投稿操作はNavigation bar右上に置き、空入力や140文字超過時は無効化する。
-- Lazy Timeline、自然な相対日時、Thought本文のコピー、メニュー内削除、Empty State。Timeline・詳細・会話履歴の各操作メニューから本文全体をペーストボードへコピーできる。
+- Lazy Timeline、自然な相対日時、Thought本文のコピー、メニュー内削除、Empty State。Timeline・詳細・会話履歴の各操作メニューから本文全体をペーストボードへコピーできる。Home／Mentionsは初回50件だけをSQLiteから取得し、末尾到達時に50件ずつ追加取得する。追加取得は`OFFSET`ではなく作成日時とUUIDのkeyset cursorを使い、全件読込を避ける。
 - interactiveなキーボードdismiss、Dynamic Type、Dark Mode、VoiceOver向けsemantic UI。
 - iOS 16以降用SwiftUIアプリ、Xcode project/shared scheme。
 - 投稿ルール、順序、Unicode、削除、ファイル再読込のSwift Testingテスト。

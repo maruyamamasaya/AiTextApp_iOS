@@ -52,18 +52,21 @@ struct GitHubExternalBrainRemote: ExternalBrainRemote, GitHubRepositoryConnectio
 }
 
 enum ExternalBrainDraftWriteError: Error, LocalizedError {
-    case tokenMissing, permissionDenied, conflict, network, invalidResponse
+    case tokenMissing, permissionDenied, conflict, network, invalidResponse, deleteFailed
     var errorDescription: String? { switch self {
     case .tokenMissing: "GitHub tokenが設定されていません。"
     case .permissionDenied: "GitHub tokenにContentsのwrite権限がありません。"
     case .conflict: "同名のDraftがすでに存在します。上書きは行いません。"
     case .network: "GitHubへ接続できません。Draft内容は保持されています。"
     case .invalidResponse: "GitHubへDraftを保存できませんでした。Draft内容は保持されています。"
+    case .deleteFailed: "GitHubからDraftを削除できませんでした。ローカルのDraftは保持されています。"
     } }
 }
 
 struct GitHubExternalBrainDraftWriter: ExternalBrainDraftWriter {
     private struct Body: Encodable { let message, content, branch: String }
+    private struct DeleteBody: Encodable { let message, sha, branch: String }
+    private struct FileMetadata: Decodable { let sha: String }
     func createDraft(path: String, markdown: String, configuration: ExternalBrainRepositoryConfiguration, token: String) async throws {
         try KnowledgeDraftPath.validate(path)
         guard configuration.isConfigured else { throw ExternalBrainDraftWriteError.invalidResponse }
@@ -78,6 +81,39 @@ struct GitHubExternalBrainDraftWriter: ExternalBrainDraftWriter {
             guard let status = (response as? HTTPURLResponse)?.statusCode else { throw ExternalBrainDraftWriteError.invalidResponse }
             switch status { case 201: return; case 401, 403: throw ExternalBrainDraftWriteError.permissionDenied; case 409, 422: throw ExternalBrainDraftWriteError.conflict; default: throw ExternalBrainDraftWriteError.invalidResponse }
         } catch let error as ExternalBrainDraftWriteError { throw error }
+        catch { throw ExternalBrainDraftWriteError.network }
+    }
+
+    func deleteDraft(path: String, configuration: ExternalBrainRepositoryConfiguration, token: String) async throws {
+        try KnowledgeDraftPath.validate(path)
+        guard configuration.isConfigured else { throw ExternalBrainDraftWriteError.deleteFailed }
+        guard !token.isEmpty else { throw ExternalBrainDraftWriteError.tokenMissing }
+        let encoded = path.split(separator: "/").map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }.joined(separator: "/")
+        guard let baseURL = URL(string: "https://api.github.com/repos/\(configuration.owner)/\(configuration.repository)/contents/\(encoded)"),
+              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { throw ExternalBrainDraftWriteError.deleteFailed }
+        components.queryItems = [URLQueryItem(name: "ref", value: configuration.branch)]
+        guard let metadataURL = components.url else { throw ExternalBrainDraftWriteError.deleteFailed }
+        do {
+            var metadataRequest = URLRequest(url: metadataURL); metadataRequest.httpMethod = "GET"; metadataRequest.timeoutInterval = 30
+            metadataRequest.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept"); metadataRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); metadataRequest.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+            let (metadataData, metadataResponse) = try await URLSession.shared.data(for: metadataRequest)
+            guard let metadataStatus = (metadataResponse as? HTTPURLResponse)?.statusCode else { throw ExternalBrainDraftWriteError.deleteFailed }
+            if metadataStatus == 404 { return }
+            guard metadataStatus == 200 else {
+                if metadataStatus == 401 || metadataStatus == 403 { throw ExternalBrainDraftWriteError.permissionDenied }
+                throw ExternalBrainDraftWriteError.deleteFailed
+            }
+            let sha = try JSONDecoder().decode(FileMetadata.self, from: metadataData).sha
+            var deleteRequest = URLRequest(url: baseURL); deleteRequest.httpMethod = "DELETE"; deleteRequest.timeoutInterval = 30
+            deleteRequest.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept"); deleteRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); deleteRequest.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version"); deleteRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            deleteRequest.httpBody = try JSONEncoder().encode(DeleteBody(message: "Delete knowledge draft \(path)", sha: sha, branch: configuration.branch))
+            let (_, deleteResponse) = try await URLSession.shared.data(for: deleteRequest)
+            guard let deleteStatus = (deleteResponse as? HTTPURLResponse)?.statusCode else { throw ExternalBrainDraftWriteError.deleteFailed }
+            if deleteStatus == 200 || deleteStatus == 404 { return }
+            if deleteStatus == 401 || deleteStatus == 403 { throw ExternalBrainDraftWriteError.permissionDenied }
+            throw ExternalBrainDraftWriteError.deleteFailed
+        } catch let error as ExternalBrainDraftWriteError { throw error }
+        catch is DecodingError { throw ExternalBrainDraftWriteError.deleteFailed }
         catch { throw ExternalBrainDraftWriteError.network }
     }
 }
@@ -180,11 +216,19 @@ final class ExternalBrainManager: ObservableObject {
     var canWriteDrafts: Bool { repository.isConfigured && hasToken && (connectionCapabilities?.writeDrafts ?? true) }
     var canWriteKnowledge: Bool { repository.isConfigured && hasToken && (connectionCapabilities?.writeKnowledge ?? true) }
     func relatedKnowledge(query: String) -> [ExternalBrainRetrievedChunk] { (try? cache?.index.searchRelated(query: query, maximum: 3)) ?? [] }
+    func journalEntries(for day: Date) -> [ExternalBrainJournalEntry] {
+        cache?.journalEntries(date: KnowledgeDraftPath.dateString(day)) ?? []
+    }
     func saveDraft(_ draft: KnowledgeDraft) async throws -> String {
         let path = draft.targetPath; try KnowledgeDraftPath.validate(path)
         guard let token = ExternalBrainTokenStore.load(), !token.isEmpty else { throw ExternalBrainDraftWriteError.tokenMissing }
         try await draftWriter.createDraft(path: path, markdown: draft.markdown, configuration: repository, token: token)
         return path
+    }
+    func deleteDraft(path: String) async throws {
+        try KnowledgeDraftPath.validate(path)
+        guard let token = ExternalBrainTokenStore.load(), !token.isEmpty else { throw ExternalBrainDraftWriteError.tokenMissing }
+        try await draftWriter.deleteDraft(path: path, configuration: repository, token: token)
     }
     func promote(_ draft: KnowledgeDraft, path: String) async throws -> String {
         try KnowledgeDocumentPath.validate(path); guard draft.reviewStatus == .approved else { throw KnowledgeDraftTransitionError.invalidTransition }; guard let token=ExternalBrainTokenStore.load(),!token.isEmpty else { throw ExternalBrainDraftWriteError.tokenMissing }

@@ -49,6 +49,7 @@ SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
 - `ActorProfileView`: Human／AI共通のプロフィール表示。自分のProfileタブでは編集とSettingsへのToolbar導線を追加する。AIではPersona別External Brain設定、Repository、Keychain token、同期済みAGENT cacheをローカル評価し、明示GET確認が成功した場合だけ接続済みの緑ライトを表示する。
 - `ThoughtAnalyticsView`: 直近30日の基本サマリー、日別／曜日別／時間帯別分布、上位タグ、Continuation件数を標準SwiftUIの縦Sectionと簡易バーで表示する完全ローカル画面。
 - `AIAPIUsageAnalyticsView`: 今日／7日／30日／全期間のAI Call、成功率、文字数または完全な実測token、Feature／Persona／Provider・Model／Error、Latency、External Brain、日別推移をSQLiteだけで表示する。
+- `AIProviderSettingsView`: Gemini／OpenAI／Claudeのプロバイダー別設定入口。Geminiはbundle内のFirebase設定、OpenAIはKeychain itemの有無をローカル評価し、緑ライトは設定検出だけを意味する。API疎通済みとは扱わず、生成経路を持たないClaudeは未対応表示に固定する。OpenAI secretの保存・置換・削除は`OpenAIProviderSettingsView`だけが`ThoughtStore`経由で行う。
 - `DailySummaryCalendarView`: 月単位で要約済み／Thoughtあり未要約／Thoughtなしを表示し、日別詳細と明示生成の送信前プレビューへ遷移する。
 - `DailySummaryContent` / `PrepareDailySummary`: `fetchHumanThoughts(from:to:)`から期間内・未削除のHuman Thoughtだけを取得し、Humanタグ、共通時間帯、Human同士の日内Relationをtyped previewへ固定する。AI本文は取得・prompt化せず、新規v3応答の`aiInteractions`も保存前に空へ矯正する。v1／v2保存JSONは後方互換decodeし、将来のAI Summaryは別model／画面の責務とする。
 - `DailySummaryThoughtTagSuggestion`: AI応答のprompt連番をPreview内のHuman Thought IDへ検証付きで解決する提案モデル。生成時はTagを変更せず、Detailの明示的な追加操作だけが既存Tag repositoryを呼ぶ。
@@ -56,7 +57,7 @@ SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
 - `ReviewSummaryGeneratingTransport`: Firebase SDK importをapp layerへ閉じ込め、request変換、応答変換、空応答、typed errorを外部通信なしでテストする境界。
 - `ThoughtDetailView`: 選択Thoughtの投稿者・本文・タグと、`continues`／`repliesTo`を統合したConversation Treeを表示する。通常の「返信を書く」は全Conversationの最新leafへ接続し、選択した過去Thoughtへの返信は「この投稿から返信を分岐」で明示する。タグ、Knowledge Draft、削除は`…`へ分離する。
 - `ThoughtStore`: Timeline／本文検索／タグ／Continuation draftとHistory画面状態を各use caseへ接続。
-- `ThoughtTimeline`: 投稿validation、日時降順sort、soft delete、保存の調停。
+- `ThoughtTimeline`: 投稿validation、日時降順sort、50件単位のTimelineページ状態、soft delete、保存の調停。
 - `Thought` / `ThoughtDraft`: 原文モデルと140文字ルール。
 - `Persona` / `PersonaRepository` / `AuthoredThoughtRepository`: 人間／AIに共通する投稿者モデル、複数Personaの管理、任意Persona IDとThoughtを同一transactionで保存する境界。固定IDの人間Personaは無効化できない。
 - `AIPersonaConfiguration` / `GenerateAIPost`: Personaごとの役割・指示、ユーザー依頼からimmutableな送信前previewを作り、明示確定後の応答だけをAI名義で投稿する。140文字を超える応答や空応答は保存しない。
@@ -70,7 +71,7 @@ SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
 - `ExternalBrainDraftWriter` / `GitHubExternalBrainDraftWriter`: read境界から分離したwrite専用境界。アプリ側で`drafts/YYYY-MM-DD-safe-slug.md`を生成し、GitHub Contents APIでshaなしの新規作成だけを許可する。同名、権限、network失敗時はPreviewのDraftを保持する。
 - `AIReplyContextRepository`: 対象から`repliesTo`だけを逆向きに辿り、削除済み本文を除いた直近最大5件を投稿者付き・古い順で返す。PreviewはThought・Relation・Personaを固定し、生成直前の再取得結果と異なる場合は通信前に中止する。
 - `ThoughtMention` / `ThoughtMentionRepository`: Thought本文の文字列解析ではなく、ThoughtとAI Persona IDの単一メンション関連をatomic保存・一括取得する。メンション作成自体はAI clientを呼ばない。
-- `ThoughtRepository`: create、Timeline query、literal部分一致検索、日付範囲query、ID取得、全件取得、soft deleteの保存境界。
+- `ThoughtRepository`: create、全Timeline query、作成日時・UUIDをcursorにするTimeline page query、literal部分一致検索、日付範囲query、ID取得、全件取得、soft deleteの保存境界。
 - `ThoughtTag` / `ThoughtTagRepository`: Thought原文から独立したタグ、正規化、付与・解除transaction、Thought別／全タグ／タグ別Thought queryの境界。
 - `ThoughtAnalytics` / `ThoughtAnalyticsRepository`: typed集計結果、Calendar由来の日／時間帯境界、SQLite集計専用read境界。CRUD RepositoryやAI通信から分離する。
 - `ThoughtRelation`: Thought本文から独立した文脈モデル。sourceは新しいThought、targetは元のThoughtで、`continues`と`repliesTo`を区別する。
@@ -88,7 +89,7 @@ SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
 
 Timeline入力はBindingで140 Character以内に制限し、投稿時に前後空白を除去します。投稿とMention relationを先にatomic保存してTimelineへ即時反映し、activeかつ自動返信ONのAI Personaだけを非同期生成します。Human mentionは生成せず、AI生成Thoughtから自動生成を開始しません。生成中／失敗は元Thought配下の一時UI stateとして表示し、成功時は通常Thought、author、`repliesTo`、生成metadataを既存transactionで保存します。同じ対象にはPersona単位で一度だけ返信でき、複数AIの各1返信を許可します。
 
-Timelineは`ScrollView`と`LazyVStack`で構成します。Home右上の鉛筆アイコンから投稿Composerをsheet表示し、入力欄へ自動focusします。Navigation barの投稿ボタンは有効な文字入力時だけ有効になり、投稿成功時だけsheetを閉じます。行は本文を主役にし、日時と削除メニューを補助情報として表示します。
+Timelineは`ScrollView`と`LazyVStack`で構成します。初回はSQLiteから最新50件だけを取得し、HomeまたはMentionsの末尾が表示された時点で次の50件を追加します。SQLite queryは`thoughts_timeline_idx`に沿った作成日時・UUIDの降順と、最後に取得したThoughtを基準にするkeyset cursorを使います。次ページの有無は51件目の存在だけで判定し、件数取得や全件読込、深い`OFFSET`を行いません。Home右上の鉛筆アイコンから投稿Composerをsheet表示し、入力欄へ自動focusします。Navigation barの投稿ボタンは有効な文字入力時だけ有効になり、投稿成功時だけsheetを閉じます。行は本文を主役にし、日時と削除メニューを補助情報として表示します。
 
 Thought DetailはrootからContinuationをdepth-firstで並べた静かな縦型Historyです。現在位置を控えめな背景とlabelで示し、削除済みThoughtはRelationを切らず「削除されたThought」と表示します。Continuation成功後は新Thoughtを現在位置にし、同じThoughtをTimelineにも即時反映します。
 

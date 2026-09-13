@@ -7,14 +7,15 @@
 - `AiTextApp/App/AiTextApp.swift` — SwiftUIエントリーポイント、UIテスト用composition。
 - `AiTextApp/App/AppTheme.swift` — Primitive／Semantic／Theme／Effect token、4テーマ、UserDefaults永続化、Reduce Motion対応background、共通Surface、テーマ選択Preview。
 - `AiTextApp/App/ThoughtAnalyticsView.swift` — ローカル分析のサマリーと日別／曜日／時間帯／タグ／Continuation表示。
-- `AiTextApp/App/DailySummaryView.swift` — 生成済みサマリーの閲覧専用一覧／詳細、Human Thoughtだけを示す月カレンダー、日別件数／継続件数、構造化Summary、Human限定の送信前プレビュー、要約済み過去日の安全な再生成導線。
-- `AiTextApp/App/TimelineView.swift` — `MainTabView`（Home／Mentions／AI機能／Insights／Profile）、各タブの独立`NavigationStack`、Home上部の本文検索、右上の返信2件目以降を畳む切替・投稿Composer・投稿者フィルター、Mention／Reply一覧、AI機能ハブ、サマリー閲覧／生成を分けた分析ハブ、投稿一覧を持たない共通Actor Profile、Profile右上から開く一般Settings、Thought Detail、History、Continuation Composer、削除UI。
+- `AiTextApp/App/DailySummaryView.swift` — 生成済みサマリーの閲覧専用一覧／詳細、Human Thoughtだけを示す月カレンダー、日別件数／継続件数、構造化Summary、Human限定の送信前プレビュー、要約済み過去日の安全な再生成、その日のjournal Draft生成、同期済みGitHub日記の本文表示。
+- `AiTextApp/App/TimelineView.swift` — `MainTabView`（Home／Mentions／AI機能／Insights／Profile）、各タブの独立`NavigationStack`、Home／Mentions末尾の追加読込、Home上部の本文検索、右上の返信2件目以降を畳む切替・投稿Composer・投稿者フィルター、Mention／Reply一覧、AI機能ハブ、サマリー閲覧／生成を分けた分析ハブ、投稿一覧を持たない共通Actor Profile、Profile右上から開く一般Settings、Thought Detail、History、Continuation Composer、削除UI。
+- `AiTextApp/App/TimelineView.swift`内`AIProviderSettingsView`／各Provider設定View — GeminiのFirebase設定検出、OpenAIの端末限定Keychain API key管理、Claude未対応表示と、色・文言を併用した設定状態一覧。
 - `AiTextApp/App/TimelineView.swift`内`ProfileEditorView`／`PersonaIcon` — デフォルト人間の表示名、写真選択・縮小、丸型アイコン表示。
 - `AiTextApp/App/TimelineView.swift`内`PersonaManagementView`／`AIPersonaEditorView` — 複数AI Personaの一覧、追加、編集、無効化。
 - `AiTextApp/App/TimelineView.swift`内`AIPersonaManagementView`／`ActorProfileView` — AI Persona一覧からプロフィールを開き、表示内容と設定を確認・編集する管理導線。AIプロフィールには外部ブレインのローカル準備状態、GET接続確認、成功時の緑ライトと最終確認日時を表示する。
 - `AiTextApp/App/TimelineView.swift`内`AIPostRequestView`／`AIPostPreviewView` — Settingsの独立画面で投稿者AIを選択して依頼を入力し、Persona External Brainのroute／source、最終payloadを確認して明示送信する導線。
 - `AiTextApp/App/TimelineView.swift`内`AIReplyRequestView`／`AIReplyPreviewView` — メンション付きThoughtへのAI返信依頼、対象と最終payload確認、明示送信、Detail返信表示。
-- `AiTextApp/App/ThoughtStore.swift` — Timeline投稿境界、本文検索／タグ／Review／History／Continuation UI stateとCoreの接続。
+- `AiTextApp/App/ThoughtStore.swift` — Timeline投稿・50件単位の追加読込境界、本文検索／タグ／Review／History／Continuation UI stateとCoreの接続。
 - `AiTextApp/App/ShareSheet.swift` — Exportファイルを標準Share Sheetへ渡すbridge。
 - `AiTextApp/App/ExternalBackupManager.swift` — security-scoped bookmark、外部backup／RestoreのUI state。
 - `AiTextApp/App/FolderPicker.swift` — iOS標準Filesフォルダpicker bridge。
@@ -33,7 +34,7 @@ Search: `@main|TimelineView|ThoughtStore|confirmationDialog`
 
 - `ThoughtCore/Thought.swift` — 原文、Persona、AI Persona設定、AI投稿／AI返信preview・生成use case、typed Reply Contextと取得repository境界、メンションmodel。
 - `ThoughtCore/ThoughtDraft.swift` — 140文字、trim、validation。
-- `ThoughtCore/ThoughtTimeline.swift` — 投稿、降順表示、soft delete use case。
+- `ThoughtCore/ThoughtTimeline.swift` — 投稿、降順表示、初回50件とkeyset cursorによる追加読込、soft delete use case。
 - `ThoughtCore/ThoughtRelation.swift` — Relationモデル、repository／原子的Continuation境界、History取得use case。
 - `ThoughtCore/ThoughtTag.swift` — タグmodel、正規化規則、付与結果、repository／transaction境界。
 - `ThoughtCore/ThoughtAnalytics.swift` — typed分析model、30日Calendar境界、分析Repository／Use Case。
@@ -42,15 +43,15 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 
 ## Persistence
 
-- `ThoughtCore/ThoughtRepository.swift` — CRUD・本文検索・通常の日付範囲query・Daily Summary専用`fetchHumanThoughts(from:to:)`境界、Review期間計算、テスト用メモリ実装。
-- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v19、Persona／投稿者／AI設定・Provider・生成来歴／メンション／AI返信Relation、Knowledge Review／Quality／usage、実カラム照合migration、各種query、旧JSON migration／2世代backup。
+- `ThoughtCore/ThoughtRepository.swift` — CRUD・Timeline page・本文検索・通常の日付範囲query・Daily Summary専用`fetchHumanThoughts(from:to:)`境界、Review期間計算、テスト用メモリ実装。
+- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v19、作成日時＋UUIDのkeyset Timeline page、Persona／投稿者／AI設定・Provider・生成来歴／メンション／AI返信Relation、Knowledge Review／Quality／usage、実カラム照合migration、各種query、旧JSON migration／2世代backup。
 - `ThoughtCore/ReviewSummary.swift` — AI要約model、immutable送信preview、通信／transport／保存protocol、中央provider／model設定、用途別`AIGenerationProfile`、typed service error、対象準備／鮮度検証／生成・保存use case、Mock client。
 - `ThoughtCore/DailySummary.swift` — Human限定のv3 prompt、確定Humanタグ・時間帯・Human Relation、stale対応preview、準備／生成use case。既存v1／v2 modelの互換decodeは維持し、新規生成ではAI本文・`aiInteractions`を扱わない。
 - `ThoughtCore/ReviewSummaryExporter.swift` — 旧期間要約の互換コード。現在のUIからは利用せず、既存データを壊さないため保持する。
 - `ThoughtCore/ThoughtExporter.swift` — Repository経由のMarkdown／JSON生成。
 - `ThoughtCore/ExternalBackup.swift` — manifest、外部2世代backup、検証、pending Restore／rollback。
 - `ThoughtCore/ExternalBrain.swift` — Persona別設定、AGENT.md／front matter parser、heading chunk、manifest差分cache、SQLite FTS5、route優先retrieval、AI Reply／Persona Post共通のprompt用provenance。
-- `ThoughtCore/ExternalBrain.swift` — Knowledge Draft source／type／Markdown／safe slug、Draft生成prompt・use case、関連資料FTS検索、write protocol。
+- `ThoughtCore/ExternalBrain.swift` — Knowledge Draft source／type（意思決定・ナレッジ・メモリ・プロジェクトメモ・日記）／Markdown／safe slug、Draft生成prompt・use case、関連資料FTS検索、日記を過去の記憶として扱う取得時ルール、write protocol。
 - `ThoughtCore/ExternalBrain.swift` — Review状態遷移、provenance、KnowledgeDocument、安全な正式path、Draft／Knowledge repositoryとlifecycle event境界。
 - `ThoughtCore/ExternalBrain.swift` — Knowledge status、Quality Candidate、正規化重複／類似／stale analyzer、Merge provenance、usage tracking境界。
 
@@ -65,7 +66,7 @@ Search: `ThoughtRepository|ThoughtRelationRepository|createContinuation|SQLiteTh
 
 ## Tests
 
-- `ThoughtCoreTests/ThoughtTimelineTests.swift` — 投稿境界、Unicode、SQL順序、削除、本文検索、タグ・v4 migration、再読込、Export、Review期間・順序・件数。
+- `ThoughtCoreTests/ThoughtTimelineTests.swift` — 投稿境界、Unicode、SQL順序、50件単位のページングと同一日時cursor、削除、本文検索、タグ・v4 migration、再読込、Export、Review期間・順序・件数。
 - `ThoughtCoreTests/ExternalBrainTests.swift` — AGENT parser、path traversal、front matter、heading chunk、draft除外、SHA差分同期／削除／offline cache、Persona route、最大件数、0件、prompt境界。
 - `ThoughtCoreTests/ExternalBrainTests.swift` — Knowledge Draft全type／source、front matter、安全なslug・path、生成prompt、最大3件のローカルFTS関連検索、生成後のRetrieval除外。
 - `AiTextApp/App/ExternalBrainManager.swift` — 共有GitHub repository設定、Keychain PAT、既存Contents API client、read-only接続確認、capability／接続エラー分類。

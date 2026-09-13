@@ -76,6 +76,51 @@ struct ThoughtTimelineTests {
         #expect(timeline.thoughts.map(\.body) == ["newest", "first"])
     }
 
+    @Test func timelineLoadsFiftyThoughtPagesOnDemand() throws {
+        let records = (0..<105).map { index in
+            Thought(body: "thought-\(index)", createdAt: Date(timeIntervalSince1970: TimeInterval(index)))
+        }
+        let repository = MemoryThoughtRepository(records: records)
+        var timeline = try ThoughtTimeline(repository: repository)
+
+        #expect(timeline.thoughts.count == 50)
+        #expect(timeline.thoughts.first?.body == "thought-104")
+        #expect(timeline.hasMore)
+
+        let secondPage = try timeline.loadMore()
+        #expect(secondPage.count == 50)
+        #expect(timeline.thoughts.count == 100)
+        #expect(timeline.hasMore)
+
+        let finalPage = try timeline.loadMore()
+        #expect(finalPage.count == 5)
+        #expect(timeline.thoughts.last?.body == "thought-0")
+        #expect(!timeline.hasMore)
+        #expect(try timeline.loadMore().isEmpty)
+    }
+
+    @Test func sqliteTimelinePageUsesStableDateAndIDCursor() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let repository = try fixture.repository()
+        let date = Date(timeIntervalSince1970: 200)
+        let ids = [
+            UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+        ]
+        for (index, id) in ids.enumerated() {
+            try repository.create(Thought(id: id, body: "same-date-\(index)", createdAt: date))
+        }
+        try repository.create(Thought(body: "older", createdAt: Date(timeIntervalSince1970: 100)))
+
+        let firstPage = try repository.fetchTimelinePage(limit: 2, before: nil)
+        let secondPage = try repository.fetchTimelinePage(limit: 2, before: firstPage.last)
+
+        #expect(firstPage.map(\.id) == [ids[2], ids[1]])
+        #expect(secondPage.map(\.body) == ["same-date-0", "older"])
+    }
+
     @Test func sqliteCreatesReadsAndUsesStableQueryOrder() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
