@@ -21,11 +21,13 @@ public protocol ThoughtRepository: Sendable {
 }
 
 /// A small repository useful for previews and domain tests. SQLite is the app's durable store.
-public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, @unchecked Sendable {
+public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, WeeklyReviewRepository, PersonaRepository, @unchecked Sendable {
     private var records: [Thought]
     private var relations: [ThoughtRelation]
     private var summaries: [ReviewSummary]
     private var dailySummaries: [DailySummary]
+    private var weeklySummaries: [WeeklySummary] = []
+    private var weeklyPlans: [WeeklyPlan] = []
     private var tags: [ThoughtTag]
     private var thoughtTagIDs: [UUID: Set<UUID>]
     private var defaultPersona = Persona(id: Persona.defaultHumanID, displayName: "自分", handle: "myself", kind: .human)
@@ -389,6 +391,12 @@ public final class MemoryThoughtRepository: ThoughtRepository, AuthoredThoughtRe
     public func fetchDailySummaries(from start: Date, to end: Date) throws -> [DailySummary] {
         lock.withLock { dailySummaries.filter { $0.dayStart >= start && $0.dayStart < end }.sorted { $0.createdAt > $1.createdAt } }
     }
+
+    public func saveWeeklySummary(_ summary: WeeklySummary) throws { lock.withLock { weeklySummaries.removeAll { $0.weekStart == summary.weekStart }; weeklySummaries.append(summary) } }
+    public func fetchWeeklySummary(weekStart: Date) throws -> WeeklySummary? { lock.withLock { weeklySummaries.first { $0.weekStart == weekStart } } }
+    public func fetchWeeklySummaries() throws -> [WeeklySummary] { lock.withLock { weeklySummaries.sorted { $0.weekStart > $1.weekStart } } }
+    public func saveWeeklyPlan(_ plan: WeeklyPlan) throws { lock.withLock { weeklyPlans.removeAll { $0.targetWeekStart == plan.targetWeekStart }; weeklyPlans.append(plan) } }
+    public func fetchWeeklyPlan(targetWeekStart: Date) throws -> WeeklyPlan? { lock.withLock { weeklyPlans.first { $0.targetWeekStart == targetWeekStart } } }
 
     public func create(_ relation: ThoughtRelation) throws {
         try lock.withLock {

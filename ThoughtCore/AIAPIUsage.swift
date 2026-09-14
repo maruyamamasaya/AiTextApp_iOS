@@ -4,6 +4,8 @@ public enum AIAPIFeature: String, CaseIterable, Codable, Sendable {
     case personaPost
     case thoughtReply
     case dailySummary
+    case weeklySummary
+    case weeklyPlan
     case knowledgeDraft
 
     public var displayName: String {
@@ -11,6 +13,8 @@ public enum AIAPIFeature: String, CaseIterable, Codable, Sendable {
         case .personaPost: "AIペルソナの投稿"
         case .thoughtReply: "AIからの返信"
         case .dailySummary: "デイリーサマリー"
+        case .weeklySummary: "週間サマリー"
+        case .weeklyPlan: "次週プラン"
         case .knowledgeDraft: "ナレッジ下書き"
         }
     }
@@ -201,7 +205,7 @@ public struct AIAPIUsageRecorder: Sendable {
         } catch {
             let finished = now(); let status: AIAPICallStatus = error is CancellationError ? .cancelled : .failed
             let fallbackProvider = request.provider == .gemini ? provider : request.provider.rawValue
-            let fallbackModel = request.provider == .gemini ? model : request.provider.defaultModel
+            let fallbackModel = request.model ?? (request.provider == .gemini ? model : request.provider.defaultModel)
             save(.init(startedAt: started, finishedAt: finished, feature: context.feature, personaID: context.personaID, provider: responseMetadata?.0 ?? fallbackProvider, model: responseMetadata?.1 ?? fallbackModel, status: status, inputCharacters: request.prompt.count, outputCharacters: responseMetadata?.2 ?? 0, latencyMilliseconds: milliseconds(started, finished), externalBrainUsed: context.externalBrainUsed, retrievedChunkCount: context.retrievedChunkCount, errorCategory: status == .failed ? .classify(error) : nil, sourceType: context.sourceType))
             throw error
         }

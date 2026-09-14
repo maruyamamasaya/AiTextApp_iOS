@@ -8,6 +8,7 @@
 - `AiTextApp/App/AppTheme.swift` — Primitive／Semantic／Theme／Effect token、4テーマ、UserDefaults永続化、Reduce Motion対応background、共通Surface、テーマ選択Preview。
 - `AiTextApp/App/ThoughtAnalyticsView.swift` — ローカル分析のサマリーと日別／曜日／時間帯／タグ／Continuation表示。
 - `AiTextApp/App/DailySummaryView.swift` — 生成済みサマリーの閲覧専用一覧／詳細、日本語表記の月カレンダー、日別件数／継続件数、構造化Summary、Human限定の送信前プレビュー、要約済み過去日の安全な再生成、その日のjournal Draft生成。独立した日本語表記の日記カレンダーと日別詳細では、同期済みGitHub日記のMarkdownを見出し・箇条書き・引用として読みやすく表示する。
+- `AiTextApp/App/WeeklyReviewView.swift` — 過去12完了週の一覧、週間サマリーの送信前確認／生成／再生成、保存内容表示、次週プラン候補の編集・確定UI。
 - `AiTextApp/App/TimelineView.swift` — `MainTabView`（Home／Mentions／AI機能／Insights／Profile）、各タブの独立`NavigationStack`、Home／Mentions末尾の追加読込、Home上部の本文検索、右上の返信2件目以降を畳む切替・投稿Composer・投稿者フィルター、Mention／Reply一覧、AI機能ハブ、サマリー閲覧／生成を分けた分析ハブ、投稿一覧を持たない共通Actor Profile、Profile右上から開く一般Settings、Thought Detail、History、Continuation Composer、削除UI。
 - `AiTextApp/App/TimelineView.swift`内`AIProviderSettingsView`／各Provider設定View — GeminiのFirebase設定検出、OpenAIの端末限定Keychain API key管理、Claude未対応表示と、色・文言を併用した設定状態一覧。
 - `AiTextApp/App/TimelineView.swift`内`ProfileEditorView`／`PersonaIcon` — デフォルト人間の表示名、写真選択・縮小、丸型アイコン表示。
@@ -44,9 +45,10 @@ Search: `ThoughtDraft|post|delete|deletedAt`
 ## Persistence
 
 - `ThoughtCore/ThoughtRepository.swift` — CRUD・Timeline page・本文検索・通常の日付範囲query・Daily Summary専用`fetchHumanThoughts(from:to:)`境界、Review期間計算、テスト用メモリ実装。
-- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v19、作成日時＋UUIDのkeyset Timeline page、Persona／投稿者／AI設定・Provider・生成来歴／メンション／AI返信Relation、Knowledge Review／Quality／usage、実カラム照合migration、各種query、旧JSON migration／2世代backup。
+- `ThoughtCore/SQLiteThoughtRepository.swift` — SQLite schema v20、作成日時＋UUIDのkeyset Timeline page、Persona／投稿者／AI設定・Provider・生成来歴／メンション／AI返信Relation、Daily／Weekly SummaryとWeekly Plan、Knowledge Review／Quality／usage、実カラム照合migration、各種query、旧JSON migration／2世代backup。
 - `ThoughtCore/ReviewSummary.swift` — AI要約model、immutable送信preview、通信／transport／保存protocol、中央provider／model設定、用途別`AIGenerationProfile`、typed service error、対象準備／鮮度検証／生成・保存use case、Mock client。
 - `ThoughtCore/DailySummary.swift` — Human限定のv3 prompt、確定Humanタグ・時間帯・Human Relation、stale対応preview、準備／生成use case。既存v1／v2 modelの互換decodeは維持し、新規生成ではAI本文・`aiInteractions`を扱わない。
+- `ThoughtCore/WeeklyReview.swift` — 月曜〜日曜の週境界、Human限定週間Summary、次週Plan、用途別prompt／preview／生成use case、確定前Planを保存しないrepository境界。
 - `ThoughtCore/ReviewSummaryExporter.swift` — 旧期間要約の互換コード。現在のUIからは利用せず、既存データを壊さないため保持する。
 - `ThoughtCore/ThoughtExporter.swift` — Repository経由のMarkdown／JSON生成。
 - `ThoughtCore/ExternalBackup.swift` — manifest、外部2世代backup、検証、pending Restore／rollback。

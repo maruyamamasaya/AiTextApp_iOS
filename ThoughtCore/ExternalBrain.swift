@@ -370,13 +370,29 @@ public struct ExternalBrainJournalEntry: Identifiable, Equatable, Sendable {
     }
 }
 
+public enum ExternalBrainJournalDisplay {
+    /// A promoted journal is a byte-for-byte copy of its draft body with only
+    /// front-matter status/path changed. Keep unrelated drafts visible, but do
+    /// not show that retained source draft beside the active journal.
+    public static func preferringActive(_ entries: [ExternalBrainJournalEntry]) -> [ExternalBrainJournalEntry] {
+        let active = Set(entries.filter { $0.status.lowercased() == "active" }.map { signature($0) })
+        return entries.filter { entry in
+            entry.status.lowercased() != "draft" || !active.contains(signature(entry))
+        }
+    }
+
+    private static func signature(_ entry: ExternalBrainJournalEntry) -> String {
+        [entry.date, entry.title.trimmingCharacters(in: .whitespacesAndNewlines), entry.body.trimmingCharacters(in: .whitespacesAndNewlines)].joined(separator: "\u{1F}")
+    }
+}
+
 public final class ExternalBrainCache: @unchecked Sendable {
     public let rootURL: URL; private let filesURL, manifestURL: URL; public let index: ExternalBrainIndex
     public init(rootURL: URL) throws { self.rootURL = rootURL; filesURL = rootURL.appendingPathComponent("files", isDirectory: true); manifestURL = rootURL.appendingPathComponent("manifest.json"); try FileManager.default.createDirectory(at: filesURL, withIntermediateDirectories: true); index = try ExternalBrainIndex(url: rootURL.appendingPathComponent("index.sqlite3")) }
     public func manifest() -> ExternalBrainManifest { guard let data = try? Data(contentsOf: manifestURL), let value = try? JSONDecoder.externalBrain.decode(ExternalBrainManifest.self, from: data) else { return ExternalBrainManifest() }; return value }
     public func markdown(at path: String) throws -> String { guard ExternalBrainPath.isSafe(path) else { throw ExternalBrainError.unsafePath(path) }; let data = try Data(contentsOf: localURL(path)); guard let value = String(data: data, encoding: .utf8) else { throw ExternalBrainError.invalidMarkdown }; return value }
     public func journalEntries() -> [ExternalBrainJournalEntry] {
-        manifest().files.keys.sorted().compactMap { path in
+        let entries = manifest().files.keys.sorted().compactMap { path in
             guard let markdown = try? self.markdown(at: path) else { return nil }
             let parsed = MarkdownFrontMatterParser.parse(markdown)
             guard parsed.metadata.type?.lowercased() == KnowledgeDraftType.journal.rawValue,
@@ -389,6 +405,7 @@ public final class ExternalBrainCache: @unchecked Sendable {
                 status: parsed.metadata.status ?? "未指定"
             )
         }
+        return ExternalBrainJournalDisplay.preferringActive(entries)
     }
     public func journalEntries(date: String) -> [ExternalBrainJournalEntry] {
         journalEntries().filter { $0.date == date }

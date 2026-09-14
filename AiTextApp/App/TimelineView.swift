@@ -592,6 +592,14 @@ private struct AIFeaturesView: View {
                         Text("OpenAI · \(ReviewSummaryAIConfiguration.openAIModelName) · medium")
                             .foregroundStyle(.secondary)
                     }
+                    LabeledContent("週間サマリー") {
+                        Text("OpenAI · \(ReviewSummaryAIConfiguration.weeklyReviewModelName) · medium")
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("次週プラン") {
+                        Text("OpenAI · \(ReviewSummaryAIConfiguration.weeklyReviewModelName) · low")
+                            .foregroundStyle(.secondary)
+                    }
                     Picker("Knowledge DraftのAI Provider", selection: $store.knowledgeDraftAIProvider) {
                         ForEach(AIProvider.allCases) { provider in
                             Text(provider.displayName).tag(provider)
@@ -985,6 +993,12 @@ private struct InsightsView: View {
                     .accessibilityIdentifier("insightsJournalButton")
                 }
                 Section("作成") {
+                    NavigationLink {
+                        WeeklyReviewListView(store: store)
+                    } label: {
+                        Label("週間振り返り", systemImage: "calendar.badge.clock")
+                    }
+                    .accessibilityIdentifier("insightsWeeklyReviewButton")
                     NavigationLink {
                         DailySummaryCalendarView(store: store)
                     } label: {

@@ -12,6 +12,8 @@ swift test
 
 入力境界、SQLite、Persona、AI Reply／Context、タグ、ローカル分析、backup、Export、Historyに加え、Timelineの初回50件・50件単位追加読込・同一日時UUID cursor、Actor handleの正規化・一意性・ID維持、Human／AI Mention snapshotと範囲、Conversation Treeの両Relation統合・branch・currentPath・最新leaf、同一対象への複数AI各1返信、Daily Summary v2のHuman／AI分類、Humanタグ限定、AIタグ候補のHuman index解決／不正index除外／生成時非保存／明示追加、複数AI、Relation、共通時間帯とtimezone境界、空Insight、v1 decode／v2 round-trip、SQLite再読込、stale previewを検証します。
 
+週間振り返りは月曜〜日曜の完了週境界、Human Thought限定、Terraの`weeklySummary`／medium／8,192 token、同週Summary置換、次週Plan候補の生成時非保存／明示確定、schema v20のSQLite round-tripを`WeeklyReviewTests.swift`で検証します。
+
 Persona External Brain／External Brain Routing v1はAGENT.md解析、`{current_project}`展開、unsafe path拒否、Markdown front matter／heading chunk／draft除外、SHA差分同期・削除・offline cache、日本語自然文queryのtrigram検索、長いchunkの一致箇所周辺2,000文字excerpt、FTS route／metadata優先、最大件数、0件、AI Reply／Persona Post promptの参考資料境界とUsage metadataを`ExternalBrainTests.swift`で検証します。
 
 Knowledge Draft Pipelineは5種のtype、6種のsource、front matter、safe slugと`drafts/`path境界、同日同名Draftの一意path、SQLite再読込後のpath維持とDraft単位削除、source外の事実を追加しないprompt、Human／AI区別、journal固有フォーマットと過去の記憶として扱う取得時ルール、ローカルFTS最大3件、0件、AI生成、`status: draft`のRetrieval除外を`ExternalBrainTests.swift`で検証します。GitHub Contents write／deleteのtoken未設定、権限、offline、同名conflict、new-file-only、保存・削除失敗時Draft保持はMac上のURLProtocol／実Repository検証対象です。
@@ -55,6 +57,8 @@ xcodebuild -project AiTextApp.xcodeproj -scheme AiTextApp \
 Daily SummaryはThoughtがある日／ない日、要約済み状態、過去月移動、送信前payload、構造化各Section、再起動後の復元を確認します。要約済みの日は再生成ボタンから同じPreviewへ進み、失敗時は旧Summaryを保持し、成功時だけ同日の1件を置き換えることを確認します。実通信ではJSON応答が保存され、タグ／Thought／Continuationが変更されないことを確認します。
 
 日記はDaily Summaryの日別画面で、要約の有無にかかわらずHuman Thoughtがある日に「日記を作る」が有効になり、選択日付のjournal Draftプレビューが開くことを確認します。閲覧は振り返りの独立した日記カレンダーを開き、日記のある日だけ識別表示されること、GitHub同期済みの同日journal本文・状態・pathだけが日別詳細に表示されること、カレンダーから同期できることを確認します。デイリーサマリー／日記カレンダーの月・曜日・日付が日本語であること、日記Markdownの見出し・箇条書き・引用・強調が本文を変更せず読みやすく描画されることをSimulatorで目視確認します。
+
+Promote元の`status: draft`と、日付・title・本文が一致する`status: active`が同期cacheに共存する場合、日記閲覧にはactiveだけを返すことをUnit Testで確認します。内容が異なる未正式化Draftは除外しません。
 
 XcodeでFirebase package resolveとapp targetのcompileを行った後、Debug Providerを登録したSimulator、App Attestを登録した実機の順で明示送信を確認します。成功時のSQLite provider／model、未設定plist、未登録Debug token、App Check拒否、offline、429／quota、その他API、空応答を確認します。Console設定や実APIを必要とする検証は通常のUnit Testへ組み込みません。
 

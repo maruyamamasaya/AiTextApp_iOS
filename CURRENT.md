@@ -1,6 +1,6 @@
 # Current Project Status
 
-最終照合日: 2026-09-12
+最終照合日: 2026-09-14
 
 ## Project
 
@@ -10,7 +10,15 @@
 
 Phase 3-D（ローカル分析 v1）までコード実装済みです。2026-09-09にMac/Xcode 26.6でSwift Testing全60件、Firebase 12.18.0を含むDebug／Release Simulator build、Personal TeamのDebug実機向け署名buildを確認しました。XCUITest targetはcompile済みですが、Simulator serviceが起動時に停止するホスト環境障害のため実行確認は未完了です。
 
+### テスト待ち（2026-09-14追加分）
+
+- 週間振り返りv1と日記のDraft／active二重表示修正はWindowsで実装済みだが、Swift toolchainがないため未テスト。`MAC_VALIDATION.md`の「2026-09-14追加分」をMacで完了するまで「テスト済み」と扱わない。
+
 ## 実装済み
+
+- 日記カレンダーはPromote後もGitHubに保持される元Draftと正式版を二重表示せず、日付・title・本文が一致する`active`日記を優先する。別内容の未正式化Draftは引き続き表示し、GitHub上のファイルやKnowledge Review履歴は変更しない。
+
+- 週間振り返りv1。完了した月曜〜日曜のHuman Thoughtだけを対象に、`gpt-5.6-terra`／medium／最大8,192 tokenで週間サマリーを明示生成する。過去の理解と次週の意思決定を分離し、次週プランはTerra／low／最大4,096 tokenで候補を作り、ユーザーが編集・確定した場合だけ保存する。schema v20の独立tableへ週単位で保存し、サマリー再生成成功時だけ同週を置換し、確定済みPlanは自動変更しない。振り返りの週間入口とサマリー閲覧一覧へ接続済み。
 
 - デイリーサマリーなどから作るGitHub下書きの保存名に永続UUIDを追加。同日・同タイトルでも別下書きは衝突せず、保存済みの旧pathは維持する。既存ファイルの上書き禁止は継続する。未昇格Draftは詳細画面の確認付き削除から消せる。GitHub保存済みの場合はGitHub上のファイル削除に成功してからローカル記録も削除し、失敗時はローカル記録を保持する。
 - Daily Summaryの日別画面に「日記を作る」を追加し、その日のHuman Thoughtから日付を維持したjournal Draftを直接生成する。日記の閲覧はDaily Summaryから分離し、振り返りの独立した日記カレンダーで行う。GitHub同期済みの`type: journal`を`created`日付でカレンダーへ表示し、日別詳細で本文・状態・pathを読める。GitHub同期も日記カレンダーから実行できる。

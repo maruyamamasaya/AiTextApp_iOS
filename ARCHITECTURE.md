@@ -45,7 +45,8 @@ SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
 - `TimelineView`: Home専用。右上の鉛筆から開く投稿Composer、投稿者フィルター、Lazy Timeline、Detail、相対日時、操作メニュー、削除確認、Empty State、エラー表示。検索・振り返り・設定の重複Toolbar導線は持たない。
 - `MentionsView`: 保存済みMention relationと`repliesTo` relationから、Human／AI Persona宛ての受信項目を新しい順で表示する。
 - `SearchTabView`: 現在はThought本文検索を提供し、将来Persona／Tag／Knowledge検索を追加できる独立タブ境界。
-- `InsightsView`: Daily Summary CalendarとThought Analyticsをまとめ、週次・月次分析を追加できる分析ハブ。
+- `InsightsView`: Daily Summary Calendar、週間振り返り、Thought Analyticsをまとめ、将来の月次分析も追加できる分析ハブ。
+- `WeeklyReviewListView`／`WeeklyReviewDetailView`: 完了した暦週（月曜〜日曜）を選び、Human Thought限定の週間サマリーを送信前確認後に生成する。次週プランは保存済みSummaryを入力に別AI callで候補生成し、編集・明示確定まで永続化しない。
 - `ActorProfileView`: Human／AI共通のプロフィール表示。自分のProfileタブでは編集とSettingsへのToolbar導線を追加する。AIではPersona別External Brain設定、Repository、Keychain token、同期済みAGENT cacheをローカル評価し、明示GET確認が成功した場合だけ接続済みの緑ライトを表示する。
 - `ThoughtAnalyticsView`: 直近30日の基本サマリー、日別／曜日別／時間帯別分布、上位タグ、Continuation件数を標準SwiftUIの縦Sectionと簡易バーで表示する完全ローカル画面。
 - `AIAPIUsageAnalyticsView`: 今日／7日／30日／全期間のAI Call、成功率、文字数または完全な実測token、Feature／Persona／Provider・Model／Error、Latency、External Brain、日別推移をSQLiteだけで表示する。
@@ -78,7 +79,7 @@ SwiftUI App -> MainTabView -> Home / Mentions / Search / Insights / Profile
 - `ThoughtRelationRepository`: Relation作成、source／target方向の1ステップ取得境界。
 - `ThoughtContinuationRepository`: 新規Thoughtと`continues` Relationを同一transactionで作成する境界。
 - `LoadConversationThread`: 現在Thoughtから両Relationを遡ってrootを求め、全node／edge、選択地点までのcurrent path、leaf、最新leafを再構築する。`ThoughtHistory`は旧Continuation表示との互換用に保持する。
-- `SQLiteThoughtRepository`: schema v19、Thought／Persona／Mention／Tag／Relation／AI生成情報／Persona別Auto Reply・Provider／Daily Summary／AI Usage metadata、Knowledge Review／Quality／usage metadataとDraft FTS query、旧JSON importと2世代backupを所有する正本実装。version値だけでなく実table／column／Relation制約を照合し、安全に補修可能な不足列、旧Relation制約、旧`account_id`単独UNIQUE制約は非破壊で補修する。旧PersonaはGeminiへ移行する。旧期間要約tableは既存データ互換のため維持する。
+- `SQLiteThoughtRepository`: schema v20、Thought／Persona／Mention／Tag／Relation／AI生成情報／Persona別Auto Reply・Provider／Daily Summary／Weekly Summary／Weekly Plan／AI Usage metadata、Knowledge Review／Quality／usage metadataとDraft FTS query、旧JSON importと2世代backupを所有する正本実装。version値だけでなく実table／column／Relation制約を照合し、安全に補修可能な不足列、旧Relation制約、旧`account_id`単独UNIQUE制約は非破壊で補修する。旧PersonaはGeminiへ移行する。旧期間要約tableは既存データ互換のため維持する。
 - `ThoughtExporter`: Repositoryから未削除Thoughtを取得し、Markdown／JSONを生成。
 - `ShareSheet`: ExportファイルをiOS標準共有UIへ渡すUIKit bridge。
 - `ExternalBackupManager`: Filesフォルダpicker、security-scoped bookmark、バックアップ状態と確認UIのpresentation境界。
@@ -106,6 +107,8 @@ Daily SummaryはHumanの概要・テーマ・思考、既存Humanタグ別、任
 ## Persistence
 
 `Application Support/ExternalBrain/files`、`manifest.json`、`index.sqlite3`はGitHub Markdownを正本とする削除・再生成可能な派生データです。Thought DBと外部完全backupには含めません。
+
+日記閲覧は同期済み`type: journal`を対象とし、日付・title・本文が一致する`active`と`draft`が共存する場合はPromote後の`active`だけを表示する。別内容のDraftは正式化前の日記として表示を維持し、表示上の重複排除ではGitHubファイルを削除しない。
 
 Knowledge Draftは生成成功時にReview用SQLiteへ永続化し、編集可能Previewでも保持します。Humanが明示的に保存した場合だけGitHubの`drafts/`へ新規作成し、既存fileの更新・削除は行いません。`status: draft`により同期後も通常Retrieval indexから除外されます。正式KnowledgeへのPromote、Archive、Supersedeもそれぞれ独立した明示操作です。
 

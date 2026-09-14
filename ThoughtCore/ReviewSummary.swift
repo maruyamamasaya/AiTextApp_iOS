@@ -47,17 +47,20 @@ public struct ReviewSummaryRequest: Equatable, Sendable {
     public let usageContext: AIAPIUsageContext?
     public let provider: AIProvider
     public let generationProfile: AIGenerationProfile
+    public let model: String?
 
     public init(
         prompt: String,
         usageContext: AIAPIUsageContext? = nil,
         provider: AIProvider = .gemini,
-        generationProfile: AIGenerationProfile = .reviewSummary
+        generationProfile: AIGenerationProfile = .reviewSummary,
+        model: String? = nil
     ) {
         self.prompt = prompt
         self.usageContext = usageContext
         self.provider = provider
         self.generationProfile = generationProfile
+        self.model = model
     }
 }
 
@@ -131,11 +134,13 @@ public enum AIGenerationProfile: String, Equatable, Sendable {
     case dailySummary
     case knowledgeDraft
     case reviewSummary
+    case weeklySummary
+    case weeklyPlan
 
     public var reasoningEffort: AIReasoningEffort {
         switch self {
-        case .concisePersona: .low
-        case .dailySummary, .knowledgeDraft, .reviewSummary: .medium
+        case .concisePersona, .weeklyPlan: .low
+        case .dailySummary, .knowledgeDraft, .reviewSummary, .weeklySummary: .medium
         }
     }
 
@@ -145,6 +150,8 @@ public enum AIGenerationProfile: String, Equatable, Sendable {
         case .reviewSummary: 2_048
         case .knowledgeDraft: 4_096
         case .dailySummary: 8_192
+        case .weeklySummary: 8_192
+        case .weeklyPlan: 4_096
         }
     }
 }
@@ -154,6 +161,7 @@ public enum ReviewSummaryAIConfiguration {
     public static let modelName = geminiModelName
     public static let geminiModelName = "gemini-3.7-flash"
     public static let openAIModelName = "gpt-5.6-luna"
+    public static let weeklyReviewModelName = "gpt-5.6-terra"
 }
 
 public enum ReviewSummaryServiceError: Error, LocalizedError, Equatable, Sendable {

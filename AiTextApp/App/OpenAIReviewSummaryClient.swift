@@ -108,7 +108,7 @@ struct OpenAIDirectReviewSummaryClient: ReviewSummaryClient {
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.httpBody = try JSONEncoder().encode(RequestBody(
-            model: modelName,
+            model: request.model ?? modelName,
             input: request.prompt,
             store: false,
             reasoning: .init(effort: request.generationProfile.reasoningEffort.rawValue),
@@ -153,7 +153,7 @@ struct OpenAIDirectReviewSummaryClient: ReviewSummaryClient {
         return ReviewSummaryResponse(
             text: text,
             provider: AIProvider.openAI.rawValue,
-            model: payload.model ?? modelName,
+            model: payload.model ?? request.model ?? modelName,
             tokenUsage: tokenUsage
         )
     }

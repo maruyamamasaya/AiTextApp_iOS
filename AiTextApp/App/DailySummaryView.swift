@@ -80,7 +80,7 @@ struct SummaryLibraryView: View {
 
     var body: some View {
         Group {
-            if store.dailySummaries.isEmpty {
+            if store.dailySummaries.isEmpty && store.weeklySummaries.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.largeTitle)
@@ -96,30 +96,33 @@ struct SummaryLibraryView: View {
                 .multilineTextAlignment(.center)
                 .accessibilityElement(children: .combine)
             } else {
-                List(store.dailySummaries) { summary in
-                    NavigationLink {
-                        SummaryReadOnlyDetailView(store: store, summary: summary)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack {
-                                Label("デイリー", systemImage: "calendar")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.tint)
-                                Spacer()
-                                Text("\(summary.thoughtCount)件")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                List {
+                    if !store.weeklySummaries.isEmpty {
+                        Section("週間") {
+                            ForEach(store.weeklySummaries) { summary in
+                                NavigationLink { WeeklySummaryReadOnlyView(summary: summary) } label: {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        HStack { Label("週間", systemImage: "calendar.badge.clock").font(.caption.weight(.semibold)).foregroundStyle(.tint); Spacer(); Text("\(summary.thoughtCount)件").font(.caption).foregroundStyle(.secondary) }
+                                        Text(summary.weekStart.formatted(.dateTime.locale(Locale(identifier: "ja_JP")).year().month().day()) + "〜" + summary.weekEnd.addingTimeInterval(-1).formatted(.dateTime.locale(Locale(identifier: "ja_JP")).month().day())).font(.headline)
+                                        Text(summary.content.overview).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                                    }.padding(.vertical, 4)
+                                }
                             }
-                            Text(JapaneseCalendarFormatting.longDay(summary.dayStart))
-                                .font(.headline)
-                            Text(summary.content.overview)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
                         }
-                        .padding(.vertical, 4)
                     }
-                    .accessibilityIdentifier("summaryLibraryItem_\(summary.id.uuidString)")
+                    if !store.dailySummaries.isEmpty {
+                        Section("デイリー") {
+                            ForEach(store.dailySummaries) { summary in
+                                NavigationLink { SummaryReadOnlyDetailView(store: store, summary: summary) } label: {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        HStack { Label("デイリー", systemImage: "calendar").font(.caption.weight(.semibold)).foregroundStyle(.tint); Spacer(); Text("\(summary.thoughtCount)件").font(.caption).foregroundStyle(.secondary) }
+                                        Text(JapaneseCalendarFormatting.longDay(summary.dayStart)).font(.headline)
+                                        Text(summary.content.overview).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                                    }.padding(.vertical, 4)
+                                }.accessibilityIdentifier("summaryLibraryItem_\(summary.id.uuidString)")
+                            }
+                        }
+                    }
                 }
                 .themedScrollableBackground()
             }

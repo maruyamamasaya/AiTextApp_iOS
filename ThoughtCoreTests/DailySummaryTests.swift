@@ -117,7 +117,7 @@ struct DailySummaryTests {
         let reopenedPreview = try PrepareDailySummary(thoughts: reopened, tags: reopened, relations: reopened, authors: reopened)(day: start, calendar: calendar)
         #expect(reopenedPreview.thoughts == [thought])
         #expect(!reopenedPreview.request.prompt.contains(aiThought.body))
-        #expect(SQLiteThoughtRepository.schemaVersion == 19)
+        #expect(SQLiteThoughtRepository.schemaVersion == 20)
     }
 
     @Test func v1ContentDecodesWithV2FieldsDefaulted() throws {

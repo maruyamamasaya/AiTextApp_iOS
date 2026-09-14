@@ -39,8 +39,8 @@ public enum AIPersonaPersistenceError: Error, LocalizedError, Equatable {
     }
 }
 
-public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, PersonaRepository, AIAPIUsageRepository, AIAPIUsageAnalyticsRepository, KnowledgeDraftRepository, KnowledgeLifecycleEventRepository, @unchecked Sendable {
-    public static let schemaVersion: Int32 = 19
+public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRepository, ThoughtMentionRepository, AIPersonaRepository, AIThoughtReplyRepository, HumanThoughtReplyRepository, ThoughtRelationRepository, ThoughtContinuationRepository, ThoughtTagRepository, ThoughtAnalyticsRepository, ReviewSummaryRepository, DailySummaryRepository, WeeklyReviewRepository, PersonaRepository, AIAPIUsageRepository, AIAPIUsageAnalyticsRepository, KnowledgeDraftRepository, KnowledgeLifecycleEventRepository, @unchecked Sendable {
+    public static let schemaVersion: Int32 = 20
     private static let localAccountID = "owner"
 
     private let databaseURL: URL
@@ -865,6 +865,61 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
         }
     }
 
+    public func saveWeeklySummary(_ summary: WeeklySummary) throws {
+        try lock.withLock {
+            let json = try encodedJSON(summary.content)
+            let statement = try prepare("""
+                INSERT INTO weekly_summaries(id, week_start, week_end, content_json, created_at, provider, model, prompt_version, thought_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(week_start) DO UPDATE SET id=excluded.id, week_end=excluded.week_end, content_json=excluded.content_json, created_at=excluded.created_at, provider=excluded.provider, model=excluded.model, prompt_version=excluded.prompt_version, thought_count=excluded.thought_count
+                """)
+            defer { sqlite3_finalize(statement) }
+            try bind(summary.id.uuidString, to: 1, in: statement); try bind(summary.weekStart.timeIntervalSince1970, to: 2, in: statement); try bind(summary.weekEnd.timeIntervalSince1970, to: 3, in: statement); try bind(json, to: 4, in: statement); try bind(summary.createdAt.timeIntervalSince1970, to: 5, in: statement); try bind(summary.provider, to: 6, in: statement); try bind(summary.model, to: 7, in: statement); try bind(Int32(summary.promptVersion), to: 8, in: statement); try bind(Int32(summary.thoughtCount), to: 9, in: statement)
+            try stepDone(statement); createRollingBackupIfPossible()
+        }
+    }
+
+    public func fetchWeeklySummary(weekStart: Date) throws -> WeeklySummary? {
+        try lock.withLock {
+            let statement = try prepare("SELECT id, week_start, week_end, content_json, created_at, provider, model, prompt_version, thought_count FROM weekly_summaries WHERE week_start = ? LIMIT 1")
+            defer { sqlite3_finalize(statement) }; try bind(weekStart.timeIntervalSince1970, to: 1, in: statement)
+            let result = sqlite3_step(statement); if result == SQLITE_DONE { return nil }; guard result == SQLITE_ROW else { throw lastError() }
+            return try decodeWeeklySummary(statement)
+        }
+    }
+
+    public func fetchWeeklySummaries() throws -> [WeeklySummary] {
+        try lock.withLock {
+            let statement = try prepare("SELECT id, week_start, week_end, content_json, created_at, provider, model, prompt_version, thought_count FROM weekly_summaries ORDER BY week_start DESC")
+            defer { sqlite3_finalize(statement) }; var values: [WeeklySummary] = []; var result = sqlite3_step(statement)
+            while result == SQLITE_ROW { values.append(try decodeWeeklySummary(statement)); result = sqlite3_step(statement) }
+            guard result == SQLITE_DONE else { throw lastError() }; return values
+        }
+    }
+
+    public func saveWeeklyPlan(_ plan: WeeklyPlan) throws {
+        try lock.withLock {
+            let json = try encodedJSON(plan.content)
+            let statement = try prepare("""
+                INSERT INTO weekly_plans(id, target_week_start, target_week_end, source_summary_id, content_json, created_at, updated_at, provider, model, prompt_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(target_week_start) DO UPDATE SET id=excluded.id, target_week_end=excluded.target_week_end, source_summary_id=excluded.source_summary_id, content_json=excluded.content_json, updated_at=excluded.updated_at, provider=excluded.provider, model=excluded.model, prompt_version=excluded.prompt_version
+                """)
+            defer { sqlite3_finalize(statement) }
+            try bind(plan.id.uuidString, to: 1, in: statement); try bind(plan.targetWeekStart.timeIntervalSince1970, to: 2, in: statement); try bind(plan.targetWeekEnd.timeIntervalSince1970, to: 3, in: statement); try bind(plan.sourceSummaryID.uuidString, to: 4, in: statement); try bind(json, to: 5, in: statement); try bind(plan.createdAt.timeIntervalSince1970, to: 6, in: statement); try bind(plan.updatedAt.timeIntervalSince1970, to: 7, in: statement); try bind(plan.provider, to: 8, in: statement); try bind(plan.model, to: 9, in: statement); try bind(Int32(plan.promptVersion), to: 10, in: statement)
+            try stepDone(statement); createRollingBackupIfPossible()
+        }
+    }
+
+    public func fetchWeeklyPlan(targetWeekStart: Date) throws -> WeeklyPlan? {
+        try lock.withLock {
+            let statement = try prepare("SELECT id, target_week_start, target_week_end, source_summary_id, content_json, created_at, updated_at, provider, model, prompt_version FROM weekly_plans WHERE target_week_start = ? LIMIT 1")
+            defer { sqlite3_finalize(statement) }; try bind(targetWeekStart.timeIntervalSince1970, to: 1, in: statement)
+            let result = sqlite3_step(statement); if result == SQLITE_DONE { return nil }; guard result == SQLITE_ROW else { throw lastError() }
+            return try decodeWeeklyPlan(statement)
+        }
+    }
+
     public func create(_ relation: ThoughtRelation) throws {
         try lock.withLock {
             try validate(relation)
@@ -1434,6 +1489,15 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
                 try execute("PRAGMA user_version = 19")
             }
         }
+        if version < 20 {
+            try transaction {
+                try execute("CREATE TABLE weekly_summaries(id TEXT PRIMARY KEY NOT NULL,week_start REAL NOT NULL UNIQUE,week_end REAL NOT NULL,content_json TEXT NOT NULL,created_at REAL NOT NULL,provider TEXT NOT NULL,model TEXT NOT NULL,prompt_version INTEGER NOT NULL,thought_count INTEGER NOT NULL CHECK (thought_count > 0),CHECK (week_start < week_end))")
+                try execute("CREATE INDEX weekly_summaries_start_idx ON weekly_summaries(week_start DESC)")
+                try execute("CREATE TABLE weekly_plans(id TEXT PRIMARY KEY NOT NULL,target_week_start REAL NOT NULL UNIQUE,target_week_end REAL NOT NULL,source_summary_id TEXT NOT NULL,content_json TEXT NOT NULL,created_at REAL NOT NULL,updated_at REAL NOT NULL,provider TEXT NOT NULL,model TEXT NOT NULL,prompt_version INTEGER NOT NULL,CHECK (target_week_start < target_week_end))")
+                try execute("CREATE INDEX weekly_plans_start_idx ON weekly_plans(target_week_start DESC)")
+                try execute("PRAGMA user_version = 20")
+            }
+        }
     }
 
     private func relationTableSupportsReplies() throws -> Bool {
@@ -1469,6 +1533,8 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
             "ai_persona_configurations": ["persona_id", "role", "instructions", "auto_reply_enabled", "provider", "updated_at"],
             "ai_post_generations": ["thought_id", "persona_id", "generation_kind", "reply_target_thought_id"],
             "daily_summaries": ["id", "day_start", "day_end", "content_json"],
+            "weekly_summaries": ["id", "week_start", "week_end", "content_json"],
+            "weekly_plans": ["id", "target_week_start", "target_week_end", "source_summary_id", "content_json"],
             "ai_api_usage": ["id", "feature", "status", "source_type"],
             "knowledge_drafts": ["id", "body", "review_status", "sync_status"],
             "knowledge_documents": ["id", "draft_id", "status", "retrieval_count"],
@@ -1989,6 +2055,22 @@ public final class SQLiteThoughtRepository: ThoughtRepository, AuthoredThoughtRe
               let data = String(cString: jsonText).data(using: .utf8) else { throw SQLiteThoughtRepositoryError.invalidRecord }
         let content = try JSONDecoder().decode(DailySummaryContent.self, from: data)
         return DailySummary(id: id, dayStart: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)), dayEnd: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)), content: content, createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)), provider: String(cString: providerText), model: String(cString: modelText), promptVersion: Int(sqlite3_column_int(statement, 7)), thoughtCount: Int(sqlite3_column_int(statement, 8)))
+    }
+
+    private func decodeWeeklySummary(_ statement: OpaquePointer) throws -> WeeklySummary {
+        guard let id = UUID(uuidString: text(statement, 0)), let data = text(statement, 3).data(using: .utf8) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+        return WeeklySummary(id: id, weekStart: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)), weekEnd: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)), content: try JSONDecoder().decode(WeeklySummaryContent.self, from: data), createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)), provider: text(statement, 5), model: text(statement, 6), promptVersion: Int(sqlite3_column_int(statement, 7)), thoughtCount: Int(sqlite3_column_int(statement, 8)))
+    }
+
+    private func decodeWeeklyPlan(_ statement: OpaquePointer) throws -> WeeklyPlan {
+        guard let id = UUID(uuidString: text(statement, 0)), let sourceID = UUID(uuidString: text(statement, 3)), let data = text(statement, 4).data(using: .utf8) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+        return WeeklyPlan(id: id, targetWeekStart: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)), targetWeekEnd: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)), sourceSummaryID: sourceID, content: try JSONDecoder().decode(WeeklyPlanContent.self, from: data), createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)), updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6)), provider: text(statement, 7), model: text(statement, 8), promptVersion: Int(sqlite3_column_int(statement, 9)))
+    }
+
+    private func encodedJSON<T: Encodable>(_ value: T) throws -> String {
+        let data = try JSONEncoder().encode(value)
+        guard let result = String(data: data, encoding: .utf8) else { throw SQLiteThoughtRepositoryError.invalidRecord }
+        return result
     }
 
     private func bind(_ value: Int32, to index: Int32, in statement: OpaquePointer) throws {

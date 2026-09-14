@@ -64,6 +64,13 @@ final class ThoughtStore: ObservableObject {
     @Published private(set) var dailySummaryDayThoughts: [Thought] = []
     @Published private(set) var dailySummaryDayTags: [String] = []
     @Published private(set) var dailySummaryDayContinuationCount = 0
+    @Published private(set) var weeklySummaries: [WeeklySummary] = []
+    @Published private(set) var weeklySummary: WeeklySummary?
+    @Published private(set) var weeklyPlan: WeeklyPlan?
+    @Published private(set) var weeklySummaryPreview: WeeklySummaryPreview?
+    @Published private(set) var weeklyPlanDraft: WeeklyPlanDraft?
+    @Published private(set) var isGeneratingWeeklyReview = false
+    @Published var weeklyReviewError: String?
     @Published private(set) var searchResults: [Thought] = []
     @Published private(set) var hasSearchQuery = false
     @Published private(set) var tagsByThoughtID: [UUID: [ThoughtTag]] = [:]
@@ -108,6 +115,7 @@ final class ThoughtStore: ObservableObject {
     private var knowledgeDraftRepository: (any KnowledgeDraftRepository)?
     private var knowledgeLifecycleRepository: (any KnowledgeLifecycleEventRepository)?
     private var dailySummaryRepository: (any DailySummaryRepository)?
+    private var weeklyReviewRepository: (any WeeklyReviewRepository)?
     private var personaRepository: (any PersonaRepository)?
     private var aiPersonaRepository: (any AIPersonaRepository)?
     private var mentionRepository: (any ThoughtMentionRepository)?
@@ -163,6 +171,7 @@ final class ThoughtStore: ObservableObject {
             knowledgeDraftRepository = repository as? any KnowledgeDraftRepository
             knowledgeLifecycleRepository = repository as? any KnowledgeLifecycleEventRepository
             dailySummaryRepository = repository as? any DailySummaryRepository
+            weeklyReviewRepository = repository as? any WeeklyReviewRepository
             personaRepository = repository as? any PersonaRepository
             aiPersonaRepository = repository as? any AIPersonaRepository
             mentionRepository = repository as? any ThoughtMentionRepository
@@ -174,6 +183,7 @@ final class ThoughtStore: ObservableObject {
             if let personaRepository { personas = try personaRepository.fetchPersonas(includeInactive: false) }
             if let aiPersonaRepository { aiConfigurations = try aiPersonaRepository.fetchAIConfigurations() }
             dailySummaries = try dailySummaryRepository?.fetchDailySummaries(from: .distantPast, to: .distantFuture) ?? []
+            weeklySummaries = try weeklyReviewRepository?.fetchWeeklySummaries() ?? []
             knowledgeDrafts = try knowledgeDraftRepository?.fetchKnowledgeDrafts() ?? []; knowledgeDocuments = try knowledgeDraftRepository?.fetchKnowledgeDocuments() ?? []
             if let sqliteRepository = repository as? SQLiteThoughtRepository {
                 backupManager = ExternalBackupManager(repository: sqliteRepository)
@@ -538,6 +548,55 @@ final class ThoughtStore: ObservableObject {
         } catch ReviewSummaryError.stalePreview { dailySummaryError = "確認後にThoughtが変更されたため送信しませんでした。" }
         catch let error as ReviewSummaryServiceError { dailySummaryError = error.localizedDescription }
         catch { dailySummaryError = "Daily Summaryを作成できませんでした。応答形式または通信状態を確認してください。" }
+    }
+
+    func loadWeeklyReview(interval: DateInterval) {
+        do {
+            weeklySummary = try weeklyReviewRepository?.fetchWeeklySummary(weekStart: interval.start)
+            weeklyPlan = try weeklySummary.flatMap { try weeklyReviewRepository?.fetchWeeklyPlan(targetWeekStart: $0.weekEnd) }
+            weeklyReviewError = nil
+        } catch { weeklySummary = nil; weeklyPlan = nil; weeklyReviewError = "週間振り返りを読み込めませんでした。" }
+    }
+
+    func prepareWeeklySummary(interval: DateInterval, calendar: Calendar = .current) {
+        guard let thoughtRepository else { weeklyReviewError = "要約対象を読み込めませんでした。"; return }
+        do {
+            weeklySummaryPreview = try PrepareWeeklySummary(repository: thoughtRepository)(interval: interval, calendar: calendar)
+            weeklyReviewError = nil
+        } catch ReviewSummaryError.noThoughts { weeklySummaryPreview = nil; weeklyReviewError = "Human Thoughtが0件の週は要約できません。" }
+        catch { weeklySummaryPreview = nil; weeklyReviewError = "週間要約の対象を準備できませんでした。" }
+    }
+
+    func generateWeeklySummary(from preview: WeeklySummaryPreview, calendar: Calendar = .current) async {
+        guard let thoughtRepository, let weeklyReviewRepository else { weeklyReviewError = "保存先を利用できません。"; return }
+        isGeneratingWeeklyReview = true; weeklyReviewError = nil
+        defer { isGeneratingWeeklyReview = false }
+        do {
+            let current = try PrepareWeeklySummary(repository: thoughtRepository)(interval: preview.interval, calendar: calendar)
+            guard current.thoughts == preview.thoughts else { throw ReviewSummaryError.stalePreview }
+            let value = try await GenerateWeeklySummary(client: summaryClient, repository: weeklyReviewRepository, usageRepository: aiUsageRepository)(preview: preview)
+            weeklySummary = value; weeklySummaryPreview = nil; weeklyPlanDraft = nil
+            weeklySummaries.removeAll { $0.weekStart == value.weekStart }; weeklySummaries.append(value); weeklySummaries.sort { $0.weekStart > $1.weekStart }
+        } catch ReviewSummaryError.stalePreview { weeklyReviewError = "確認後にThoughtが変更されたため送信しませんでした。" }
+        catch let error as ReviewSummaryServiceError { weeklyReviewError = error.localizedDescription }
+        catch { weeklyReviewError = "週間サマリーを作成できませんでした。応答形式または通信状態を確認してください。" }
+    }
+
+    func generateWeeklyPlanDraft(from summary: WeeklySummary) async {
+        isGeneratingWeeklyReview = true; weeklyReviewError = nil
+        defer { isGeneratingWeeklyReview = false }
+        do { weeklyPlanDraft = try await GenerateWeeklyPlanDraft(client: summaryClient, usageRepository: aiUsageRepository)(summary: summary) }
+        catch let error as ReviewSummaryServiceError { weeklyReviewError = error.localizedDescription }
+        catch { weeklyReviewError = "次週プランの候補を作成できませんでした。" }
+    }
+
+    func saveWeeklyPlan(draft: WeeklyPlanDraft, content: WeeklyPlanContent) {
+        guard let weeklyReviewRepository else { weeklyReviewError = "保存先を利用できません。"; return }
+        do {
+            let now = Date()
+            let value = WeeklyPlan(targetWeekStart: draft.targetInterval.start, targetWeekEnd: draft.targetInterval.end, sourceSummaryID: draft.sourceSummary.id, content: content, createdAt: weeklyPlan?.createdAt ?? now, updatedAt: now, provider: draft.provider, model: draft.model, promptVersion: WeeklyPlanPrompt.version)
+            try weeklyReviewRepository.saveWeeklyPlan(value); weeklyPlan = value; weeklyPlanDraft = nil; weeklyReviewError = nil
+        } catch { weeklyReviewError = "次週プランを保存できませんでした。" }
     }
 
     func loadAnalytics(containing date: Date = Date(), calendar: Calendar = .current) {

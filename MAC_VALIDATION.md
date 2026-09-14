@@ -10,6 +10,20 @@ Windowsで実装済みだが、macOS／Swift／Xcode環境で未検証の項目�
 - [ ] `GoogleService-Info.plist`、署名Team、Firebase Console設定、GitHub tokenをGitへ追加せずローカルに用意する
 - [ ] `git status --short`で検証開始前の差分を記録する
 
+## 2026-09-14追加分（週間振り返り／日記重複表示）
+
+状態: **テスト待ち**。以下をすべて完了し、実施環境・結果を記録した後にだけ`CURRENT.md`と作業記録を「テスト済み」へ更新する。
+
+- [ ] `swift test`で`WeeklyReviewTests`を含む全Unit Testが成功する
+- [ ] schema v19からv20へmigrationし、`weekly_summaries`／`weekly_plans`の保存・再読込が成功する
+- [ ] `AiTextApp`のDebug Simulator buildが成功する
+- [ ] 振り返りから過去の完了週を選び、Human Thoughtだけが週間サマリーPreviewへ入る
+- [ ] 週間サマリーが`gpt-5.6-terra`／medium／最大8,192 tokenで生成され、再生成失敗時に旧Summaryが残る
+- [ ] 次週PlanがTerra／low／最大4,096 tokenで候補生成され、確定前は保存されず、編集・確定後だけ再起動後も復元される
+- [ ] 同一内容の`status: draft`と`status: active`日記を同期した場合、日記画面にはactiveだけが表示される
+- [ ] 別内容の未正式化Draftは日記画面から消えない
+- [ ] Xcode／macOS／Simulator、実施日、成功件数、失敗・残課題を`sessions/`へ追記する
+
 ## 1. Swift Package Tests
 
 - [ ] Repository rootで`swift test`が全件成功する
