@@ -22,3 +22,8 @@
 - UI確認: appをbuild／起動できないため、週間Summary／Planと日記表示は未確認。
 - XCTestDevices: この検証ではXcode testを実行せず、新規作成0件・削除0件。終了時容量12K。
 - Repository check: 検証開始時はclean。`git diff --check`成功。検証記録追記以外のソース変更なし。
+
+### 最新Git再確認
+
+- `git fetch --prune origin`と`git ls-remote --heads origin`で再照合。2026-09-14 22:06:52 JST時点の`origin/main`最新は`a369bb4`（検証結果の文書追記のみ）で、ローカルHEADと一致。
+- `origin/main@a369bb4`で`swift test`を再実行したが、同じ`ThoughtCore/ExternalBrain.swift:395`の型推論エラーでcompile失敗。修正コミットはremote branch群にも確認できず、以降の検証は未到達のまま。
